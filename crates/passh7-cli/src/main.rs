@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use passh7_core::{HostProfile, Identity, Vault};
+use passh7_core::{HostProfile, HubError, Identity, Vault};
 use std::{fs, path::{Path, PathBuf}};
 use zeroize::Zeroizing;
 
@@ -34,14 +34,9 @@ fn prompt(confirm: bool) -> Result<Zeroizing<String>> {
     Ok(password)
 }
 fn with_vault<F>(path: &Path, update: F) -> Result<()>
-where F: FnOnce(&mut Vault) -> Result<bool> {
+where F: FnOnce(&mut Vault) -> Result<bool, HubError> {
     let password = prompt(false)?;
-    let mut vault = passh7_core::load(path, &password).context("unable to unlock vault")?;
-    if update(&mut vault)? {
-        passh7_core::save(path, &vault, &password)
-            .context("unable to save encrypted vault")?;
-        println!("Vault updated");
-    }
+    passh7_core::transaction(path, &password, update).context("vault transaction failed")?;
     Ok(())
 }
 fn main() -> Result<()> {
@@ -58,12 +53,10 @@ fn main() -> Result<()> {
         })?,
         Command::ChangePassword => {
             let old_password = prompt(false)?;
-            let vault = passh7_core::load(&args.vault, &old_password)
-                .context("unable to unlock vault with the current password")?;
             println!("Enter a new master password (12 characters minimum):");
             let new_password = prompt(true)?;
-            if *old_password == *new_password { bail!("new master password must differ from the old password"); }
-            passh7_core::save(&args.vault, &vault, &new_password)?;
+            passh7_core::rotate_password(&args.vault, &old_password, &new_password)
+                .context("unable to rotate encrypted vault")?;
             println!("Master password changed; retain encrypted recovery backups securely");
         }
         Command::RemoveHost { alias } => with_vault(&args.vault, |v| {
