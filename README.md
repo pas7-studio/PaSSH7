@@ -60,7 +60,7 @@ npm run build
 npm run tauri dev
 ```
 
-The native Tauri entrypoint has not been compiled or tested on Windows. Do not use genuine SSH keys until independent security validation. The current prototype temporarily holds the entered master password in React memory while unlocked; this needs replacement with a narrowly scoped Rust-side unlock session before production use.
+The native Tauri entrypoint has not been compiled or tested on Windows. Do not use genuine SSH keys until independent security validation. The password is entered through a temporary React input, sent to Rust only for unlock/creation, then cleared from React state after successful unlock. Subsequent host operations use a Rust-owned session with a 15-minute idle expiry and explicit lock. This is **not equivalent to full secure memory isolation**: the password transiently exists in the WebView input/IPC, and Rust retains a secret while unlocked. OS sleep/screen-lock hooks, concurrent session handling, key zeroization coverage and Windows binary tests remain outstanding.
 
 See [desktop UX and context security contract](docs/desktop-ux.md). This is **not a packaged Windows program** yet.
 
