@@ -329,6 +329,7 @@ where
     let lock_path = path.with_extension("passh7.lock");
     let lock = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)?;
@@ -361,6 +362,7 @@ pub fn rotate_password(
     let lock_path = path.with_extension("passh7.lock");
     let lock = OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(&lock_path)?;
@@ -661,8 +663,10 @@ mod tests {
 
     #[test]
     fn unknown_future_schema_is_rejected_before_write() {
-        let mut vault = Vault::default();
-        vault.schema_version = 999;
+        let vault = Vault {
+            schema_version: 999,
+            ..Default::default()
+        };
         assert!(matches!(
             encrypt(&vault, password()),
             Err(HubError::UnsupportedFormat)
@@ -697,6 +701,7 @@ mod tests {
         let lock_path = path.with_extension("passh7.lock");
         let guard = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&lock_path)
@@ -748,7 +753,7 @@ mod tests {
         assert_eq!(backups.len(), 1);
         assert_eq!(fs::read(&backups[0]).unwrap(), original);
         let recovered = load(&backups[0], password()).unwrap();
-        assert!(recovered.extensions.get("note").is_none());
+        assert!(!recovered.extensions.contains_key("note"));
         assert_eq!(
             load(&path, password()).unwrap().extensions["note"],
             "new generation"
