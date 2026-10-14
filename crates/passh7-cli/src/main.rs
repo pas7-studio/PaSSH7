@@ -35,7 +35,7 @@ where F: FnOnce(&mut Vault) -> Result<bool> {
     let mut vault = passh7_core::load(path, &password).context("unable to unlock vault")?;
     if update(&mut vault)? {
         passh7_core::save(path, &vault, &password)
-            .context("unable to save vault (Windows overwrite requires a future fix)")?;
+            .context("unable to save encrypted vault")?;
         println!("Vault updated");
     }
     Ok(())
