@@ -13,7 +13,7 @@ Only a local human user accesses this CLI. Disk files may be stolen or modified.
 - KDF key and decrypted plaintext buffers use zeroizing wrappers.
 
 ## Known unresolved risks
-- The v0.1 save strategy needs explicit Windows replacement/rollback semantics and recovery tests.
+- Windows ReplaceFileW path retains encrypted backups, but has not been compiled or exercised on a Windows runner. Backup rotation, rollback, ACL preservation, and crash tests remain outstanding.
 - SSH key validity is only superficially checked on import.
 - Serialized secrets may leave copies in heap buffers; zeroization is best effort.
 - No guarantee against master-password keylogging or process memory inspection.
