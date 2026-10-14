@@ -1,7 +1,7 @@
 //! Strict SSH host-key fingerprint pinning. No trust-on-first-use or auto-accept.
+use crate::HubError;
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine as _};
 use sha2::{Digest, Sha256};
-use crate::HubError;
 
 /// OpenSSH-compatible SHA256 fingerprint over the *raw SSH public key blob*.
 pub fn fingerprint(raw_key_blob: &[u8]) -> Result<String, HubError> {
@@ -14,9 +14,11 @@ pub fn fingerprint(raw_key_blob: &[u8]) -> Result<String, HubError> {
 
 /// Validate a stored OpenSSH SHA256 fingerprint. Not a host-key authenticity check.
 pub fn validate_fingerprint(pin: &str) -> Result<(), HubError> {
-    let digest = pin.strip_prefix("SHA256:")
-        .ok_or(HubError::InvalidInput("host key must use SHA256: fingerprint format"))?;
-    let decoded = STANDARD_NO_PAD.decode(digest)
+    let digest = pin.strip_prefix("SHA256:").ok_or(HubError::InvalidInput(
+        "host key must use SHA256: fingerprint format",
+    ))?;
+    let decoded = STANDARD_NO_PAD
+        .decode(digest)
         .map_err(|_| HubError::InvalidInput("invalid host-key fingerprint encoding"))?;
     if decoded.len() != 32 || STANDARD_NO_PAD.encode(&decoded) != digest {
         return Err(HubError::InvalidInput("invalid host-key SHA256 digest"));
@@ -50,8 +52,14 @@ mod tests {
     }
     #[test]
     fn rejects_malformed_pins() {
-        for pin in ["", "MD5:abc", "SHA256:", "SHA256:@@@@",
-                    "SHA256:AAAA", "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="] {
+        for pin in [
+            "",
+            "MD5:abc",
+            "SHA256:",
+            "SHA256:@@@@",
+            "SHA256:AAAA",
+            "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        ] {
             assert!(validate_fingerprint(pin).is_err(), "{pin}");
         }
     }

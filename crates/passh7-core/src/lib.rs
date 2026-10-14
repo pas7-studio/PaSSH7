@@ -1,11 +1,18 @@
 //! PaSSH7 encrypted local vault. Network SSH is not implemented in v0.1.
 pub mod hostkey;
 use argon2::{Algorithm, Argon2, Params, Version};
+use chacha20poly1305::{
+    aead::{Aead, Payload},
+    KeyInit, XChaCha20Poly1305, XNonce,
+};
 use fs2::FileExt;
-use chacha20poly1305::{aead::{Aead, Payload}, KeyInit, XChaCha20Poly1305, XNonce};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::{fs::{self, OpenOptions}, io::Write, path::Path};
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::Path,
+};
 use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -57,7 +64,9 @@ pub struct Identity {
     pub extensions: std::collections::BTreeMap<String, serde_json::Value>,
 }
 impl Drop for Identity {
-    fn drop(&mut self) { self.private_key_pem.zeroize(); }
+    fn drop(&mut self) {
+        self.private_key_pem.zeroize();
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -70,18 +79,28 @@ pub struct Vault {
     #[serde(flatten, default)]
     pub extensions: std::collections::BTreeMap<String, serde_json::Value>,
 }
-fn default_data_schema() -> u32 { DATA_SCHEMA }
+fn default_data_schema() -> u32 {
+    DATA_SCHEMA
+}
 impl Default for Vault {
     fn default() -> Self {
-        Self { schema_version: DATA_SCHEMA, hosts: Vec::new(), identities: Vec::new(), extensions: Default::default() }
+        Self {
+            schema_version: DATA_SCHEMA,
+            hosts: Vec::new(),
+            identities: Vec::new(),
+            extensions: Default::default(),
+        }
     }
 }
 impl Vault {
     pub fn add_identity(&mut self, identity: Identity) -> Result<(), HubError> {
         if identity.alias.trim().is_empty()
             || !identity.private_key_pem.contains("-----BEGIN ")
-            || !identity.private_key_pem.contains("PRIVATE KEY-----") {
-            return Err(HubError::InvalidInput("invalid alias or unsupported private key encoding"));
+            || !identity.private_key_pem.contains("PRIVATE KEY-----")
+        {
+            return Err(HubError::InvalidInput(
+                "invalid alias or unsupported private key encoding",
+            ));
         }
         if self.identities.iter().any(|i| i.alias == identity.alias) {
             return Err(HubError::InvalidInput("identity alias already exists"));
@@ -91,14 +110,22 @@ impl Vault {
     }
 
     pub fn add_host(&mut self, host: HostProfile) -> Result<(), HubError> {
-        if host.alias.trim().is_empty() || host.hostname.trim().is_empty()
-            || host.username.trim().is_empty() || host.identity_alias.trim().is_empty() || host.port == 0 {
+        if host.alias.trim().is_empty()
+            || host.hostname.trim().is_empty()
+            || host.username.trim().is_empty()
+            || host.identity_alias.trim().is_empty()
+            || host.port == 0
+        {
             return Err(HubError::InvalidInput("missing host field or invalid port"));
         }
         if self.hosts.iter().any(|h| h.alias == host.alias) {
             return Err(HubError::InvalidInput("host alias already exists"));
         }
-        if !self.identities.iter().any(|i| i.alias == host.identity_alias) {
+        if !self
+            .identities
+            .iter()
+            .any(|i| i.alias == host.identity_alias)
+        {
             return Err(HubError::InvalidInput("unknown identity alias"));
         }
         if let Some(pin) = &host.pinned_host_key {
@@ -110,7 +137,10 @@ impl Vault {
     /// Explicitly pin an already verified host fingerprint (never discover blindly).
     pub fn pin_host_key(&mut self, alias: &str, pin: &str) -> Result<(), HubError> {
         hostkey::validate_fingerprint(pin)?;
-        let host = self.hosts.iter_mut().find(|h| h.alias == alias)
+        let host = self
+            .hosts
+            .iter_mut()
+            .find(|h| h.alias == alias)
             .ok_or(HubError::InvalidInput("host alias not found"))?;
         host.pinned_host_key = Some(pin.to_owned());
         Ok(())
@@ -118,7 +148,10 @@ impl Vault {
 
     /// Remove a host without touching the referenced SSH identity.
     pub fn remove_host(&mut self, alias: &str) -> Result<(), HubError> {
-        let index = self.hosts.iter().position(|h| h.alias == alias)
+        let index = self
+            .hosts
+            .iter()
+            .position(|h| h.alias == alias)
             .ok_or(HubError::InvalidInput("host alias not found"))?;
         self.hosts.remove(index);
         Ok(())
@@ -129,7 +162,10 @@ impl Vault {
         if self.hosts.iter().any(|h| h.identity_alias == alias) {
             return Err(HubError::InvalidInput("identity is still used by a host"));
         }
-        let index = self.identities.iter().position(|i| i.alias == alias)
+        let index = self
+            .identities
+            .iter()
+            .position(|i| i.alias == alias)
             .ok_or(HubError::InvalidInput("identity alias not found"))?;
         self.identities.remove(index);
         Ok(())
@@ -137,14 +173,23 @@ impl Vault {
 
     /// Validate internal references after decrypting a potentially older vault.
     pub fn validate(&self) -> Result<(), HubError> {
-        if self.schema_version != DATA_SCHEMA { return Err(HubError::UnsupportedFormat); }
+        if self.schema_version != DATA_SCHEMA {
+            return Err(HubError::UnsupportedFormat);
+        }
         let mut hosts = std::collections::HashSet::new();
         let mut keys = std::collections::HashSet::new();
-        if self.extensions.keys().any(|k| matches!(k.as_str(), "schema_version" | "hosts" | "identities")) {
+        if self
+            .extensions
+            .keys()
+            .any(|k| matches!(k.as_str(), "schema_version" | "hosts" | "identities"))
+        {
             return Err(HubError::InvalidInput("reserved vault extension field"));
         }
         for i in &self.identities {
-            if i.extensions.keys().any(|k| matches!(k.as_str(), "alias" | "private_key_pem")) {
+            if i.extensions
+                .keys()
+                .any(|k| matches!(k.as_str(), "alias" | "private_key_pem"))
+            {
                 return Err(HubError::InvalidInput("reserved identity extension field"));
             }
             if i.alias.trim().is_empty() || !keys.insert(i.alias.as_str()) {
@@ -152,11 +197,25 @@ impl Vault {
             }
         }
         for h in &self.hosts {
-            if h.extensions.keys().any(|k| matches!(k.as_str(), "alias" | "hostname" | "port" | "username" | "identity_alias" | "pinned_host_key")) {
+            if h.extensions.keys().any(|k| {
+                matches!(
+                    k.as_str(),
+                    "alias"
+                        | "hostname"
+                        | "port"
+                        | "username"
+                        | "identity_alias"
+                        | "pinned_host_key"
+                )
+            }) {
                 return Err(HubError::InvalidInput("reserved host extension field"));
             }
-            if h.alias.trim().is_empty() || h.hostname.trim().is_empty() ||
-                h.username.trim().is_empty() || h.port == 0 || !hosts.insert(h.alias.as_str()) {
+            if h.alias.trim().is_empty()
+                || h.hostname.trim().is_empty()
+                || h.username.trim().is_empty()
+                || h.port == 0
+                || !hosts.insert(h.alias.as_str())
+            {
                 return Err(HubError::InvalidInput("invalid or duplicate host profile"));
             }
             if let Some(pin) = &h.pinned_host_key {
@@ -168,7 +227,6 @@ impl Vault {
         }
         Ok(())
     }
-
 }
 
 #[derive(Serialize, Deserialize)]
@@ -186,39 +244,71 @@ fn key_from_password(password: &str, e: &Envelope) -> Result<Zeroizing<[u8; 32]>
     if e.memory_kib != MEM_KIB || e.iterations != ITERATIONS || e.parallelism != PARALLELISM {
         return Err(HubError::UnsupportedFormat);
     }
-    let params = Params::new(e.memory_kib, e.iterations, e.parallelism, Some(32)).map_err(|_| HubError::Kdf)?;
+    let params = Params::new(e.memory_kib, e.iterations, e.parallelism, Some(32))
+        .map_err(|_| HubError::Kdf)?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut key = Zeroizing::new([0u8; 32]);
-    argon.hash_password_into(password.as_bytes(), &e.salt, &mut *key).map_err(|_| HubError::Kdf)?;
+    argon
+        .hash_password_into(password.as_bytes(), &e.salt, &mut *key)
+        .map_err(|_| HubError::Kdf)?;
     Ok(key)
 }
 
 pub fn encrypt(vault: &Vault, password: &str) -> Result<Vec<u8>, HubError> {
     if password.chars().count() < 12 {
-        return Err(HubError::InvalidInput("master password must be at least 12 characters"));
+        return Err(HubError::InvalidInput(
+            "master password must be at least 12 characters",
+        ));
     }
     let mut salt = [0; 16];
     let mut nonce = [0; 24];
     OsRng.fill_bytes(&mut salt);
     OsRng.fill_bytes(&mut nonce);
-    let mut e = Envelope { format: FORMAT, memory_kib: MEM_KIB, iterations: ITERATIONS,
-        parallelism: PARALLELISM, salt, nonce, ciphertext: vec![] };
+    let mut e = Envelope {
+        format: FORMAT,
+        memory_kib: MEM_KIB,
+        iterations: ITERATIONS,
+        parallelism: PARALLELISM,
+        salt,
+        nonce,
+        ciphertext: vec![],
+    };
     let key = key_from_password(password, &e)?;
     let cipher = XChaCha20Poly1305::new_from_slice(&*key).map_err(|_| HubError::Kdf)?;
     vault.validate()?;
     let plaintext = Zeroizing::new(serde_json::to_vec(vault)?);
-    e.ciphertext = cipher.encrypt(XNonce::from_slice(&e.nonce),
-        Payload { msg: &plaintext, aad: AAD }).map_err(|_| HubError::Authentication)?;
+    e.ciphertext = cipher
+        .encrypt(
+            XNonce::from_slice(&e.nonce),
+            Payload {
+                msg: &plaintext,
+                aad: AAD,
+            },
+        )
+        .map_err(|_| HubError::Authentication)?;
     Ok(serde_json::to_vec_pretty(&e)?)
 }
 pub fn decrypt(bytes: &[u8], password: &str) -> Result<Vault, HubError> {
-    if bytes.len() as u64 > MAX_SIZE { return Err(HubError::InvalidInput("vault file too large")); }
+    if bytes.len() as u64 > MAX_SIZE {
+        return Err(HubError::InvalidInput("vault file too large"));
+    }
     let e: Envelope = serde_json::from_slice(bytes)?;
-    if e.format != FORMAT { return Err(HubError::UnsupportedFormat); }
+    if e.format != FORMAT {
+        return Err(HubError::UnsupportedFormat);
+    }
     let key = key_from_password(password, &e)?;
     let cipher = XChaCha20Poly1305::new_from_slice(&*key).map_err(|_| HubError::Kdf)?;
-    let plaintext = Zeroizing::new(cipher.decrypt(XNonce::from_slice(&e.nonce),
-        Payload { msg: &e.ciphertext, aad: AAD }).map_err(|_| HubError::Authentication)?);
+    let plaintext = Zeroizing::new(
+        cipher
+            .decrypt(
+                XNonce::from_slice(&e.nonce),
+                Payload {
+                    msg: &e.ciphertext,
+                    aad: AAD,
+                },
+            )
+            .map_err(|_| HubError::Authentication)?,
+    );
     let vault: Vault = serde_json::from_slice(&plaintext)?;
     vault.validate()?;
     Ok(vault)
@@ -233,29 +323,53 @@ pub fn load(path: &Path, password: &str) -> Result<Vault, HubError> {
 /// The lock is on a separate file because atomic vault replacement changes the inode.
 /// All writers (CLI, Desktop and future MCP) MUST use this function.
 pub fn transaction<F>(path: &Path, password: &str, operation: F) -> Result<(), HubError>
-where F: FnOnce(&mut Vault) -> Result<bool, HubError> {
+where
+    F: FnOnce(&mut Vault) -> Result<bool, HubError>,
+{
     let lock_path = path.with_extension("passh7.lock");
-    let lock = OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
     lock.try_lock_exclusive().map_err(|error| {
-        if error.kind() == std::io::ErrorKind::WouldBlock { HubError::Busy }
-        else { HubError::Io(error) }
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            HubError::Busy
+        } else {
+            HubError::Io(error)
+        }
     })?;
     // RAII: the file descriptor (and its lock) is released on all error paths.
     let mut vault = load(path, password)?;
-    if operation(&mut vault)? { save(path, &vault, password, password)?; }
+    if operation(&mut vault)? {
+        save(path, &vault, password, password)?;
+    }
     Ok(())
 }
 
 /// Rotate the master password under the same exclusive cross-process lock.
-pub fn rotate_password(path: &Path, old_password: &str, new_password: &str) -> Result<(), HubError> {
+pub fn rotate_password(
+    path: &Path,
+    old_password: &str,
+    new_password: &str,
+) -> Result<(), HubError> {
     if old_password == new_password {
-        return Err(HubError::InvalidInput("new password must differ from old password"));
+        return Err(HubError::InvalidInput(
+            "new password must differ from old password",
+        ));
     }
     let lock_path = path.with_extension("passh7.lock");
-    let lock = OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(&lock_path)?;
     lock.try_lock_exclusive().map_err(|error| {
-        if error.kind() == std::io::ErrorKind::WouldBlock { HubError::Busy }
-        else { HubError::Io(error) }
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            HubError::Busy
+        } else {
+            HubError::Io(error)
+        }
     })?;
     let vault = load(path, old_password)?;
     save(path, &vault, new_password, old_password)
@@ -281,17 +395,28 @@ fn replace_vault_file(temp: &Path, destination: &Path) -> Result<(), HubError> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
     fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+        path.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     }
     if !destination.exists() {
         fs::rename(temp, destination)?;
         return Ok(());
     }
     let result = unsafe {
-        ReplaceFileW(wide(destination).as_ptr(), wide(temp).as_ptr(),
-                     std::ptr::null(), 0, std::ptr::null(), std::ptr::null())
+        ReplaceFileW(
+            wide(destination).as_ptr(),
+            wide(temp).as_ptr(),
+            std::ptr::null(),
+            0,
+            std::ptr::null(),
+            std::ptr::null(),
+        )
     };
-    if result == 0 { return Err(HubError::Io(std::io::Error::last_os_error())); }
+    if result == 0 {
+        return Err(HubError::Io(std::io::Error::last_os_error()));
+    }
     Ok(())
 }
 
@@ -301,24 +426,35 @@ fn save(path: &Path, vault: &Vault, password: &str, prior_password: &str) -> Res
     // Each backup is uniquely named and never silently overwritten.
     if path.exists() {
         let old = fs::read(path)?;
-        if old.len() as u64 > MAX_SIZE { return Err(HubError::InvalidInput("vault file too large")); }
+        if old.len() as u64 > MAX_SIZE {
+            return Err(HubError::InvalidInput("vault file too large"));
+        }
         // This deliberately fails for old-master-password backups; rotation needs a
         // dedicated independently validated recovery plan.
         let _prior = decrypt(&old, prior_password)?;
         let mut backup_suffix = [0u8; 8];
         OsRng.fill_bytes(&mut backup_suffix);
         let backup = path.with_extension(format!("bak-{:016x}", u64::from_be_bytes(backup_suffix)));
-        let mut backup_file = OpenOptions::new().create_new(true).write(true).open(&backup)?;
+        let mut backup_file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&backup)?;
         backup_file.write_all(&old)?;
         backup_file.sync_all()?;
         // Refuse replacement unless a complete backup can be decrypted.
         let _verified = load(&backup, prior_password)?;
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let filename = path.file_name().ok_or(HubError::InvalidInput("missing vault filename"))?.to_string_lossy();
+    let filename = path
+        .file_name()
+        .ok_or(HubError::InvalidInput("missing vault filename"))?
+        .to_string_lossy();
     let mut random = [0u8; 8];
     OsRng.fill_bytes(&mut random);
-    let tmp = parent.join(format!(".{filename}.{:016x}.tmp", u64::from_be_bytes(random)));
+    let tmp = parent.join(format!(
+        ".{filename}.{:016x}.tmp",
+        u64::from_be_bytes(random)
+    ));
     let result = (|| -> Result<(), HubError> {
         let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         file.write_all(&data)?;
@@ -326,39 +462,71 @@ fn save(path: &Path, vault: &Vault, password: &str, prior_password: &str) -> Res
         replace_vault_file(&tmp, path)?;
         Ok(())
     })();
-    if result.is_err() { let _ = fs::remove_file(&tmp); }
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
     result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn password() -> &'static str { "long-example-master-password" }
+    fn password() -> &'static str {
+        "long-example-master-password"
+    }
     #[test]
     fn roundtrip_wrong_password_and_tamper() {
         let mut v = Vault::default();
-        v.add_identity(Identity { extensions: Default::default(), alias: "mykey".into(), private_key_pem:
-            "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
-        v.add_host(HostProfile { extensions: Default::default(), alias: "dev".into(), hostname: "dev.example".into(), port: 22,
-            username: "ubuntu".into(), identity_alias: "mykey".into(), pinned_host_key: None }).unwrap();
+        v.add_identity(Identity {
+            extensions: Default::default(),
+            alias: "mykey".into(),
+            private_key_pem:
+                "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----"
+                    .into(),
+        })
+        .unwrap();
+        v.add_host(HostProfile {
+            extensions: Default::default(),
+            alias: "dev".into(),
+            hostname: "dev.example".into(),
+            port: 22,
+            username: "ubuntu".into(),
+            identity_alias: "mykey".into(),
+            pinned_host_key: None,
+        })
+        .unwrap();
         let data = encrypt(&v, password()).unwrap();
         assert_eq!(decrypt(&data, password()).unwrap().hosts[0].alias, "dev");
-        assert!(matches!(decrypt(&data, "incorrect password"), Err(HubError::Authentication)));
+        assert!(matches!(
+            decrypt(&data, "incorrect password"),
+            Err(HubError::Authentication)
+        ));
         let mut e: Envelope = serde_json::from_slice(&data).unwrap();
         e.ciphertext[0] ^= 1;
-        assert!(matches!(decrypt(&serde_json::to_vec(&e).unwrap(), password()), Err(HubError::Authentication)));
+        assert!(matches!(
+            decrypt(&serde_json::to_vec(&e).unwrap(), password()),
+            Err(HubError::Authentication)
+        ));
     }
     #[test]
     fn save_replaces_existing_vault_and_preserves_decryptability() {
         let mut random = [0u8; 8];
         OsRng.fill_bytes(&mut random);
-        let dir = std::env::temp_dir().join(format!("passh7-test-{:016x}", u64::from_be_bytes(random)));
+        let dir =
+            std::env::temp_dir().join(format!("passh7-test-{:016x}", u64::from_be_bytes(random)));
         fs::create_dir(&dir).unwrap();
         let path = dir.join("vault.json");
         create(&path, password()).unwrap();
         let mut updated = load(&path, password()).unwrap();
-        updated.add_identity(Identity { extensions: Default::default(), alias: "test".into(), private_key_pem:
-            "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
+        updated
+            .add_identity(Identity {
+                extensions: Default::default(),
+                alias: "test".into(),
+                private_key_pem:
+                    "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----"
+                        .into(),
+            })
+            .unwrap();
         save(&path, &updated, password(), password()).unwrap();
         assert_eq!(load(&path, password()).unwrap().identities.len(), 1);
         let _ = fs::remove_dir_all(&dir);
@@ -367,10 +535,26 @@ mod tests {
     #[test]
     fn identity_cannot_be_removed_when_host_uses_it() {
         let mut vault = Vault::default();
-        vault.add_identity(Identity { extensions: Default::default(), alias: "key".into(),
-            private_key_pem: "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
-        vault.add_host(HostProfile { extensions: Default::default(), alias: "node".into(), hostname: "node.test".into(),
-            port: 22, username: "ubuntu".into(), identity_alias: "key".into(), pinned_host_key: None }).unwrap();
+        vault
+            .add_identity(Identity {
+                extensions: Default::default(),
+                alias: "key".into(),
+                private_key_pem:
+                    "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----"
+                        .into(),
+            })
+            .unwrap();
+        vault
+            .add_host(HostProfile {
+                extensions: Default::default(),
+                alias: "node".into(),
+                hostname: "node.test".into(),
+                port: 22,
+                username: "ubuntu".into(),
+                identity_alias: "key".into(),
+                pinned_host_key: None,
+            })
+            .unwrap();
         assert!(vault.remove_identity("key").is_err());
         assert_eq!(vault.identities.len(), 1);
         vault.remove_host("node").unwrap();
@@ -381,8 +565,15 @@ mod tests {
     #[test]
     fn rejects_inconsistent_vault_before_encryption() {
         let mut vault = Vault::default();
-        vault.hosts.push(HostProfile { extensions: Default::default(), alias: "node".into(), hostname: "node.test".into(),
-            port: 22, username: "ubuntu".into(), identity_alias: "missing".into(), pinned_host_key: None });
+        vault.hosts.push(HostProfile {
+            extensions: Default::default(),
+            alias: "node".into(),
+            hostname: "node.test".into(),
+            port: 22,
+            username: "ubuntu".into(),
+            identity_alias: "missing".into(),
+            pinned_host_key: None,
+        });
         assert!(encrypt(&vault, password()).is_err());
     }
 
@@ -391,24 +582,48 @@ mod tests {
         let original = encrypt(&Vault::default(), password()).unwrap();
         let vault = decrypt(&original, password()).unwrap();
         let rotated = encrypt(&vault, "another-long-master-password").unwrap();
-        assert!(matches!(decrypt(&rotated, password()), Err(HubError::Authentication)));
+        assert!(matches!(
+            decrypt(&rotated, password()),
+            Err(HubError::Authentication)
+        ));
         assert!(decrypt(&rotated, "another-long-master-password").is_ok());
     }
 
     #[test]
     fn host_pin_requires_valid_fingerprint_and_explicit_match() {
         let mut vault = Vault::default();
-        vault.add_identity(Identity { extensions: Default::default(), alias: "demo".into(),
-            private_key_pem: "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
-        vault.add_host(HostProfile { extensions: Default::default(), alias: "remote".into(), hostname: "test.example".into(),
-            port: 22, username: "ubuntu".into(), identity_alias: "demo".into(), pinned_host_key: None }).unwrap();
+        vault
+            .add_identity(Identity {
+                extensions: Default::default(),
+                alias: "demo".into(),
+                private_key_pem:
+                    "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----"
+                        .into(),
+            })
+            .unwrap();
+        vault
+            .add_host(HostProfile {
+                extensions: Default::default(),
+                alias: "remote".into(),
+                hostname: "test.example".into(),
+                port: 22,
+                username: "ubuntu".into(),
+                identity_alias: "demo".into(),
+                pinned_host_key: None,
+            })
+            .unwrap();
         let blob = b"test ssh public key blob";
         assert!(hostkey::verify_host_key(vault.hosts[0].pinned_host_key.as_deref(), blob).is_err());
         let pin = hostkey::fingerprint(blob).unwrap();
         vault.pin_host_key("remote", &pin).unwrap();
         assert!(hostkey::verify_host_key(vault.hosts[0].pinned_host_key.as_deref(), blob).is_ok());
-        assert!(vault.pin_host_key("remote", "SHA256:not-a-valid-fingerprint").is_err());
-        assert_eq!(vault.hosts[0].pinned_host_key.as_deref(), Some(pin.as_str()));
+        assert!(vault
+            .pin_host_key("remote", "SHA256:not-a-valid-fingerprint")
+            .is_err());
+        assert_eq!(
+            vault.hosts[0].pinned_host_key.as_deref(),
+            Some(pin.as_str())
+        );
     }
 
     #[test]
@@ -448,16 +663,25 @@ mod tests {
     fn unknown_future_schema_is_rejected_before_write() {
         let mut vault = Vault::default();
         vault.schema_version = 999;
-        assert!(matches!(encrypt(&vault, password()), Err(HubError::UnsupportedFormat)));
+        assert!(matches!(
+            encrypt(&vault, password()),
+            Err(HubError::UnsupportedFormat)
+        ));
         let parsed: Vault = serde_json::from_value(serde_json::json!({
             "schema_version":999, "hosts":[], "identities":[]
-        })).unwrap();
-        assert!(matches!(parsed.validate(), Err(HubError::UnsupportedFormat)));
+        }))
+        .unwrap();
+        assert!(matches!(
+            parsed.validate(),
+            Err(HubError::UnsupportedFormat)
+        ));
     }
     #[test]
     fn extension_fields_cannot_override_known_fields() {
         let mut vault = Vault::default();
-        vault.extensions.insert("hosts".into(), serde_json::json!([]));
+        vault
+            .extensions
+            .insert("hosts".into(), serde_json::json!([]));
         assert!(encrypt(&vault, password()).is_err());
     }
 
@@ -465,22 +689,32 @@ mod tests {
     fn competing_writer_cannot_overwrite_locked_vault() {
         let mut random = [0u8; 8];
         OsRng.fill_bytes(&mut random);
-        let dir = std::env::temp_dir().join(format!("passh7-lock-{:016x}", u64::from_be_bytes(random)));
+        let dir =
+            std::env::temp_dir().join(format!("passh7-lock-{:016x}", u64::from_be_bytes(random)));
         fs::create_dir(&dir).unwrap();
         let path = dir.join("vault.json");
         create(&path, password()).unwrap();
         let lock_path = path.with_extension("passh7.lock");
-        let guard = OpenOptions::new().create(true).read(true).write(true).open(&lock_path).unwrap();
+        let guard = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
         guard.try_lock_exclusive().unwrap();
         let result = transaction(&path, password(), |_| Ok(true));
         assert!(matches!(result, Err(HubError::Busy)));
         drop(guard);
         transaction(&path, password(), |v| {
-            v.extensions.insert("note".into(), serde_json::json!("retained"));
+            v.extensions
+                .insert("note".into(), serde_json::json!("retained"));
             Ok(true)
-        }).unwrap();
-        assert_eq!(load(&path, password()).unwrap().extensions.get("note"),
-                   Some(&serde_json::json!("retained")));
+        })
+        .unwrap();
+        assert_eq!(
+            load(&path, password()).unwrap().extensions.get("note"),
+            Some(&serde_json::json!("retained"))
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -488,32 +722,45 @@ mod tests {
     fn previous_generation_is_kept_as_decryptable_backup() {
         let mut random = [0u8; 8];
         OsRng.fill_bytes(&mut random);
-        let dir = std::env::temp_dir().join(format!("passh7-backup-{:016x}", u64::from_be_bytes(random)));
+        let dir =
+            std::env::temp_dir().join(format!("passh7-backup-{:016x}", u64::from_be_bytes(random)));
         fs::create_dir(&dir).unwrap();
         let path = dir.join("vault.json");
         create(&path, password()).unwrap();
         let original = fs::read(&path).unwrap();
         transaction(&path, password(), |vault| {
-            vault.extensions.insert("note".into(), serde_json::json!("new generation"));
+            vault
+                .extensions
+                .insert("note".into(), serde_json::json!("new generation"));
             Ok(true)
-        }).unwrap();
-        let backups: Vec<_> = fs::read_dir(&dir).unwrap()
+        })
+        .unwrap();
+        let backups: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
             .filter_map(Result::ok)
             .map(|entry| entry.path())
-            .filter(|p| p.extension().and_then(|x| x.to_str()).is_some_and(|x| x.starts_with("bak-")))
+            .filter(|p| {
+                p.extension()
+                    .and_then(|x| x.to_str())
+                    .is_some_and(|x| x.starts_with("bak-"))
+            })
             .collect();
         assert_eq!(backups.len(), 1);
         assert_eq!(fs::read(&backups[0]).unwrap(), original);
         let recovered = load(&backups[0], password()).unwrap();
         assert!(recovered.extensions.get("note").is_none());
-        assert_eq!(load(&path, password()).unwrap().extensions["note"], "new generation");
+        assert_eq!(
+            load(&path, password()).unwrap().extensions["note"],
+            "new generation"
+        );
         let _ = fs::remove_dir_all(dir);
     }
     #[test]
     fn failed_writer_does_not_replace_original_or_make_backup() {
         let mut random = [0u8; 8];
         OsRng.fill_bytes(&mut random);
-        let dir = std::env::temp_dir().join(format!("passh7-abort-{:016x}", u64::from_be_bytes(random)));
+        let dir =
+            std::env::temp_dir().join(format!("passh7-abort-{:016x}", u64::from_be_bytes(random)));
         fs::create_dir(&dir).unwrap();
         let path = dir.join("vault.json");
         create(&path, password()).unwrap();
@@ -521,14 +768,29 @@ mod tests {
         let result = transaction(&path, password(), |_| Err(HubError::InvalidInput("abort")));
         assert!(result.is_err());
         assert_eq!(fs::read(&path).unwrap(), original);
-        assert_eq!(fs::read_dir(&dir).unwrap().filter_map(Result::ok).count(), 2);
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().filter_map(Result::ok).count(),
+            2
+        );
         let _ = fs::remove_dir_all(dir);
     }
     #[test]
     fn randomness_and_validation() {
-        assert_ne!(encrypt(&Vault::default(), password()).unwrap(), encrypt(&Vault::default(), password()).unwrap());
+        assert_ne!(
+            encrypt(&Vault::default(), password()).unwrap(),
+            encrypt(&Vault::default(), password()).unwrap()
+        );
         assert!(encrypt(&Vault::default(), "short").is_err());
-        assert!(Vault::default().add_host(HostProfile { extensions: Default::default(), alias: "h".into(), hostname: "localhost".into(),
-            port: 22, username: "u".into(), identity_alias: "missing".into(), pinned_host_key: None }).is_err());
+        assert!(Vault::default()
+            .add_host(HostProfile {
+                extensions: Default::default(),
+                alias: "h".into(),
+                hostname: "localhost".into(),
+                port: 22,
+                username: "u".into(),
+                identity_alias: "missing".into(),
+                pinned_host_key: None
+            })
+            .is_err());
     }
 }
