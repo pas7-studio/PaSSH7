@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Mutex, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 use tauri::State;
-use passh7_core::{HostProfile, HubError};
+use passh7_core::{HostProfile, HubError, Identity};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
@@ -117,12 +117,42 @@ fn vault_add_host(host: HostInput, sessions: State<'_, SessionStore>) -> Result<
         }).map_err(safe_err)
     })
 }
+#[tauri::command]
+fn vault_list_identities(sessions: State<'_, SessionStore>) -> Result<Vec<String>, String> {
+    sessions.use_password(|password| {
+        let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
+        Ok(vault.identities.iter().map(|i| i.alias.clone()).collect())
+    })
+}
+
+/// Accepts a pasted key from the user, never a path selected by an agent.
+/// Key content remains in memory and is never returned to JS.
+#[tauri::command]
+fn vault_import_identity(alias: String, mut private_key_pem: String,
+    sessions: State<'_, SessionStore>) -> Result<(), String> {
+    if private_key_pem.len() > 128 * 1024 {
+        private_key_pem.zeroize();
+        return Err("SSH identity exceeds 128 KiB".into());
+    }
+    let result = sessions.use_password(|password| {
+        passh7_core::transaction(&vault_path()?, password, |vault| {
+            vault.add_identity(Identity {
+                alias, private_key_pem: private_key_pem.clone(),
+                extensions: Default::default(),
+            })?;
+            Ok(true)
+        }).map_err(safe_err)
+    });
+    private_key_pem.zeroize();
+    result
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(SessionStore::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host
+            vault_list_hosts,vault_add_host,vault_list_identities,vault_import_identity
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");
