@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/passh7-core", "crates/passh7-cli"]
+exclude = ["apps/passh7-desktop/src-tauri"]
 resolver = "2"
 
 [workspace.package]
