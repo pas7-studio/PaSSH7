@@ -9,6 +9,7 @@ use thiserror::Error;
 use zeroize::{Zeroize, Zeroizing};
 
 const FORMAT: u32 = 1;
+const DATA_SCHEMA: u32 = 1;
 const AAD: &[u8] = b"passh7/vault/v1";
 const MEM_KIB: u32 = 65_536;
 const ITERATIONS: u32 = 3;
@@ -40,21 +41,37 @@ pub struct HostProfile {
     pub identity_alias: String,
     /// Data-only for now: SSH host key validation not implemented.
     pub pinned_host_key: Option<String>,
+    /// Preserve future optional fields through older read/write clients.
+    #[serde(flatten, default)]
+    pub extensions: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Identity {
     pub alias: String,
     pub private_key_pem: String,
+    #[serde(flatten, default)]
+    pub extensions: std::collections::BTreeMap<String, serde_json::Value>,
 }
 impl Drop for Identity {
     fn drop(&mut self) { self.private_key_pem.zeroize(); }
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Vault {
+    /// Legacy v1 documents omitted this field. Treat only an absent field as v1.
+    #[serde(default = "default_data_schema")]
+    pub schema_version: u32,
     pub hosts: Vec<HostProfile>,
     pub identities: Vec<Identity>,
+    #[serde(flatten, default)]
+    pub extensions: std::collections::BTreeMap<String, serde_json::Value>,
+}
+fn default_data_schema() -> u32 { DATA_SCHEMA }
+impl Default for Vault {
+    fn default() -> Self {
+        Self { schema_version: DATA_SCHEMA, hosts: Vec::new(), identities: Vec::new(), extensions: Default::default() }
+    }
 }
 impl Vault {
     pub fn add_identity(&mut self, identity: Identity) -> Result<(), HubError> {
@@ -117,6 +134,7 @@ impl Vault {
 
     /// Validate internal references after decrypting a potentially older vault.
     pub fn validate(&self) -> Result<(), HubError> {
+        if self.schema_version != DATA_SCHEMA { return Err(HubError::UnsupportedFormat); }
         let mut hosts = std::collections::HashSet::new();
         let mut keys = std::collections::HashSet::new();
         for i in &self.identities {
@@ -261,9 +279,9 @@ mod tests {
     #[test]
     fn roundtrip_wrong_password_and_tamper() {
         let mut v = Vault::default();
-        v.add_identity(Identity { alias: "mykey".into(), private_key_pem:
+        v.add_identity(Identity { extensions: Default::default(), alias: "mykey".into(), private_key_pem:
             "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
-        v.add_host(HostProfile { alias: "dev".into(), hostname: "dev.example".into(), port: 22,
+        v.add_host(HostProfile { extensions: Default::default(), alias: "dev".into(), hostname: "dev.example".into(), port: 22,
             username: "ubuntu".into(), identity_alias: "mykey".into(), pinned_host_key: None }).unwrap();
         let data = encrypt(&v, password()).unwrap();
         assert_eq!(decrypt(&data, password()).unwrap().hosts[0].alias, "dev");
