@@ -21,7 +21,7 @@ impl SessionStore {
         let session = guard.as_mut().ok_or("Vault is locked")?;
         if session.last_used.elapsed() >= IDLE_TIMEOUT {
             *guard = None;
-            return Err("Vault session expired");
+            return Err("Vault session expired".to_string());
         }
         let result = operation(&session.password);
         session.last_used = Instant::now();
