@@ -23,7 +23,12 @@ cargo run -p passh7 -- --vault test-vault.json init
 cargo run -p passh7 -- --vault test-vault.json list
 cargo run -p passh7 -- --vault test-vault.json import-key --alias demo --file /path/to/test-private-key
 cargo run -p passh7 -- --vault test-vault.json add-host --alias test --hostname example.test --username ubuntu --identity demo
+cargo run -p passh7 -- --vault test-vault.json change-password
+cargo run -p passh7 -- --vault test-vault.json remove-host --alias test
+cargo run -p passh7 -- --vault test-vault.json remove-key --alias demo
 ```
+
+**Password rotation caveat:** previous encrypted Windows backups may still be decryptable using the old master password; store and dispose of backups deliberately. The operation is not yet verified under concurrent writers.
 
 **Windows status:** code now uses `ReplaceFileW` with an encrypted recovery backup, but this path is still unverified in Windows CI. Do not store valuable keys until validation, permissions hardening and recovery tests are complete.
 
