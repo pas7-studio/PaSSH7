@@ -86,13 +86,13 @@ fn main() -> Result<()> {
             if fs::metadata(&file)?.len() > 128 * 1024 { bail!("private key file too large"); }
             let key = Zeroizing::new(fs::read_to_string(&file)?);
             with_vault(&args.vault, |v| {
-                v.add_identity(Identity { alias, private_key_pem: (*key).clone() })?;
+                v.add_identity(Identity { extensions: Default::default(), alias, private_key_pem: (*key).clone() })?;
                 Ok(true)
             })?;
         }
         Command::AddHost { alias, hostname, port, username, identity, pinned_host_key } => {
             with_vault(&args.vault, |v| {
-                v.add_host(HostProfile { alias, hostname, port, username,
+                v.add_host(HostProfile { extensions: Default::default(), alias, hostname, port, username,
                     identity_alias: identity, pinned_host_key })?;
                 Ok(true)
             })?;
