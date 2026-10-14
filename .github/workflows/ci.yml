@@ -18,7 +18,7 @@ jobs:
             runner: passh7-linux
           - os: windows
             runner: passh7-windows
-    runs-on: [self-hosted, passh7, ${{ matrix.runner }}]
+    runs-on: [self-hosted, passh7, '${{ matrix.runner }}']
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
