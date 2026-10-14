@@ -31,3 +31,12 @@ export async function addHost(host:AddHostInput):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   await invoke("vault_add_host",{host});
 }
+
+export async function getIdentities():Promise<string[]>{
+  if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
+  return invoke<string[]>("vault_list_identities");
+}
+export async function importIdentity(alias:string,privateKeyPem:string):Promise<void>{
+  if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
+  await invoke("vault_import_identity",{alias,privateKeyPem});
+}
