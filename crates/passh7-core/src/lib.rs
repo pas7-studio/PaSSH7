@@ -318,6 +318,22 @@ mod tests {
         assert!(matches!(decrypt(&rotated, password()), Err(HubError::Authentication)));
         assert!(decrypt(&rotated, "another-long-master-password").is_ok());
     }
+
+    #[test]
+    fn host_pin_requires_valid_fingerprint_and_explicit_match() {
+        let mut vault = Vault::default();
+        vault.add_identity(Identity { alias: "demo".into(),
+            private_key_pem: "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
+        vault.add_host(HostProfile { alias: "remote".into(), hostname: "test.example".into(),
+            port: 22, username: "ubuntu".into(), identity_alias: "demo".into(), pinned_host_key: None }).unwrap();
+        let blob = b"test ssh public key blob";
+        assert!(hostkey::verify_host_key(vault.hosts[0].pinned_host_key.as_deref(), blob).is_err());
+        let pin = hostkey::fingerprint(blob).unwrap();
+        vault.pin_host_key("remote", &pin).unwrap();
+        assert!(hostkey::verify_host_key(vault.hosts[0].pinned_host_key.as_deref(), blob).is_ok());
+        assert!(vault.pin_host_key("remote", "SHA256:not-a-valid-fingerprint").is_err());
+        assert_eq!(vault.hosts[0].pinned_host_key.as_deref(), Some(pin.as_str()));
+    }
     #[test]
     fn randomness_and_validation() {
         assert_ne!(encrypt(&Vault::default(), password()).unwrap(), encrypt(&Vault::default(), password()).unwrap());
