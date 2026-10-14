@@ -8,7 +8,7 @@
 
 - `crates/passh7-core`: vault model and authenticated encryption
 - `crates/passh7-cli`: interactive-password CLI for vault setup and SSH profiles
-- `apps/passh7-desktop`: **visual-only** React/Vite prototype for the future Windows desktop (no Tauri bridge yet)
+- `apps/passh7-desktop`: React + Tauri 2 desktop prototype; native commands for encrypted vault initialization, host listing and adding hosts (no SSH transport yet)
 - `docs/desktop-ux.md`: UX principles, contextual integrations and agent trust boundaries
 - `docs/threat-model.md`: security assumptions and open risks
 - `docs/vault-format-and-migrations.md`: stable schema contract, compatibility and migration strategy
@@ -50,14 +50,17 @@ The encrypted envelope version and the decrypted data schema version are indepen
 
 ## Desktop UI preview (no SSH / secrets)
 
-The UI prototype contains a searchable host list, host switching, offline terminal shell, context panels for Files / Docker / Ports / AI Agents, a command palette (`Ctrl+K`) and a theme switch. All demo hosts use `.invalid` domains; Connect and privileged integrations are intentionally disabled. No actual vault is loaded into this prototype.
+The web preview uses synthetic `.invalid` hosts. In a Tauri desktop build, the user may initialize and unlock a local encrypted vault, list existing host profiles and store new ones through Rust Core transactions. Connect and privileged integrations remain disabled. Identity import is available through the CLI only at this stage; the UI cannot create usable identities yet. No SSH transport is implemented.
 
 ```shell
 cd apps/passh7-desktop
 npm install
 npm run dev
 npm run build
+npm run tauri dev
 ```
+
+The native Tauri entrypoint has not been compiled or tested on Windows. Do not use genuine SSH keys until independent security validation. The current prototype temporarily holds the entered master password in React memory while unlocked; this needs replacement with a narrowly scoped Rust-side unlock session before production use.
 
 See [desktop UX and context security contract](docs/desktop-ux.md). This is **not a packaged Windows program** yet.
 
