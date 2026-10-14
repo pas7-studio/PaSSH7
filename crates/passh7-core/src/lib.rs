@@ -137,12 +137,21 @@ impl Vault {
         if self.schema_version != DATA_SCHEMA { return Err(HubError::UnsupportedFormat); }
         let mut hosts = std::collections::HashSet::new();
         let mut keys = std::collections::HashSet::new();
+        if self.extensions.keys().any(|k| matches!(k.as_str(), "schema_version" | "hosts" | "identities")) {
+            return Err(HubError::InvalidInput("reserved vault extension field"));
+        }
         for i in &self.identities {
+            if i.extensions.keys().any(|k| matches!(k.as_str(), "alias" | "private_key_pem")) {
+                return Err(HubError::InvalidInput("reserved identity extension field"));
+            }
             if i.alias.trim().is_empty() || !keys.insert(i.alias.as_str()) {
                 return Err(HubError::InvalidInput("duplicate or empty identity alias"));
             }
         }
         for h in &self.hosts {
+            if h.extensions.keys().any(|k| matches!(k.as_str(), "alias" | "hostname" | "port" | "username" | "identity_alias" | "pinned_host_key")) {
+                return Err(HubError::InvalidInput("reserved host extension field"));
+            }
             if h.alias.trim().is_empty() || h.hostname.trim().is_empty() ||
                 h.username.trim().is_empty() || h.port == 0 || !hosts.insert(h.alias.as_str()) {
                 return Err(HubError::InvalidInput("invalid or duplicate host profile"));
@@ -395,6 +404,12 @@ mod tests {
             "schema_version":999, "hosts":[], "identities":[]
         })).unwrap();
         assert!(matches!(parsed.validate(), Err(HubError::UnsupportedFormat)));
+    }
+    #[test]
+    fn extension_fields_cannot_override_known_fields() {
+        let mut vault = Vault::default();
+        vault.extensions.insert("hosts".into(), serde_json::json!([]));
+        assert!(encrypt(&vault, password()).is_err());
     }
     #[test]
     fn randomness_and_validation() {
