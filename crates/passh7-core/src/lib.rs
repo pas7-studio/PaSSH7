@@ -214,6 +214,21 @@ mod tests {
         assert!(matches!(decrypt(&serde_json::to_vec(&e).unwrap(), password()), Err(HubError::Authentication)));
     }
     #[test]
+    fn save_replaces_existing_vault_and_preserves_decryptability() {
+        let mut random = [0u8; 8];
+        OsRng.fill_bytes(&mut random);
+        let dir = std::env::temp_dir().join(format!("passh7-test-{:016x}", u64::from_be_bytes(random)));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("vault.json");
+        create(&path, password()).unwrap();
+        let mut updated = load(&path, password()).unwrap();
+        updated.add_identity(Identity { alias: "test".into(), private_key_pem:
+            "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
+        save(&path, &updated, password()).unwrap();
+        assert_eq!(load(&path, password()).unwrap().identities.len(), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+    #[test]
     fn randomness_and_validation() {
         assert_ne!(encrypt(&Vault::default(), password()).unwrap(), encrypt(&Vault::default(), password()).unwrap());
         assert!(encrypt(&Vault::default(), "short").is_err());
