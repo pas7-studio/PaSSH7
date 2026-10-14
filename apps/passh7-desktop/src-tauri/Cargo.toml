@@ -12,3 +12,7 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 zeroize = "1.8"
 passh7-core = { path = "../../../crates/passh7-core" }
+
+# Standalone workspace root: this crate is not part of the top-level Cargo
+# workspace (which only lists the core crates), so declare its own workspace.
+[workspace]
