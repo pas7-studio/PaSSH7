@@ -1,0 +1,195 @@
+//! PaSSH7 encrypted local vault. Network SSH is not implemented in v0.1.
+use argon2::{Algorithm, Argon2, Params, Version};
+use chacha20poly1305::{aead::{Aead, Payload}, KeyInit, XChaCha20Poly1305, XNonce};
+use rand_core::{OsRng, RngCore};
+use serde::{Deserialize, Serialize};
+use std::{fs::{self, OpenOptions}, io::Write, path::Path};
+use thiserror::Error;
+use zeroize::{Zeroize, Zeroizing};
+
+const FORMAT: u32 = 1;
+const AAD: &[u8] = b"passh7/vault/v1";
+const MEM_KIB: u32 = 65_536;
+const ITERATIONS: u32 = 3;
+const PARALLELISM: u32 = 1;
+const MAX_SIZE: u64 = 16 * 1024 * 1024;
+
+#[derive(Debug, Error)]
+pub enum HubError {
+    #[error("incorrect master password or modified vault")]
+    Authentication,
+    #[error("unsupported vault format")]
+    UnsupportedFormat,
+    #[error("invalid input: {0}")]
+    InvalidInput(&'static str),
+    #[error("I/O: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("serialization: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("KDF error")]
+    Kdf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostProfile {
+    pub alias: String,
+    pub hostname: String,
+    pub port: u16,
+    pub username: String,
+    pub identity_alias: String,
+    /// Data-only for now: SSH host key validation not implemented.
+    pub pinned_host_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Identity {
+    pub alias: String,
+    pub private_key_pem: String,
+}
+impl Drop for Identity {
+    fn drop(&mut self) { self.private_key_pem.zeroize(); }
+}
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct Vault {
+    pub hosts: Vec<HostProfile>,
+    pub identities: Vec<Identity>,
+}
+impl Vault {
+    pub fn add_identity(&mut self, identity: Identity) -> Result<(), HubError> {
+        if identity.alias.trim().is_empty()
+            || !identity.private_key_pem.contains("-----BEGIN ")
+            || !identity.private_key_pem.contains("PRIVATE KEY-----") {
+            return Err(HubError::InvalidInput("invalid alias or unsupported private key encoding"));
+        }
+        if self.identities.iter().any(|i| i.alias == identity.alias) {
+            return Err(HubError::InvalidInput("identity alias already exists"));
+        }
+        self.identities.push(identity);
+        Ok(())
+    }
+
+    pub fn add_host(&mut self, host: HostProfile) -> Result<(), HubError> {
+        if host.alias.trim().is_empty() || host.hostname.trim().is_empty()
+            || host.username.trim().is_empty() || host.identity_alias.trim().is_empty() || host.port == 0 {
+            return Err(HubError::InvalidInput("missing host field or invalid port"));
+        }
+        if self.hosts.iter().any(|h| h.alias == host.alias) {
+            return Err(HubError::InvalidInput("host alias already exists"));
+        }
+        if !self.identities.iter().any(|i| i.alias == host.identity_alias) {
+            return Err(HubError::InvalidInput("unknown identity alias"));
+        }
+        self.hosts.push(host);
+        Ok(())
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Envelope {
+    format: u32,
+    memory_kib: u32,
+    iterations: u32,
+    parallelism: u32,
+    salt: [u8; 16],
+    nonce: [u8; 24],
+    ciphertext: Vec<u8>,
+}
+fn key_from_password(password: &str, e: &Envelope) -> Result<Zeroizing<[u8; 32]>, HubError> {
+    if e.memory_kib != MEM_KIB || e.iterations != ITERATIONS || e.parallelism != PARALLELISM {
+        return Err(HubError::UnsupportedFormat);
+    }
+    let params = Params::new(e.memory_kib, e.iterations, e.parallelism, Some(32)).map_err(|_| HubError::Kdf)?;
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = Zeroizing::new([0u8; 32]);
+    argon.hash_password_into(password.as_bytes(), &e.salt, &mut *key).map_err(|_| HubError::Kdf)?;
+    Ok(key)
+}
+
+pub fn encrypt(vault: &Vault, password: &str) -> Result<Vec<u8>, HubError> {
+    if password.chars().count() < 12 {
+        return Err(HubError::InvalidInput("master password must be at least 12 characters"));
+    }
+    let mut salt = [0; 16];
+    let mut nonce = [0; 24];
+    OsRng.fill_bytes(&mut salt);
+    OsRng.fill_bytes(&mut nonce);
+    let mut e = Envelope { format: FORMAT, memory_kib: MEM_KIB, iterations: ITERATIONS,
+        parallelism: PARALLELISM, salt, nonce, ciphertext: vec![] };
+    let key = key_from_password(password, &e)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(&*key).map_err(|_| HubError::Kdf)?;
+    let plaintext = Zeroizing::new(serde_json::to_vec(vault)?);
+    e.ciphertext = cipher.encrypt(XNonce::from_slice(&e.nonce),
+        Payload { msg: &plaintext, aad: AAD }).map_err(|_| HubError::Authentication)?;
+    Ok(serde_json::to_vec_pretty(&e)?)
+}
+pub fn decrypt(bytes: &[u8], password: &str) -> Result<Vault, HubError> {
+    if bytes.len() as u64 > MAX_SIZE { return Err(HubError::InvalidInput("vault file too large")); }
+    let e: Envelope = serde_json::from_slice(bytes)?;
+    if e.format != FORMAT { return Err(HubError::UnsupportedFormat); }
+    let key = key_from_password(password, &e)?;
+    let cipher = XChaCha20Poly1305::new_from_slice(&*key).map_err(|_| HubError::Kdf)?;
+    let plaintext = Zeroizing::new(cipher.decrypt(XNonce::from_slice(&e.nonce),
+        Payload { msg: &e.ciphertext, aad: AAD }).map_err(|_| HubError::Authentication)?);
+    Ok(serde_json::from_slice(&plaintext)?)
+}
+pub fn load(path: &Path, password: &str) -> Result<Vault, HubError> {
+    if fs::metadata(path)?.len() > MAX_SIZE {
+        return Err(HubError::InvalidInput("vault file too large"));
+    }
+    decrypt(&fs::read(path)?, password)
+}
+pub fn create(path: &Path, password: &str) -> Result<(), HubError> {
+    let data = encrypt(&Vault::default(), password)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(&data)?;
+    file.sync_all()?;
+    Ok(())
+}
+/// Write new ciphertext to a same-directory temporary file, then rename.
+/// Windows overwrite semantics are NOT yet supported; retain the original on error.
+pub fn save(path: &Path, vault: &Vault, password: &str) -> Result<(), HubError> {
+    let data = encrypt(vault, password)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let filename = path.file_name().ok_or(HubError::InvalidInput("missing vault filename"))?.to_string_lossy();
+    let mut random = [0u8; 8];
+    OsRng.fill_bytes(&mut random);
+    let tmp = parent.join(format!(".{filename}.{:016x}.tmp", u64::from_be_bytes(random)));
+    let result = (|| -> Result<(), HubError> {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        file.write_all(&data)?;
+        file.sync_all()?;
+        fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() { let _ = fs::remove_file(&tmp); }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn password() -> &'static str { "long-example-master-password" }
+    #[test]
+    fn roundtrip_wrong_password_and_tamper() {
+        let mut v = Vault::default();
+        v.add_identity(Identity { alias: "mykey".into(), private_key_pem:
+            "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
+        v.add_host(HostProfile { alias: "dev".into(), hostname: "dev.example".into(), port: 22,
+            username: "ubuntu".into(), identity_alias: "mykey".into(), pinned_host_key: None }).unwrap();
+        let data = encrypt(&v, password()).unwrap();
+        assert_eq!(decrypt(&data, password()).unwrap().hosts[0].alias, "dev");
+        assert!(matches!(decrypt(&data, "incorrect password"), Err(HubError::Authentication)));
+        let mut e: Envelope = serde_json::from_slice(&data).unwrap();
+        e.ciphertext[0] ^= 1;
+        assert!(matches!(decrypt(&serde_json::to_vec(&e).unwrap(), password()), Err(HubError::Authentication)));
+    }
+    #[test]
+    fn randomness_and_validation() {
+        assert_ne!(encrypt(&Vault::default(), password()).unwrap(), encrypt(&Vault::default(), password()).unwrap());
+        assert!(encrypt(&Vault::default(), "short").is_err());
+        assert!(Vault::default().add_host(HostProfile { alias: "h".into(), hostname: "localhost".into(),
+            port: 22, username: "u".into(), identity_alias: "missing".into(), pinned_host_key: None }).is_err());
+    }
+}
