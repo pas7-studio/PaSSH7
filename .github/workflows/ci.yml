@@ -1,17 +1,30 @@
-name: Rust CI
+name: Rust CI (self-hosted only)
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: passh7-ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   rust:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: linux
+            runner: passh7-linux
+          - os: windows
+            runner: passh7-windows
+    runs-on: [self-hosted, passh7, ${{ matrix.runner }}]
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
