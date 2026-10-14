@@ -58,3 +58,12 @@ The lock protects only **cooperating** PaSSH7 writers. External tools, manual ed
 ## Long-lived object identifiers
 
 A future v2 migration should assign random immutable UUIDs to identities and hosts, make aliases mutable display names, and convert host-to-identity links to UUID references. Do not infer stable IDs from alias, hostname or positional index; these can change or collide. Keep original aliases as display values and preserve a reversible mapping for exports. **No UUID migration is performed by v0.1**; avoid silent on-read mutations.
+
+## Backup implementation update (experimental)
+
+- Direct `save()` is private; cooperating clients must use locked `transaction()` or `rotate_password()`.
+- Before replacing an existing vault, PaSSH7 saves its encrypted bytes in a unique `*.bak-<random>` file, flushes that copy, and verifies it can be decrypted.
+- A password rotation verifies the old encrypted backup using the **old** password and writes the active vault with the new password. **Retained backups can still be opened with the old password**.
+- A failed mutation callback does not replace active ciphertext. Backup retention is currently unlimited.
+- Backup restoration is still a manual recovery task and has not been validated for crash recovery. A `*.bak-*` file must not be deleted automatically.
+- Security gap: secure Windows ACLs, symlink/reparse-point protection, restore tooling, directory fsync and backup rotation still need implementation and platform tests. Vault files and backups must be held in a private directory and must not be considered production safe.
