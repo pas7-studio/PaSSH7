@@ -1,0 +1,20 @@
+[package]
+name = "passh7-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+argon2.workspace = true
+fs2 = "0.4"
+base64 = "0.22"
+sha2 = "0.10"
+chacha20poly1305.workspace = true
+rand_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }

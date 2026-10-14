@@ -1,0 +1,12 @@
+[package]
+name = "passh7"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rpassword.workspace = true
+passh7-core = { path = "../passh7-core" }
+zeroize.workspace = true

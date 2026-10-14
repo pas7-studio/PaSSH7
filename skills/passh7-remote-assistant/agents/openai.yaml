@@ -1,0 +1,3 @@
+interface:
+  display_name: "PaSSH7 Remote Assistant"
+  short_description: "Inspect approved SSH hosts through a scoped PaSSH7 MCP session"
