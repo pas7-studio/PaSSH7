@@ -30,6 +30,7 @@ jobs:
         with:
           shared-key: passh7-core
           cache-on-failure: true
+      - run: cargo fmt --all
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
