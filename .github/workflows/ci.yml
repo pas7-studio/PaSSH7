@@ -1,4 +1,4 @@
-name: PaSSH7 CI (self-hosted only)
+name: PaSSH7 Linux self-hosted build
 on:
   push:
     branches: [main]
@@ -8,17 +8,12 @@ permissions:
 concurrency:
   group: passh7-ci-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  core:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: passh7-linux
-          - runner: passh7-windows
-    runs-on: [self-hosted, passh7, '${{ matrix.runner }}']
-    timeout-minutes: 30
+  build:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 90
+    env:
+      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,70 +21,45 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: passh7-core
-          cache-on-failure: true
-      - run: cargo fmt --all
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
-      - run: cargo build --release -p passh7
-      - uses: actions/upload-artifact@v4
-        if: matrix.runner == 'passh7-linux'
-        with:
-          name: PaSSH7-Linux-CLI
-          path: target/release/passh7
-          if-no-files-found: error
-          retention-days: 7
-
-  frontend:
-    runs-on: [self-hosted, passh7, passh7-linux]
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: apps/passh7-desktop
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            apps/passh7-desktop/src-tauri -> target
+          shared-key: passh7-linux
+          cache-on-failure: true
       - uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('apps/passh7-desktop/package.json') }}
-          restore-keys: npm-${{ runner.os }}-
-      - run: npm install --no-audit --no-fund
-      - run: npm run build
-
-  desktop-windows:
-    runs-on: [self-hosted, passh7, passh7-windows]
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apps/passh7-desktop/src-tauri -> target
-          shared-key: passh7-desktop
-          cache-on-failure: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - run: npm install --no-audit --no-fund
+          key: npm-Linux-${{ hashFiles('apps/passh7-desktop/package-lock.json', 'apps/passh7-desktop/package.json') }}
+          restore-keys: npm-Linux-
+      - name: Install Linux Tauri prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+      - name: Validate Rust core
+        run: |
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          cargo build --release -p passh7
+      - name: Build frontend
         working-directory: apps/passh7-desktop
-      - run: cargo check --manifest-path apps/passh7-desktop/src-tauri/Cargo.toml
-      - run: npm run tauri build -- --no-bundle
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Build Linux desktop
         working-directory: apps/passh7-desktop
+        run: npm run tauri build -- --bundles deb
       - uses: actions/upload-artifact@v4
         with:
-          name: PaSSH7-Windows-portable
-          path: apps/passh7-desktop/src-tauri/target/release/passh7-desktop.exe
+          name: PaSSH7-Linux
+          path: |
+            target/release/passh7
+            apps/passh7-desktop/src-tauri/target/release/bundle/deb/*.deb
+            apps/passh7-desktop/src-tauri/target/release/passh7-desktop
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
