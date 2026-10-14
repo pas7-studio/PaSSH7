@@ -8,6 +8,8 @@
 
 - `crates/passh7-core`: vault model and authenticated encryption
 - `crates/passh7-cli`: interactive-password CLI for vault setup and SSH profiles
+- `apps/passh7-desktop`: **visual-only** React/Vite prototype for the future Windows desktop (no Tauri bridge yet)
+- `docs/desktop-ux.md`: UX principles, contextual integrations and agent trust boundaries
 - `docs/threat-model.md`: security assumptions and open risks
 - `docs/vault-format-and-migrations.md`: stable schema contract, compatibility and migration strategy
 
@@ -45,6 +47,19 @@ Host keys must be verified against a trusted, independently obtained SHA-256 fin
 The encrypted envelope version and the decrypted data schema version are independent. Legacy v1 vaults (missing `schema_version`) remain readable. Unknown optional fields are preserved when a vault is re-encrypted, while unsupported future schema versions are rejected rather than silently rewritten. Regression tests cover those cases. See [migration ADR](docs/vault-format-and-migrations.md).
 
 **Not yet guaranteed:** concurrent-writer isolation, filesystem ACL retention, power-loss rollback and full Windows crash recovery. Until those are implemented and independently verified, do not rely on PaSSH7 for irreplaceable keys.
+
+## Desktop UI preview (no SSH / secrets)
+
+The UI prototype contains a searchable host list, host switching, offline terminal shell, context panels for Files / Docker / Ports / AI Agents, a command palette (`Ctrl+K`) and a theme switch. All demo hosts use `.invalid` domains; Connect and privileged integrations are intentionally disabled. No actual vault is loaded into this prototype.
+
+```shell
+cd apps/passh7-desktop
+npm install
+npm run dev
+npm run build
+```
+
+See [desktop UX and context security contract](docs/desktop-ux.md). This is **not a packaged Windows program** yet.
 
 ## Planned milestones
 
