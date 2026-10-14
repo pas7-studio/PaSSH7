@@ -483,6 +483,47 @@ mod tests {
                    Some(&serde_json::json!("retained")));
         let _ = fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn previous_generation_is_kept_as_decryptable_backup() {
+        let mut random = [0u8; 8];
+        OsRng.fill_bytes(&mut random);
+        let dir = std::env::temp_dir().join(format!("passh7-backup-{:016x}", u64::from_be_bytes(random)));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("vault.json");
+        create(&path, password()).unwrap();
+        let original = fs::read(&path).unwrap();
+        transaction(&path, password(), |vault| {
+            vault.extensions.insert("note".into(), serde_json::json!("new generation"));
+            Ok(true)
+        }).unwrap();
+        let backups: Vec<_> = fs::read_dir(&dir).unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()).is_some_and(|x| x.starts_with("bak-")))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(fs::read(&backups[0]).unwrap(), original);
+        let recovered = load(&backups[0], password()).unwrap();
+        assert!(recovered.extensions.get("note").is_none());
+        assert_eq!(load(&path, password()).unwrap().extensions["note"], "new generation");
+        let _ = fs::remove_dir_all(dir);
+    }
+    #[test]
+    fn failed_writer_does_not_replace_original_or_make_backup() {
+        let mut random = [0u8; 8];
+        OsRng.fill_bytes(&mut random);
+        let dir = std::env::temp_dir().join(format!("passh7-abort-{:016x}", u64::from_be_bytes(random)));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("vault.json");
+        create(&path, password()).unwrap();
+        let original = fs::read(&path).unwrap();
+        let result = transaction(&path, password(), |_| Err(HubError::InvalidInput("abort")));
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(&dir).unwrap().filter_map(Result::ok).count(), 2);
+        let _ = fs::remove_dir_all(dir);
+    }
     #[test]
     fn randomness_and_validation() {
         assert_ne!(encrypt(&Vault::default(), password()).unwrap(), encrypt(&Vault::default(), password()).unwrap());
