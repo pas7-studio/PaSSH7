@@ -16,6 +16,9 @@ struct Args {
 enum Command {
     Init,
     List,
+    ChangePassword,
+    RemoveHost { #[arg(long)] alias: String },
+    RemoveKey { #[arg(long)] alias: String },
     ImportKey { #[arg(long)] alias: String, #[arg(long)] file: PathBuf },
     AddHost { #[arg(long)] alias: String, #[arg(long)] hostname: String,
         #[arg(long, default_value_t = 22)] port: u16, #[arg(long)] username: String,
@@ -48,6 +51,24 @@ fn main() -> Result<()> {
             passh7_core::create(&args.vault, &password)?;
             println!("Vault created at {}", args.vault.display());
         }
+        Command::ChangePassword => {
+            let old_password = prompt(false)?;
+            let vault = passh7_core::load(&args.vault, &old_password)
+                .context("unable to unlock vault with the current password")?;
+            println!("Enter a new master password (12 characters minimum):");
+            let new_password = prompt(true)?;
+            if *old_password == *new_password { bail!("new master password must differ from the old password"); }
+            passh7_core::save(&args.vault, &vault, &new_password)?;
+            println!("Master password changed; retain encrypted recovery backups securely");
+        }
+        Command::RemoveHost { alias } => with_vault(&args.vault, |v| {
+            v.remove_host(&alias)?;
+            Ok(true)
+        })?,
+        Command::RemoveKey { alias } => with_vault(&args.vault, |v| {
+            v.remove_identity(&alias)?;
+            Ok(true)
+        })?,
         Command::List => with_vault(&args.vault, |vault| {
             println!("Identities: {}", vault.identities.len());
             for h in &vault.hosts {
