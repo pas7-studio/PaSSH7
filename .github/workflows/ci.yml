@@ -36,10 +36,6 @@ jobs:
           path: ~/.npm
           key: npm-Linux-${{ hashFiles('apps/passh7-desktop/package-lock.json', 'apps/passh7-desktop/package.json') }}
           restore-keys: npm-Linux-
-      - name: Install Linux Tauri prerequisites
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
       - name: Validate Rust core
         run: |
           cargo fmt --all
@@ -51,6 +47,11 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run build
+      - name: Check preinstalled Linux Tauri prerequisites
+        run: |
+          pkg-config --modversion webkit2gtk-4.1
+          pkg-config --modversion ayatana-appindicator3-0.1
+          command -v patchelf
       - name: Build Linux desktop
         working-directory: apps/passh7-desktop
         run: npm run tauri build -- --bundles deb
