@@ -50,7 +50,7 @@ The encrypted envelope version and the decrypted data schema version are indepen
 
 ## Desktop UI preview (no SSH / secrets)
 
-The web preview uses synthetic `.invalid` hosts. In a Tauri desktop build, the user may initialize and unlock a local encrypted vault, list existing host profiles and store new ones through Rust Core transactions. Connect and privileged integrations remain disabled. Identity import is available through the CLI only at this stage; the UI cannot create usable identities yet. No SSH transport is implemented.
+The web preview uses synthetic `.invalid` hosts. In a Tauri desktop build, the user may initialize and unlock a local encrypted vault, list existing host profiles and store new ones through Rust Core transactions. Connect and privileged integrations remain disabled. Identity names can now be loaded from the unlocked native vault. A GUI key-import dialog supports pasted test SSH keys for encrypted storage. The parser still does not cryptographically validate key material; DO NOT use production credentials. No SSH transport is implemented.
 
 ```shell
 cd apps/passh7-desktop
