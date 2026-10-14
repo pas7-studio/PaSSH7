@@ -48,3 +48,13 @@ The current v0.1 code implements only part of this process. In particular, it do
 ## Agent-facing separation
 
 MCP permissions and runtime sessions must never be persisted inside the core vault in a way that forces rewriting private identities on every agent event. Store separate agent policy/audit records with their own schemas. Do not expose serialized Vault or private key material as MCP tool output.
+
+## Writer serialization (implementation added, validation pending)
+
+All CLI read-modify-write operations now pass through `passh7_core::transaction`, which acquires an OS advisory exclusive lock on a stable `*.passh7.lock` sidecar file *before reading* the encrypted vault and keeps it through replacement. Password rotation uses the same lock.
+
+The lock protects only **cooperating** PaSSH7 writers. External tools, manual edits, sync software and clients using the raw public `save` function can bypass it. This still needs lock-file symlink/reparse-point hardening, directory ACLs, crash/recovery tests, and checks on real Windows filesystems. Do not place the vault on SMB/network storage or cloud-sync folders at this stage.
+
+## Long-lived object identifiers
+
+A future v2 migration should assign random immutable UUIDs to identities and hosts, make aliases mutable display names, and convert host-to-identity links to UUID references. Do not infer stable IDs from alias, hostname or positional index; these can change or collide. Keep original aliases as display values and preserve a reversible mapping for exports. **No UUID migration is performed by v0.1**; avoid silent on-read mutations.
