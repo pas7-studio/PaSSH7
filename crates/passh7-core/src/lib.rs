@@ -293,6 +293,15 @@ mod tests {
             port: 22, username: "ubuntu".into(), identity_alias: "missing".into(), pinned_host_key: None });
         assert!(encrypt(&vault, password()).is_err());
     }
+
+    #[test]
+    fn rotating_password_invalidates_old_password_on_new_ciphertext() {
+        let original = encrypt(&Vault::default(), password()).unwrap();
+        let vault = decrypt(&original, password()).unwrap();
+        let rotated = encrypt(&vault, "another-long-master-password").unwrap();
+        assert!(matches!(decrypt(&rotated, password()), Err(HubError::Authentication)));
+        assert!(decrypt(&rotated, "another-long-master-password").is_ok());
+    }
     #[test]
     fn randomness_and_validation() {
         assert_ne!(encrypt(&Vault::default(), password()).unwrap(), encrypt(&Vault::default(), password()).unwrap());
