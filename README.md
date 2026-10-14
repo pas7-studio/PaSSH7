@@ -23,6 +23,7 @@ cargo run -p passh7 -- --vault test-vault.json init
 cargo run -p passh7 -- --vault test-vault.json list
 cargo run -p passh7 -- --vault test-vault.json import-key --alias demo --file /path/to/test-private-key
 cargo run -p passh7 -- --vault test-vault.json add-host --alias test --hostname example.test --username ubuntu --identity demo
+cargo run -p passh7 -- --vault test-vault.json pin-host --alias test --fingerprint SHA256:REPLACE_WITH_INDEPENDENTLY_VERIFIED_FINGERPRINT
 cargo run -p passh7 -- --vault test-vault.json change-password
 cargo run -p passh7 -- --vault test-vault.json remove-host --alias test
 cargo run -p passh7 -- --vault test-vault.json remove-key --alias demo
@@ -33,6 +34,10 @@ cargo run -p passh7 -- --vault test-vault.json remove-key --alias demo
 **Windows status:** code now uses `ReplaceFileW` with an encrypted recovery backup, but this path is still unverified in Windows CI. Do not store valuable keys until validation, permissions hardening and recovery tests are complete.
 
 **CI policy:** exclusively dedicated self-hosted runners. See [runner setup](docs/self-hosted-ci.md). Automatic runs for untrusted public PRs are disabled.
+
+## Host-key trust policy
+
+Host keys must be verified against a trusted, independently obtained SHA-256 fingerprint before connection. The new `hostkey::verify_host_key` API fails closed when the pin is missing, malformed or mismatched; `pin-host` stores a user-supplied pin. **No SSH transport or handshake integration exists yet.** Adding a pin alone does not establish a secure connection, and taking a fingerprint from an untrusted first connection does not prove its authenticity.
 
 ## Planned milestones
 
