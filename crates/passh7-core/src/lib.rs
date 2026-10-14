@@ -147,8 +147,36 @@ pub fn create(path: &Path, password: &str) -> Result<(), HubError> {
     file.sync_all()?;
     Ok(())
 }
-/// Write new ciphertext to a same-directory temporary file, then rename.
-/// Windows overwrite semantics are NOT yet supported; retain the original on error.
+/// Save new ciphertext through a synced temporary file with platform-specific replacement.
+/// Windows replacement retains an encrypted backup pending a reviewed rotation policy.
+#[cfg(not(windows))]
+fn replace_vault_file(temp: &Path, destination: &Path) -> Result<(), HubError> {
+    fs::rename(temp, destination)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn replace_vault_file(temp: &Path, destination: &Path) -> Result<(), HubError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+    }
+    if !destination.exists() {
+        fs::rename(temp, destination)?;
+        return Ok(());
+    }
+    let mut random = [0u8; 8];
+    OsRng.fill_bytes(&mut random);
+    let backup = destination.with_extension(format!("bak-{:016x}", u64::from_be_bytes(random)));
+    let result = unsafe {
+        ReplaceFileW(wide(destination).as_ptr(), wide(temp).as_ptr(),
+                     wide(&backup).as_ptr(), 0, std::ptr::null(), std::ptr::null())
+    };
+    if result == 0 { return Err(HubError::Io(std::io::Error::last_os_error())); }
+    Ok(())
+}
+
 pub fn save(path: &Path, vault: &Vault, password: &str) -> Result<(), HubError> {
     let data = encrypt(vault, password)?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
@@ -160,7 +188,7 @@ pub fn save(path: &Path, vault: &Vault, password: &str) -> Result<(), HubError> 
         let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         file.write_all(&data)?;
         file.sync_all()?;
-        fs::rename(&tmp, path)?;
+        replace_vault_file(&tmp, path)?;
         Ok(())
     })();
     if result.is_err() { let _ = fs::remove_file(&tmp); }
