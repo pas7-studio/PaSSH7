@@ -246,6 +246,21 @@ where F: FnOnce(&mut Vault) -> Result<bool, HubError> {
     Ok(())
 }
 
+/// Rotate the master password under the same exclusive cross-process lock.
+pub fn rotate_password(path: &Path, old_password: &str, new_password: &str) -> Result<(), HubError> {
+    if old_password == new_password {
+        return Err(HubError::InvalidInput("new password must differ from old password"));
+    }
+    let lock_path = path.with_extension("passh7.lock");
+    let lock = OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+    lock.try_lock_exclusive().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock { HubError::Busy }
+        else { HubError::Io(error) }
+    })?;
+    let vault = load(path, old_password)?;
+    save(path, &vault, new_password)
+}
+
 pub fn create(path: &Path, password: &str) -> Result<(), HubError> {
     let data = encrypt(&Vault::default(), password)?;
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
