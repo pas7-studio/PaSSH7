@@ -1,6 +1,7 @@
 //! PaSSH7 encrypted local vault. Network SSH is not implemented in v0.1.
 pub mod hostkey;
 use argon2::{Algorithm, Argon2, Params, Version};
+use fs2::FileExt;
 use chacha20poly1305::{aead::{Aead, Payload}, KeyInit, XChaCha20Poly1305, XNonce};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,8 @@ pub enum HubError {
     Json(#[from] serde_json::Error),
     #[error("KDF error")]
     Kdf,
+    #[error("vault is being modified by another process")]
+    Busy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -226,6 +229,23 @@ pub fn load(path: &Path, password: &str) -> Result<Vault, HubError> {
     }
     decrypt(&fs::read(path)?, password)
 }
+/// Execute an entire read-modify-write operation under a stable sidecar lock.
+/// The lock is on a separate file because atomic vault replacement changes the inode.
+/// All writers (CLI, Desktop and future MCP) MUST use this function.
+pub fn transaction<F>(path: &Path, password: &str, operation: F) -> Result<(), HubError>
+where F: FnOnce(&mut Vault) -> Result<bool, HubError> {
+    let lock_path = path.with_extension("passh7.lock");
+    let lock = OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+    lock.try_lock_exclusive().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock { HubError::Busy }
+        else { HubError::Io(error) }
+    })?;
+    // RAII: the file descriptor (and its lock) is released on all error paths.
+    let mut vault = load(path, password)?;
+    if operation(&mut vault)? { save(path, &vault, password)?; }
+    Ok(())
+}
+
 pub fn create(path: &Path, password: &str) -> Result<(), HubError> {
     let data = encrypt(&Vault::default(), password)?;
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
@@ -308,7 +328,7 @@ mod tests {
         let path = dir.join("vault.json");
         create(&path, password()).unwrap();
         let mut updated = load(&path, password()).unwrap();
-        updated.add_identity(Identity { alias: "test".into(), private_key_pem:
+        updated.add_identity(Identity { extensions: Default::default(), alias: "test".into(), private_key_pem:
             "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
         save(&path, &updated, password()).unwrap();
         assert_eq!(load(&path, password()).unwrap().identities.len(), 1);
@@ -320,7 +340,7 @@ mod tests {
         let mut vault = Vault::default();
         vault.add_identity(Identity { alias: "key".into(),
             private_key_pem: "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
-        vault.add_host(HostProfile { alias: "node".into(), hostname: "node.test".into(),
+        vault.add_host(HostProfile { extensions: Default::default(), alias: "node".into(), hostname: "node.test".into(),
             port: 22, username: "ubuntu".into(), identity_alias: "key".into(), pinned_host_key: None }).unwrap();
         assert!(vault.remove_identity("key").is_err());
         assert_eq!(vault.identities.len(), 1);
