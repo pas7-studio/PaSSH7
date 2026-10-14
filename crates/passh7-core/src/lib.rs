@@ -242,7 +242,7 @@ where F: FnOnce(&mut Vault) -> Result<bool, HubError> {
     })?;
     // RAII: the file descriptor (and its lock) is released on all error paths.
     let mut vault = load(path, password)?;
-    if operation(&mut vault)? { save(path, &vault, password)?; }
+    if operation(&mut vault)? { save(path, &vault, password, password)?; }
     Ok(())
 }
 
@@ -258,7 +258,7 @@ pub fn rotate_password(path: &Path, old_password: &str, new_password: &str) -> R
         else { HubError::Io(error) }
     })?;
     let vault = load(path, old_password)?;
-    save(path, &vault, new_password)
+    save(path, &vault, new_password, old_password)
 }
 
 pub fn create(path: &Path, password: &str) -> Result<(), HubError> {
@@ -295,7 +295,7 @@ fn replace_vault_file(temp: &Path, destination: &Path) -> Result<(), HubError> {
     Ok(())
 }
 
-fn save(path: &Path, vault: &Vault, password: &str) -> Result<(), HubError> {
+fn save(path: &Path, vault: &Vault, password: &str, prior_password: &str) -> Result<(), HubError> {
     let data = encrypt(vault, password)?;
     // Preserve and authenticate the previous generation before changing the active file.
     // Each backup is uniquely named and never silently overwritten.
@@ -304,7 +304,7 @@ fn save(path: &Path, vault: &Vault, password: &str) -> Result<(), HubError> {
         if old.len() as u64 > MAX_SIZE { return Err(HubError::InvalidInput("vault file too large")); }
         // This deliberately fails for old-master-password backups; rotation needs a
         // dedicated independently validated recovery plan.
-        let _prior = decrypt(&old, password)?;
+        let _prior = decrypt(&old, prior_password)?;
         let mut backup_suffix = [0u8; 8];
         OsRng.fill_bytes(&mut backup_suffix);
         let backup = path.with_extension(format!("bak-{:016x}", u64::from_be_bytes(backup_suffix)));
@@ -312,7 +312,7 @@ fn save(path: &Path, vault: &Vault, password: &str) -> Result<(), HubError> {
         backup_file.write_all(&old)?;
         backup_file.sync_all()?;
         // Refuse replacement unless a complete backup can be decrypted.
-        let _verified = load(&backup, password)?;
+        let _verified = load(&backup, prior_password)?;
     }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let filename = path.file_name().ok_or(HubError::InvalidInput("missing vault filename"))?.to_string_lossy();
@@ -359,7 +359,7 @@ mod tests {
         let mut updated = load(&path, password()).unwrap();
         updated.add_identity(Identity { extensions: Default::default(), alias: "test".into(), private_key_pem:
             "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
-        save(&path, &updated, password()).unwrap();
+        save(&path, &updated, password(), password()).unwrap();
         assert_eq!(load(&path, password()).unwrap().identities.len(), 1);
         let _ = fs::remove_dir_all(&dir);
     }
