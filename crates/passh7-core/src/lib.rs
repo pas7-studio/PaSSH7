@@ -1,4 +1,5 @@
 //! PaSSH7 encrypted local vault. Network SSH is not implemented in v0.1.
+pub mod hostkey;
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::{aead::{Aead, Payload}, KeyInit, XChaCha20Poly1305, XNonce};
 use rand_core::{OsRng, RngCore};
@@ -80,9 +81,21 @@ impl Vault {
         if !self.identities.iter().any(|i| i.alias == host.identity_alias) {
             return Err(HubError::InvalidInput("unknown identity alias"));
         }
+        if let Some(pin) = &host.pinned_host_key {
+            hostkey::validate_fingerprint(pin)?;
+        }
         self.hosts.push(host);
         Ok(())
     }
+    /// Explicitly pin an already verified host fingerprint (never discover blindly).
+    pub fn pin_host_key(&mut self, alias: &str, pin: &str) -> Result<(), HubError> {
+        hostkey::validate_fingerprint(pin)?;
+        let host = self.hosts.iter_mut().find(|h| h.alias == alias)
+            .ok_or(HubError::InvalidInput("host alias not found"))?;
+        host.pinned_host_key = Some(pin.to_owned());
+        Ok(())
+    }
+
     /// Remove a host without touching the referenced SSH identity.
     pub fn remove_host(&mut self, alias: &str) -> Result<(), HubError> {
         let index = self.hosts.iter().position(|h| h.alias == alias)
@@ -115,6 +128,9 @@ impl Vault {
             if h.alias.trim().is_empty() || h.hostname.trim().is_empty() ||
                 h.username.trim().is_empty() || h.port == 0 || !hosts.insert(h.alias.as_str()) {
                 return Err(HubError::InvalidInput("invalid or duplicate host profile"));
+            }
+            if let Some(pin) = &h.pinned_host_key {
+                hostkey::validate_fingerprint(pin)?;
             }
             if !keys.contains(h.identity_alias.as_str()) {
                 return Err(HubError::InvalidInput("host references missing identity"));
