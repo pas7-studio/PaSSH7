@@ -25,7 +25,9 @@ cargo run -p passh7 -- --vault test-vault.json import-key --alias demo --file /p
 cargo run -p passh7 -- --vault test-vault.json add-host --alias test --hostname example.test --username ubuntu --identity demo
 ```
 
-**Windows known limitation:** updates to existing vault files are currently blocked by platform-specific file replacement semantics. Do not use this CLI to store valuable keys until Windows-safe save/backup/recovery is implemented and tested.
+**Windows status:** code now uses `ReplaceFileW` with an encrypted recovery backup, but this path is still unverified in Windows CI. Do not store valuable keys until validation, permissions hardening and recovery tests are complete.
+
+**CI policy:** exclusively dedicated self-hosted runners. See [runner setup](docs/self-hosted-ci.md). Automatic runs for untrusted public PRs are disabled.
 
 ## Planned milestones
 
