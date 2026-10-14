@@ -446,6 +446,29 @@ mod tests {
         vault.extensions.insert("hosts".into(), serde_json::json!([]));
         assert!(encrypt(&vault, password()).is_err());
     }
+
+    #[test]
+    fn competing_writer_cannot_overwrite_locked_vault() {
+        let mut random = [0u8; 8];
+        OsRng.fill_bytes(&mut random);
+        let dir = std::env::temp_dir().join(format!("passh7-lock-{:016x}", u64::from_be_bytes(random)));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("vault.json");
+        create(&path, password()).unwrap();
+        let lock_path = path.with_extension("passh7.lock");
+        let guard = OpenOptions::new().create(true).read(true).write(true).open(&lock_path).unwrap();
+        guard.try_lock_exclusive().unwrap();
+        let result = transaction(&path, password(), |_| Ok(true));
+        assert!(matches!(result, Err(HubError::Busy)));
+        drop(guard);
+        transaction(&path, password(), |v| {
+            v.extensions.insert("note".into(), serde_json::json!("retained"));
+            Ok(true)
+        }).unwrap();
+        assert_eq!(load(&path, password()).unwrap().extensions.get("note"),
+                   Some(&serde_json::json!("retained")));
+        let _ = fs::remove_dir_all(&dir);
+    }
     #[test]
     fn randomness_and_validation() {
         assert_ne!(encrypt(&Vault::default(), password()).unwrap(), encrypt(&Vault::default(), password()).unwrap());
