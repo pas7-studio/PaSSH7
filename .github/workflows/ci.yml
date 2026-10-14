@@ -51,16 +51,14 @@ jobs:
         run: |
           pkg-config --modversion webkit2gtk-4.1
           pkg-config --modversion ayatana-appindicator3-0.1
-          command -v patchelf
       - name: Build Linux desktop
         working-directory: apps/passh7-desktop
-        run: npm run tauri build -- --bundles deb
+        run: npm run tauri build -- --no-bundle
       - uses: actions/upload-artifact@v4
         with:
           name: PaSSH7-Linux
           path: |
             target/release/passh7
-            apps/passh7-desktop/src-tauri/target/release/bundle/deb/*.deb
             apps/passh7-desktop/src-tauri/target/release/passh7-desktop
           if-no-files-found: error
           retention-days: 14
