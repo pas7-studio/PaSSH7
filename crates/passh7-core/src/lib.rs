@@ -83,6 +83,46 @@ impl Vault {
         self.hosts.push(host);
         Ok(())
     }
+    /// Remove a host without touching the referenced SSH identity.
+    pub fn remove_host(&mut self, alias: &str) -> Result<(), HubError> {
+        let index = self.hosts.iter().position(|h| h.alias == alias)
+            .ok_or(HubError::InvalidInput("host alias not found"))?;
+        self.hosts.remove(index);
+        Ok(())
+    }
+
+    /// Refuse removal while a host still depends on the identity.
+    pub fn remove_identity(&mut self, alias: &str) -> Result<(), HubError> {
+        if self.hosts.iter().any(|h| h.identity_alias == alias) {
+            return Err(HubError::InvalidInput("identity is still used by a host"));
+        }
+        let index = self.identities.iter().position(|i| i.alias == alias)
+            .ok_or(HubError::InvalidInput("identity alias not found"))?;
+        self.identities.remove(index);
+        Ok(())
+    }
+
+    /// Validate internal references after decrypting a potentially older vault.
+    pub fn validate(&self) -> Result<(), HubError> {
+        let mut hosts = std::collections::HashSet::new();
+        let mut keys = std::collections::HashSet::new();
+        for i in &self.identities {
+            if i.alias.trim().is_empty() || !keys.insert(i.alias.as_str()) {
+                return Err(HubError::InvalidInput("duplicate or empty identity alias"));
+            }
+        }
+        for h in &self.hosts {
+            if h.alias.trim().is_empty() || h.hostname.trim().is_empty() ||
+                h.username.trim().is_empty() || h.port == 0 || !hosts.insert(h.alias.as_str()) {
+                return Err(HubError::InvalidInput("invalid or duplicate host profile"));
+            }
+            if !keys.contains(h.identity_alias.as_str()) {
+                return Err(HubError::InvalidInput("host references missing identity"));
+            }
+        }
+        Ok(())
+    }
+
 }
 
 #[derive(Serialize, Deserialize)]
@@ -119,6 +159,7 @@ pub fn encrypt(vault: &Vault, password: &str) -> Result<Vec<u8>, HubError> {
         parallelism: PARALLELISM, salt, nonce, ciphertext: vec![] };
     let key = key_from_password(password, &e)?;
     let cipher = XChaCha20Poly1305::new_from_slice(&*key).map_err(|_| HubError::Kdf)?;
+    vault.validate()?;
     let plaintext = Zeroizing::new(serde_json::to_vec(vault)?);
     e.ciphertext = cipher.encrypt(XNonce::from_slice(&e.nonce),
         Payload { msg: &plaintext, aad: AAD }).map_err(|_| HubError::Authentication)?;
@@ -132,7 +173,9 @@ pub fn decrypt(bytes: &[u8], password: &str) -> Result<Vault, HubError> {
     let cipher = XChaCha20Poly1305::new_from_slice(&*key).map_err(|_| HubError::Kdf)?;
     let plaintext = Zeroizing::new(cipher.decrypt(XNonce::from_slice(&e.nonce),
         Payload { msg: &e.ciphertext, aad: AAD }).map_err(|_| HubError::Authentication)?);
-    Ok(serde_json::from_slice(&plaintext)?)
+    let vault: Vault = serde_json::from_slice(&plaintext)?;
+    vault.validate()?;
+    Ok(vault)
 }
 pub fn load(path: &Path, password: &str) -> Result<Vault, HubError> {
     if fs::metadata(path)?.len() > MAX_SIZE {
@@ -227,6 +270,28 @@ mod tests {
         save(&path, &updated, password()).unwrap();
         assert_eq!(load(&path, password()).unwrap().identities.len(), 1);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn identity_cannot_be_removed_when_host_uses_it() {
+        let mut vault = Vault::default();
+        vault.add_identity(Identity { alias: "key".into(),
+            private_key_pem: "-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----".into() }).unwrap();
+        vault.add_host(HostProfile { alias: "node".into(), hostname: "node.test".into(),
+            port: 22, username: "ubuntu".into(), identity_alias: "key".into(), pinned_host_key: None }).unwrap();
+        assert!(vault.remove_identity("key").is_err());
+        assert_eq!(vault.identities.len(), 1);
+        vault.remove_host("node").unwrap();
+        vault.remove_identity("key").unwrap();
+        assert!(vault.hosts.is_empty() && vault.identities.is_empty());
+    }
+
+    #[test]
+    fn rejects_inconsistent_vault_before_encryption() {
+        let mut vault = Vault::default();
+        vault.hosts.push(HostProfile { alias: "node".into(), hostname: "node.test".into(),
+            port: 22, username: "ubuntu".into(), identity_alias: "missing".into(), pinned_host_key: None });
+        assert!(encrypt(&vault, password()).is_err());
     }
     #[test]
     fn randomness_and_validation() {
