@@ -9,6 +9,7 @@
 - `crates/passh7-core`: vault model and authenticated encryption
 - `crates/passh7-cli`: interactive-password CLI for vault setup and SSH profiles
 - `docs/threat-model.md`: security assumptions and open risks
+- `docs/vault-format-and-migrations.md`: stable schema contract, compatibility and migration strategy
 
 ## Crypto format
 
@@ -38,6 +39,12 @@ cargo run -p passh7 -- --vault test-vault.json remove-key --alias demo
 ## Host-key trust policy
 
 Host keys must be verified against a trusted, independently obtained SHA-256 fingerprint before connection. The new `hostkey::verify_host_key` API fails closed when the pin is missing, malformed or mismatched; `pin-host` stores a user-supplied pin. **No SSH transport or handshake integration exists yet.** Adding a pin alone does not establish a secure connection, and taking a fingerprint from an untrusted first connection does not prove its authenticity.
+
+## Migration safety and compatibility
+
+The encrypted envelope version and the decrypted data schema version are independent. Legacy v1 vaults (missing `schema_version`) remain readable. Unknown optional fields are preserved when a vault is re-encrypted, while unsupported future schema versions are rejected rather than silently rewritten. Regression tests cover those cases. See [migration ADR](docs/vault-format-and-migrations.md).
+
+**Not yet guaranteed:** concurrent-writer isolation, filesystem ACL retention, power-loss rollback and full Windows crash recovery. Until those are implemented and independently verified, do not rely on PaSSH7 for irreplaceable keys.
 
 ## Planned milestones
 
