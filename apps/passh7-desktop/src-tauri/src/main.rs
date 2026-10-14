@@ -1,8 +1,37 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use std::path::PathBuf;
-
-use serde::Serialize;
+use std::{path::PathBuf, sync::Mutex, time::{Duration, Instant}};
+use serde::{Deserialize, Serialize};
+use zeroize::{Zeroize, Zeroizing};
+use tauri::State;
 use passh7_core::{HostProfile, HubError};
+
+const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+#[derive(Default)]
+struct SessionStore(Mutex<Option<UnlockedSession>>);
+
+struct UnlockedSession {
+    password: Zeroizing<String>,
+    last_used: Instant,
+}
+
+impl SessionStore {
+    fn use_password<T>(&self, operation: impl FnOnce(&str) -> Result<T, String>) -> Result<T, String> {
+        let mut guard = self.0.lock().map_err(|_| "Vault session unavailable")?;
+        let session = guard.as_mut().ok_or("Vault is locked")?;
+        if session.last_used.elapsed() >= IDLE_TIMEOUT {
+            *guard = None;
+            return Err("Vault session expired");
+        }
+        let result = operation(&session.password);
+        session.last_used = Instant::now();
+        result
+    }
+    fn lock(&self) -> Result<(), String> {
+        *self.0.lock().map_err(|_| "Vault session unavailable")? = None;
+        Ok(())
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,74 +43,86 @@ struct HostSummary {
     identity_alias: String,
     host_key_pinned: bool,
 }
-
 fn vault_path() -> Result<PathBuf, String> {
-    let root = std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
+    let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
         .or_else(|| std::env::var_os("XDG_DATA_HOME").map(PathBuf::from))
         .ok_or("No per-user application data directory found")?;
     let dir = root.join("PaSSH7");
     std::fs::create_dir_all(&dir).map_err(|_| "Unable to access vault directory")?;
     Ok(dir.join("vault.json"))
 }
-
-fn safe_err(e: HubError) -> String {
-    match e {
+fn safe_err(error: HubError) -> String {
+    match error {
         HubError::Busy => "Vault is busy; retry shortly".into(),
         HubError::Authentication => "Wrong password or damaged vault".into(),
         HubError::UnsupportedFormat => "Unsupported vault version".into(),
-        _ => "Vault operation failed; inspect local diagnostics".into(),
+        _ => "Vault operation failed".into(),
     }
 }
+#[tauri::command]
+fn vault_exists() -> Result<bool, String> { Ok(vault_path()?.exists()) }
 
 #[tauri::command]
-fn vault_exists() -> Result<bool, String> {
-    Ok(vault_path()?.exists())
+fn vault_initialize(mut master_password: String) -> Result<(), String> {
+    let result = passh7_core::create(&vault_path()?, &master_password).map_err(safe_err);
+    master_password.zeroize();
+    result
 }
+#[tauri::command]
+fn vault_unlock(mut master_password: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
+    let result = passh7_core::load(&vault_path()?, &master_password).map_err(safe_err);
+    if let Err(err) = result {
+        master_password.zeroize();
+        return Err(err);
+    }
+    let mut guard = sessions.0.lock().map_err(|_| "Vault session unavailable")?;
+    *guard = Some(UnlockedSession { password: Zeroizing::new(master_password), last_used: Instant::now() });
+    Ok(())
+}
+#[tauri::command]
+fn vault_lock(sessions: State<'_, SessionStore>) -> Result<(), String> { sessions.lock() }
 
 #[tauri::command]
-fn vault_initialize(master_password: String) -> Result<(), String> {
-    let path = vault_path()?;
-    passh7_core::create(&path, &master_password).map_err(safe_err)
+fn vault_status(sessions: State<'_, SessionStore>) -> Result<bool, String> {
+    let mut guard = sessions.0.lock().map_err(|_| "Vault session unavailable")?;
+    if guard.as_ref().is_some_and(|s| s.last_used.elapsed() >= IDLE_TIMEOUT) { *guard = None; }
+    Ok(guard.is_some())
 }
-
 #[tauri::command]
-fn vault_list_hosts(master_password: String) -> Result<Vec<HostSummary>, String> {
-    let vault = passh7_core::load(&vault_path()?, &master_password).map_err(safe_err)?;
-    Ok(vault.hosts.into_iter().map(|h| HostSummary {
-        alias: h.alias, hostname: h.hostname, port: h.port, username: h.username,
-        identity_alias: h.identity_alias, host_key_pinned: h.pinned_host_key.is_some()
-    }).collect())
+fn vault_list_hosts(sessions: State<'_, SessionStore>) -> Result<Vec<HostSummary>, String> {
+    sessions.use_password(|password| {
+        let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
+        Ok(vault.hosts.into_iter().map(|h| HostSummary {
+            alias:h.alias,hostname:h.hostname,port:h.port,username:h.username,
+            identity_alias:h.identity_alias,host_key_pinned:h.pinned_host_key.is_some()
+        }).collect())
+    })
 }
-
-#[tauri::command]
-fn vault_add_host(master_password: String, host: HostInput) -> Result<(), String> {
-    let path = vault_path()?;
-    passh7_core::transaction(&path, &master_password, |vault| {
-        vault.add_host(HostProfile {
-            alias: host.alias.clone(), hostname: host.hostname.clone(), port: host.port,
-            username: host.username.clone(), identity_alias: host.identity_alias.clone(),
-            pinned_host_key: host.pinned_host_key.clone(), extensions: Default::default(),
-        })?;
-        Ok(true)
-    }).map_err(safe_err)
-}
-
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HostInput {
-    alias: String,
-    hostname: String,
-    port: u16,
-    username: String,
-    identity_alias: String,
-    pinned_host_key: Option<String>,
+    alias:String, hostname:String, port:u16, username:String,
+    identity_alias:String, pinned_host_key:Option<String>,
 }
-
+#[tauri::command]
+fn vault_add_host(host: HostInput, sessions: State<'_, SessionStore>) -> Result<(), String> {
+    sessions.use_password(|password| {
+        passh7_core::transaction(&vault_path()?,password,|vault| {
+            vault.add_host(HostProfile {
+                alias:host.alias.clone(),hostname:host.hostname.clone(),port:host.port,
+                username:host.username.clone(),identity_alias:host.identity_alias.clone(),
+                pinned_host_key:host.pinned_host_key.clone(),extensions:Default::default()
+            })?;
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
 fn main() {
     tauri::Builder::default()
+        .manage(SessionStore::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists, vault_initialize, vault_list_hosts, vault_add_host
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
+            vault_list_hosts,vault_add_host
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");
