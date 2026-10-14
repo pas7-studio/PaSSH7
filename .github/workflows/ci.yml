@@ -51,6 +51,8 @@ jobs:
         run: |
           pkg-config --modversion webkit2gtk-4.1
           pkg-config --modversion ayatana-appindicator3-0.1
+      - name: Generate provisional app icon
+        run: python3 apps/passh7-desktop/scripts/create_icon.py
       - name: Build Linux desktop
         working-directory: apps/passh7-desktop
         run: npm run tauri build -- --no-bundle
