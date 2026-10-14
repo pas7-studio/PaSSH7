@@ -235,7 +235,7 @@ pub fn load(path: &Path, password: &str) -> Result<Vault, HubError> {
 pub fn transaction<F>(path: &Path, password: &str, operation: F) -> Result<(), HubError>
 where F: FnOnce(&mut Vault) -> Result<bool, HubError> {
     let lock_path = path.with_extension("passh7.lock");
-    let lock = OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+    let lock = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(&lock_path)?;
     lock.try_lock_exclusive().map_err(|error| {
         if error.kind() == std::io::ErrorKind::WouldBlock { HubError::Busy }
         else { HubError::Io(error) }
@@ -252,7 +252,7 @@ pub fn rotate_password(path: &Path, old_password: &str, new_password: &str) -> R
         return Err(HubError::InvalidInput("new password must differ from old password"));
     }
     let lock_path = path.with_extension("passh7.lock");
-    let lock = OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+    let lock = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(&lock_path)?;
     lock.try_lock_exclusive().map_err(|error| {
         if error.kind() == std::io::ErrorKind::WouldBlock { HubError::Busy }
         else { HubError::Io(error) }
@@ -446,8 +446,7 @@ mod tests {
 
     #[test]
     fn unknown_future_schema_is_rejected_before_write() {
-        let mut vault = Vault::default();
-        vault.schema_version = 999;
+        let vault = Vault { schema_version: 999, ..Vault::default() };
         assert!(matches!(encrypt(&vault, password()), Err(HubError::UnsupportedFormat)));
         let parsed: Vault = serde_json::from_value(serde_json::json!({
             "schema_version":999, "hosts":[], "identities":[]
@@ -470,7 +469,7 @@ mod tests {
         let path = dir.join("vault.json");
         create(&path, password()).unwrap();
         let lock_path = path.with_extension("passh7.lock");
-        let guard = OpenOptions::new().create(true).read(true).write(true).open(&lock_path).unwrap();
+        let guard = OpenOptions::new().create(true).truncate(false).read(true).write(true).open(&lock_path).unwrap();
         guard.try_lock_exclusive().unwrap();
         let result = transaction(&path, password(), |_| Ok(true));
         assert!(matches!(result, Err(HubError::Busy)));
@@ -505,7 +504,7 @@ mod tests {
         assert_eq!(backups.len(), 1);
         assert_eq!(fs::read(&backups[0]).unwrap(), original);
         let recovered = load(&backups[0], password()).unwrap();
-        assert!(recovered.extensions.get("note").is_none());
+        assert!(!recovered.extensions.contains_key("note"));
         assert_eq!(load(&path, password()).unwrap().extensions["note"], "new generation");
         let _ = fs::remove_dir_all(dir);
     }
