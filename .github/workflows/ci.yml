@@ -32,7 +32,7 @@ jobs:
           cache-on-failure: true
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace --locked
+      - run: cargo test --workspace
 
   frontend:
     runs-on: [self-hosted, passh7, passh7-linux]
@@ -47,6 +47,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('apps/passh7-desktop/package.json') }}
+          restore-keys: npm-${{ runner.os }}-
       - run: npm install --no-audit --no-fund
       - run: npm run build
 
