@@ -17,6 +17,7 @@ enum Command {
     Init,
     List,
     ChangePassword,
+    PinHost { #[arg(long)] alias: String, #[arg(long)] fingerprint: String },
     RemoveHost { #[arg(long)] alias: String },
     RemoveKey { #[arg(long)] alias: String },
     ImportKey { #[arg(long)] alias: String, #[arg(long)] file: PathBuf },
@@ -51,6 +52,10 @@ fn main() -> Result<()> {
             passh7_core::create(&args.vault, &password)?;
             println!("Vault created at {}", args.vault.display());
         }
+        Command::PinHost { alias, fingerprint } => with_vault(&args.vault, |v| {
+            v.pin_host_key(&alias, &fingerprint)?;
+            Ok(true)
+        })?,
         Command::ChangePassword => {
             let old_password = prompt(false)?;
             let vault = passh7_core::load(&args.vault, &old_password)
