@@ -352,6 +352,50 @@ mod tests {
         assert!(vault.pin_host_key("remote", "SHA256:not-a-valid-fingerprint").is_err());
         assert_eq!(vault.hosts[0].pinned_host_key.as_deref(), Some(pin.as_str()));
     }
+
+    #[test]
+    fn legacy_v1_payload_migrates_without_losing_data() {
+        let legacy = serde_json::json!({
+            "hosts": [{"alias":"prod","hostname":"example.test","port":22,
+                "username":"operator","identity_alias":"key","pinned_host_key":null}],
+            "identities": [{"alias":"key","private_key_pem":"-----BEGIN OPENSSH PRIVATE KEY-----\\nTEST\\n-----END OPENSSH PRIVATE KEY-----"}]
+        });
+        let vault: Vault = serde_json::from_value(legacy).unwrap();
+        assert_eq!(vault.schema_version, 1);
+        vault.validate().unwrap();
+        let restored = decrypt(&encrypt(&vault, password()).unwrap(), password()).unwrap();
+        assert_eq!(restored.hosts[0].hostname, "example.test");
+        assert_eq!(restored.identities.len(), 1);
+    }
+
+    #[test]
+    fn unknown_fields_survive_encrypt_decrypt_and_resave() {
+        let payload = serde_json::json!({
+            "schema_version":1,
+            "hosts":[{"alias":"dev","hostname":"example.test","port":22,
+                "username":"operator","identity_alias":"id","pinned_host_key":null,
+                "future_host_setting":{"nested":[1,2,3]}}],
+            "identities":[{"alias":"id","private_key_pem":"-----BEGIN OPENSSH PRIVATE KEY-----",
+                "future_identity_field":"do not drop"}],
+            "future_top_level":{"feature":"preserved"}
+        });
+        let vault: Vault = serde_json::from_value(payload.clone()).unwrap();
+        let data = encrypt(&vault, password()).unwrap();
+        let restored = decrypt(&data, password()).unwrap();
+        let roundtrip = serde_json::to_value(restored).unwrap();
+        assert_eq!(roundtrip, payload);
+    }
+
+    #[test]
+    fn unknown_future_schema_is_rejected_before_write() {
+        let mut vault = Vault::default();
+        vault.schema_version = 999;
+        assert!(matches!(encrypt(&vault, password()), Err(HubError::UnsupportedFormat)));
+        let parsed: Vault = serde_json::from_value(serde_json::json!({
+            "schema_version":999, "hosts":[], "identities":[]
+        })).unwrap();
+        assert!(matches!(parsed.validate(), Err(HubError::UnsupportedFormat)));
+    }
     #[test]
     fn randomness_and_validation() {
         assert_ne!(encrypt(&Vault::default(), password()).unwrap(), encrypt(&Vault::default(), password()).unwrap());
