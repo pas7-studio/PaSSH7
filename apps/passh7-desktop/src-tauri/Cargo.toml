@@ -10,4 +10,5 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
+zeroize = "1.8"
 passh7-core = { path = "../../../crates/passh7-core" }
