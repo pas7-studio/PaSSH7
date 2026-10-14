@@ -18,11 +18,16 @@ export async function initializeVault(masterPassword:string):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   await invoke("vault_initialize",{masterPassword});
 }
-export async function getHosts(masterPassword:string):Promise<HostSummary[]>{
-  if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
-  return invoke<HostSummary[]>("vault_list_hosts",{masterPassword});
+export async function unlockVault(masterPassword:string):Promise<void>{
+  await invoke("vault_unlock",{masterPassword});
 }
-export async function addHost(masterPassword:string,host:AddHostInput):Promise<void>{
+export async function lockVault():Promise<void>{await invoke("vault_lock")}
+export async function vaultStatus():Promise<boolean>{return invoke<boolean>("vault_status")}
+export async function getHosts():Promise<HostSummary[]>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
-  await invoke("vault_add_host",{masterPassword,host});
+  return invoke<HostSummary[]>("vault_list_hosts");
+}
+export async function addHost(host:AddHostInput):Promise<void>{
+  if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
+  await invoke("vault_add_host",{host});
 }
