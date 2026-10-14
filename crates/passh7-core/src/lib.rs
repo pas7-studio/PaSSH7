@@ -287,19 +287,33 @@ fn replace_vault_file(temp: &Path, destination: &Path) -> Result<(), HubError> {
         fs::rename(temp, destination)?;
         return Ok(());
     }
-    let mut random = [0u8; 8];
-    OsRng.fill_bytes(&mut random);
-    let backup = destination.with_extension(format!("bak-{:016x}", u64::from_be_bytes(random)));
     let result = unsafe {
         ReplaceFileW(wide(destination).as_ptr(), wide(temp).as_ptr(),
-                     wide(&backup).as_ptr(), 0, std::ptr::null(), std::ptr::null())
+                     std::ptr::null(), 0, std::ptr::null(), std::ptr::null())
     };
     if result == 0 { return Err(HubError::Io(std::io::Error::last_os_error())); }
     Ok(())
 }
 
-pub fn save(path: &Path, vault: &Vault, password: &str) -> Result<(), HubError> {
+fn save(path: &Path, vault: &Vault, password: &str) -> Result<(), HubError> {
     let data = encrypt(vault, password)?;
+    // Preserve and authenticate the previous generation before changing the active file.
+    // Each backup is uniquely named and never silently overwritten.
+    if path.exists() {
+        let old = fs::read(path)?;
+        if old.len() as u64 > MAX_SIZE { return Err(HubError::InvalidInput("vault file too large")); }
+        // This deliberately fails for old-master-password backups; rotation needs a
+        // dedicated independently validated recovery plan.
+        let _prior = decrypt(&old, password)?;
+        let mut backup_suffix = [0u8; 8];
+        OsRng.fill_bytes(&mut backup_suffix);
+        let backup = path.with_extension(format!("bak-{:016x}", u64::from_be_bytes(backup_suffix)));
+        let mut backup_file = OpenOptions::new().create_new(true).write(true).open(&backup)?;
+        backup_file.write_all(&old)?;
+        backup_file.sync_all()?;
+        // Refuse replacement unless a complete backup can be decrypted.
+        let _verified = load(&backup, password)?;
+    }
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let filename = path.file_name().ok_or(HubError::InvalidInput("missing vault filename"))?.to_string_lossy();
     let mut random = [0u8; 8];
