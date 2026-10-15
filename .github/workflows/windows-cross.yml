@@ -51,18 +51,24 @@ jobs:
           key: passh7-cross-gnu-${{ runner.os }}-${{ hashFiles('apps/passh7-desktop/src-tauri/Cargo.toml') }}
           restore-keys: |
             passh7-cross-gnu-${{ runner.os }}-
-      - name: Supply Rust MinGW compatibility runtime libraries
+      - name: Map LLVM-MinGW runtimes for Rust GNU linker
         run: |
-          rust_sysroot="$(rustc --print sysroot)"
-          rust_libs="$rust_sysroot/lib/rustlib/x86_64-pc-windows-gnu/lib/self-contained"
-          llvm_libs="$GITHUB_WORKSPACE/.toolchain/llvm-mingw/x86_64-w64-mingw32/lib"
-          test -d "$rust_libs"
-          mkdir -p "$llvm_libs"
-          for lib in libgcc.a libgcc_eh.a; do
-            test -f "$rust_libs/$lib" || { echo "Missing Rust runtime: $rust_libs/$lib"; exit 1; }
-            cp "$rust_libs/$lib" "$llvm_libs/$lib"
-          done
-          ls -lh "$llvm_libs/libgcc.a" "$llvm_libs/libgcc_eh.a"
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/.toolchain/llvm-mingw"
+          libdir="$root/x86_64-w64-mingw32/lib"
+          mkdir -p "$libdir"
+          # Rust's windows-gnu target asks for -lgcc/-lgcc_eh, but LLVM-MinGW
+          # intentionally supplies compiler-rt and libunwind instead.
+          builtins="$(find "$root/lib/clang" -type f -name 'libclang_rt.builtins-x86_64.a' -print -quit)"
+          unwind="$(find "$root" -type f -name 'libunwind.a' -print -quit)"
+          echo "Compiler RT: $builtins"
+          echo "Unwind: $unwind"
+          test -n "$builtins" && test -s "$builtins"
+          test -n "$unwind" && test -s "$unwind"
+          ln -sfn "$builtins" "$libdir/libgcc.a"
+          ln -sfn "$unwind" "$libdir/libgcc_eh.a"
+          test -r "$libdir/libgcc.a"
+          test -r "$libdir/libgcc_eh.a"
       - name: Prepare Windows icon and frontend
         run: |
           python3 apps/passh7-desktop/scripts/create_icon.py
