@@ -104,7 +104,7 @@ jobs:
           data = pathlib.Path(sys.argv[1]).read_bytes()
           assert data[:2] == b'MZ', 'Missing DOS header'
           pe = struct.unpack_from('<I', data, 0x3c)[0]
-          assert data[pe:pe+4] == b'PE\\0\\0'.replace(b'\\0', b'\\x00'), 'Missing PE signature'
+          assert data[pe:pe+4] == bytes((80, 69, 0, 0)), 'Missing PE signature'
           assert struct.unpack_from('<H', data, pe+4)[0] == 0x8664, 'Not Windows x86_64'
           print(f'Validated Windows x64 PE: {len(data):,} bytes')
           PY
