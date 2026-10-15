@@ -190,6 +190,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn vault_lock_invalidates_inflight_connection_generation() {
+        let manager = SshSessionManager::default();
+        let before = manager.generation.load(Ordering::SeqCst);
+        manager.stop_all();
+        assert_ne!(before, manager.generation.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn vault_lock_cancels_sessions_even_with_full_input_queues() {
         let manager = SshSessionManager::default();
         let (tx, _rx) = mpsc::channel(1);
