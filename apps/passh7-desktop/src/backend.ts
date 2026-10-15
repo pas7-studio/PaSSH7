@@ -64,3 +64,9 @@ export async function probeSshHost(alias:string):Promise<SshProbeResult>{
   if(!desktop())throw new Error("SSH probes require the PaSSH7 desktop app");
   return invoke<SshProbeResult>("ssh_probe_host",{alias});
 }
+
+export type SshAuthResult={username:string;hostAlias:string;authenticated:boolean};
+export async function authenticateSshHost(alias:string):Promise<SshAuthResult>{
+  if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
+  return invoke<SshAuthResult>("ssh_authenticate",{alias});
+}
