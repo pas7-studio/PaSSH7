@@ -51,6 +51,18 @@ jobs:
           key: passh7-cross-gnu-${{ runner.os }}-${{ hashFiles('apps/passh7-desktop/src-tauri/Cargo.toml') }}
           restore-keys: |
             passh7-cross-gnu-${{ runner.os }}-
+      - name: Supply Rust MinGW compatibility runtime libraries
+        run: |
+          rust_sysroot="$(rustc --print sysroot)"
+          rust_libs="$rust_sysroot/lib/rustlib/x86_64-pc-windows-gnu/lib/self-contained"
+          llvm_libs="$GITHUB_WORKSPACE/.toolchain/llvm-mingw/x86_64-w64-mingw32/lib"
+          test -d "$rust_libs"
+          mkdir -p "$llvm_libs"
+          for lib in libgcc.a libgcc_eh.a; do
+            test -f "$rust_libs/$lib" || { echo "Missing Rust runtime: $rust_libs/$lib"; exit 1; }
+            cp "$rust_libs/$lib" "$llvm_libs/$lib"
+          done
+          ls -lh "$llvm_libs/libgcc.a" "$llvm_libs/libgcc_eh.a"
       - name: Prepare Windows icon and frontend
         run: |
           python3 apps/passh7-desktop/scripts/create_icon.py
