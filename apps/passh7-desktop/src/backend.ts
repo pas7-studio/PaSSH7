@@ -73,8 +73,8 @@ export async function authenticateSshHost(alias:string):Promise<SshAuthResult>{
 
 export type OpenedSshSession = {id:string;alias:string};
 export type SshSessionEvent = {id:string;kind:"data"|"closed";data?:string;detail?:string};
-export async function openSshSession(alias:string,cols:number,rows:number):Promise<OpenedSshSession>{
-  return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows});
+export async function openSshSession(alias:string,cols:number,rows:number,accountPassword?:string):Promise<OpenedSshSession>{
+  return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows,accountPassword:accountPassword||null});
 }
 export async function writeSshSession(id:string,data:string):Promise<void>{
   return invoke("ssh_session_write",{id,data});
