@@ -58,6 +58,7 @@ fn safe_err(error: HubError) -> String {
         HubError::Busy => "Vault is busy; retry shortly".into(),
         HubError::Authentication => "Wrong password or damaged vault".into(),
         HubError::UnsupportedFormat => "Unsupported vault version".into(),
+        HubError::InvalidInput(reason) => reason.to_owned(),
         _ => "Vault operation failed".into(),
     }
 }
