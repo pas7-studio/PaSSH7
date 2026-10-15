@@ -1,0 +1,64 @@
+name: Windows cross-build on Linux self-hosted
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/passh7-desktop/**'
+      - 'crates/passh7-core/**'
+      - '.github/workflows/windows-cross.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: passh7-windows-cross-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-cross:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 90
+    env:
+      CARGO_INCREMENTAL: '0'
+      XWIN_CACHE_DIR: ${{ github.workspace }}/.xwin-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check cross-compilation prerequisites
+        run: |
+          command -v clang
+          command -v lld-link
+          command -v llvm-rc
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .xwin-cache
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/passh7-desktop/src-tauri/target/x86_64-pc-windows-msvc
+          key: passh7-cross-msvc-${{ runner.os }}-${{ hashFiles('apps/passh7-desktop/src-tauri/Cargo.lock', 'apps/passh7-desktop/src-tauri/Cargo.toml') }}
+          restore-keys: |
+            passh7-cross-msvc-${{ runner.os }}-
+      - name: Install cargo-xwin user-locally if needed
+        run: |
+          if ! command -v cargo-xwin >/dev/null 2>&1; then
+            cargo install cargo-xwin --locked
+          fi
+      - name: Prepare Windows icon and frontend
+        run: |
+          python3 apps/passh7-desktop/scripts/create_icon.py
+          npm install --no-audit --no-fund --prefix apps/passh7-desktop
+      - name: Cross-compile Windows exe
+        working-directory: apps/passh7-desktop
+        run: npm run tauri build -- --runner cargo-xwin --target x86_64-pc-windows-msvc --no-bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PaSSH7-Windows-x64-experimental
+          path: apps/passh7-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/passh7-desktop.exe
+          if-no-files-found: error
+          retention-days: 14
