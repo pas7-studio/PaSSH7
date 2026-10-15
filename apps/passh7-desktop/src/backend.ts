@@ -93,3 +93,7 @@ export type GeneratedPublicKey={alias:string;publicKey:string;fingerprint:string
 export async function generateEd25519(alias:string,comment:string):Promise<GeneratedPublicKey>{
   return invoke<GeneratedPublicKey>("vault_generate_ed25519",{alias,comment});
 }
+
+export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey>{
+  return invoke<GeneratedPublicKey>("vault_public_identity",{alias});
+}
