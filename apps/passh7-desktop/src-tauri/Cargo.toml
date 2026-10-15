@@ -1,6 +1,6 @@
 [package]
 name = "passh7-desktop"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -16,4 +16,6 @@ passh7-core = { path = "../../../crates/passh7-core" }
 # Pure Rust async SSH transport; server public keys are checked against vault pins.
 russh = { version = "0.64", default-features = true }
 
-tokio = { version = "1", features = ["time", "net"] }
+tokio = { version = "1", features = ["time", "net", "sync", "macros", "rt"] }
+
+base64 = "0.22"

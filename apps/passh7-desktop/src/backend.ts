@@ -70,3 +70,18 @@ export async function authenticateSshHost(alias:string):Promise<SshAuthResult>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   return invoke<SshAuthResult>("ssh_authenticate",{alias});
 }
+
+export type OpenedSshSession = {id:string;alias:string};
+export type SshSessionEvent = {id:string;kind:"data"|"closed";data?:string;detail?:string};
+export async function openSshSession(alias:string,cols:number,rows:number):Promise<OpenedSshSession>{
+  return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows});
+}
+export async function writeSshSession(id:string,data:string):Promise<void>{
+  return invoke("ssh_session_write",{id,data});
+}
+export async function resizeSshSession(id:string,cols:number,rows:number):Promise<void>{
+  return invoke("ssh_session_resize",{id,cols,rows});
+}
+export async function closeSshSession(id:string):Promise<void>{
+  return invoke("ssh_session_close",{id});
+}
