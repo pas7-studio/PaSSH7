@@ -15,3 +15,12 @@
 .buildAbout dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;font-size:12px}
 .buildAbout dt{opacity:.7}
 .buildAbout dd{margin:0;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+
+/* v0.2 interactive SSH terminal */
+.liveTerminal{width:100%;height:calc(100% - 86px);min-height:280px;padding:8px;background:#0e1420;overflow:hidden}
+.liveTerminal .xterm{height:100%}
+.sshTabBar{display:flex;flex-wrap:nowrap;gap:2px;min-height:35px;overflow-x:auto;background:#131c2b;padding:4px 8px}
+.sshTab{display:flex;align-items:center;gap:12px;border:0;border-radius:5px;padding:4px 10px;color:#b2c0d6;background:transparent;cursor:pointer}
+.sshTab.active{color:#fff;background:#304562}
+.sshTab span{font-size:16px;cursor:pointer}
+.sshTab span:hover{color:#ffb5b5}
