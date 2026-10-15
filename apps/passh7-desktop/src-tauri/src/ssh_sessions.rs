@@ -15,6 +15,7 @@ pub struct SshSessionManager {
 }
 
 enum SessionCommand {
+    Ready,
     Input(Vec<u8>),
     Resize(u32, u32),
     Close,
@@ -92,10 +93,24 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
     let cleanup_id = id.clone();
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn(async move {
+        let mut ready = false;
+        let mut backlog: Vec<Vec<u8>> = Vec::new();
+        let mut buffered = 0usize;
+        let mut overflowed = false;
         loop {
             tokio::select! {
                 command = rx.recv() => {
                     let result = match command {
+                        Some(SessionCommand::Ready) => {
+                            ready = true;
+                            for chunk in backlog.drain(..) {
+                                let _ = app.emit(EVENT, SessionEvent { id: cleanup_id.clone(), kind: "data", data: Some(STANDARD.encode(chunk)), detail: None });
+                            }
+                            if overflowed {
+                                let _ = app.emit(EVENT, SessionEvent { id: cleanup_id.clone(), kind: "data", data: Some(STANDARD.encode(b"\r\n[PaSSH7: early terminal output truncated]\r\n")), detail: None });
+                            }
+                            Ok(())
+                        },
                         Some(SessionCommand::Input(bytes)) => channel.data_bytes(bytes).await,
                         Some(SessionCommand::Resize(c, r)) => channel.window_change(c, r, 0, 0).await,
                         Some(SessionCommand::Close) | None => break,
@@ -106,10 +121,17 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
                     match incoming {
                         Some(russh::ChannelMsg::Data { data }) |
                         Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
-                            let _ = app.emit(EVENT, SessionEvent {
-                                id: cleanup_id.clone(), kind: "data",
-                                data: Some(STANDARD.encode(&data)), detail: None
-                            });
+                            if ready {
+                                let _ = app.emit(EVENT, SessionEvent {
+                                    id: cleanup_id.clone(), kind: "data",
+                                    data: Some(STANDARD.encode(&data)), detail: None
+                                });
+                            } else if buffered + data.len() <= 1024 * 1024 {
+                                buffered += data.len();
+                                backlog.push(data.to_vec());
+                            } else {
+                                overflowed = true;
+                            }
                         }
                         Some(russh::ChannelMsg::Close) | None => break,
                         _ => {}
@@ -143,4 +165,10 @@ pub async fn ssh_session_resize(id: String, cols: u32, rows: u32,
 #[tauri::command]
 pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>) -> Result<(), String> {
     manager.sender(&id)?.send(SessionCommand::Close).await.map_err(|_| "SSH session already closed".to_owned())
+}
+
+#[tauri::command]
+pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>) -> Result<(), String> {
+    manager.sender(&id)?.send(SessionCommand::Ready).await
+        .map_err(|_| "SSH session already closed".to_owned())
 }
