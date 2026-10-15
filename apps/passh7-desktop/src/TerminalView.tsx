@@ -9,6 +9,8 @@ import "@xterm/xterm/css/xterm.css";
 type Props={id:string;active:boolean;onClosed:(id:string)=>void};
 export default function TerminalView({id,active,onClosed}:Props){
   const container=useRef<HTMLDivElement>(null);
+  const fitRef=useRef<FitAddon|null>(null);
+  const termRef=useRef<Terminal|null>(null);
   useEffect(()=>{
     const node=container.current;
     if(!node)return;
@@ -17,7 +19,9 @@ export default function TerminalView({id,active,onClosed}:Props){
       fontFamily:"Cascadia Code, Consolas, monospace",
       fontSize:13,theme:{background:"#0e1420",foreground:"#e5ecf6"}
     });
-    const fit=new FitAddon();terminal.loadAddon(fit);terminal.open(node);fit.fit();
+    const fit=new FitAddon();terminal.loadAddon(fit);terminal.open(node);
+    fitRef.current=fit;termRef.current=terminal;
+    if(node.clientWidth>40&&node.clientHeight>40)fit.fit();
     let live=true;
     const disposeInput=terminal.onData(data=>{void writeSshSession(id,data).catch(()=>{})});
     const decoder=new TextDecoder();
@@ -31,20 +35,26 @@ export default function TerminalView({id,active,onClosed}:Props){
     });
     const resize=new ResizeObserver(()=>{
       if(!live)return;
+      if(node.clientWidth<=40||node.clientHeight<=40)return;
       fit.fit();
-      void resizeSshSession(id,terminal.cols,terminal.rows).catch(()=>{});
+      if(terminal.cols>=20&&terminal.rows>=5)void resizeSshSession(id,terminal.cols,terminal.rows).catch(()=>{});
     });
     resize.observe(node);
     void unlistenPromise.then(()=>{if(live)return readySshSession(id)}).catch(()=>{});
     return ()=>{
       live=false;resize.disconnect();disposeInput.dispose();
       void unlistenPromise.then(unlisten=>unlisten());
-      terminal.dispose();
+      terminal.dispose();fitRef.current=null;termRef.current=null;
     };
   },[id,onClosed]);
   useEffect(()=>{
     if(active&&container.current){
-      // The terminal's ResizeObserver will propagate PTY dimensions.
+      // Hidden tabs have zero dimensions. Refit on activation.
+      if(container.current.clientWidth>40&&container.current.clientHeight>40){
+        fitRef.current?.fit();
+        const term=termRef.current;
+        if(term&&term.cols>=20&&term.rows>=5)void resizeSshSession(id,term.cols,term.rows).catch(()=>{});
+      }
       const input=container.current.querySelector("textarea");
       if(input instanceof HTMLElement)input.focus();
     }
