@@ -137,6 +137,14 @@ fn vault_import_identity(alias: String, mut private_key_pem: String,
         private_key_pem.zeroize();
         return Err("SSH identity exceeds 128 KiB".into());
     }
+    if !private_key_pem.contains("-----BEGIN ") || !private_key_pem.contains("PRIVATE KEY-----") {
+        private_key_pem.zeroize();
+        return Err("Paste the PRIVATE key (file without .pub), including BEGIN/END PRIVATE KEY lines. A public ssh-ed25519 line cannot be imported here.".into());
+    }
+    if russh::keys::decode_secret_key(&private_key_pem, None).is_err() {
+        private_key_pem.zeroize();
+        return Err("SSH private key could not be parsed. Check the complete OpenSSH/PEM key; passphrase-protected keys are not supported by this import yet.".into());
+    }
     let result = sessions.use_password(|password| {
         passh7_core::transaction(&vault_path()?, password, |vault| {
             vault.add_identity(Identity {
