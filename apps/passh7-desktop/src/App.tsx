@@ -1,7 +1,7 @@
 import {useEffect,useMemo,useState} from "react";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
-import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, X} from "lucide-react";
+import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
 type Panel = "files" | "docker" | "agent" | "ports";
 type Host = {id:string; label:string; address:string; user:string; group:string; fingerprint:boolean};
@@ -18,6 +18,7 @@ export default function App(){
   const [selected,setSelected]=useState("dev");
   const [hosts,setHosts]=useState<Host[]>(desktopAvailable()?[]:DEMO_HOSTS);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
+  const [deleteTarget,setDeleteTarget]=useState<{kind:"host"|"identity";alias:string}|null>(null);
   const [vaultPassword,setVaultPassword]=useState("");
   const [vaultDialog,setVaultDialog]=useState(false);
   const [vaultPresent,setVaultPresent]=useState(false);
@@ -36,6 +37,21 @@ export default function App(){
   const [error,setError]=useState("");
   const [query,setQuery]=useState("");
   const [panel,setPanel]=useState<Panel>("agent");
+  const confirmRemove=async()=>{
+    if(!deleteTarget || !desktopAvailable() || !vaultUnlocked)return;
+    try{
+      if(deleteTarget.kind==="host"){
+        await removeHost(deleteTarget.alias);
+        const saved=await getHosts();
+        setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,group:"My hosts",fingerprint:h.hostKeyPinned})));
+        setSelected(current=>current===deleteTarget.alias?(saved[0]?.alias||""):current);
+      } else {
+        await removeIdentity(deleteTarget.alias);
+        setIdentities(await getIdentities());
+      }
+      setDeleteTarget(null);setError("");
+    }catch(e){setError(String(e))}
+  };
   const [sidebar,setSidebar]=useState(true);
   const [commandOpen,setCommandOpen]=useState(false);
   const [showSettings,setShowSettings]=useState(false);
@@ -49,9 +65,10 @@ export default function App(){
       {sidebar&&<aside className="sidebar"><div className="sectionHeading"><span>YOUR HOSTS</span><button className="iconbtn" title="Add host" aria-label="Add host" onClick={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}><Plus size={16}/></button></div><label className="search"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hosts" aria-label="Search hosts"/><span>⌘ K</span></label>
         {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} onClick={()=>setSelected(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}</small></span><span className={"hostDot "+(h.fingerprint?"trusted":"untrusted")} title={h.fingerprint?"Demo pin metadata":"Missing host key pin"}/></button>)}</section>)}
         {!filtered.length&&<p className="emptySearch">No matching hosts</p>}
+        {desktopAvailable()&&vaultUnlocked&&<section className="identityManage"><div className="groupLabel">SSH IDENTITIES</div>{identities.map(name=><div className="identityManageRow" key={name}><KeyRound size={14}/><span title={name}>{name}</span><button className="iconbtn" title={"Remove identity "+name} aria-label={"Remove identity "+name} onClick={()=>{setError("");setDeleteTarget({kind:"identity",alias:name})}}><Trash2 size={14}/></button></div>)}{!identities.length&&<p className="emptySearch">No keys imported</p>}</section>}
         <div className="sidebottom"><span><ShieldCheck size={15}/> Local-first workspace</span><small>Example hosts only. No real credentials.</small></div></aside>}
       <main className="main"><div className="sessionTabs"><button className="iconbtn" aria-label={sidebar?"Hide host sidebar":"Show host sidebar"} onClick={()=>setSidebar(x=>!x)}><Monitor size={16}/></button><div className="sessionActive"><TerminalSquare size={15}/>{active.label}<span className="tabdot"/></div><div className="tabSpacer"/><span className="unavailable">Not connected</span></div>
-        <div className="identity"><div><div className="eyebrow">WORKSPACE / {active.group.toUpperCase()}</div><h1>{active.label}</h1><div className="identityMeta"><span><Server size={14}/>{active.user}@{active.address}</span><span>Port 22</span><span className={active.fingerprint?"pin ok":"pin warn"}><ShieldCheck size={14}/>{active.fingerprint?"Pin metadata present":"Host key unpinned"}</span></div></div><button className="primary" disabled title="SSH transport is not implemented yet">Connect <span>↗</span></button></div>
+        <div className="identity"><div><div className="eyebrow">WORKSPACE / {active.group.toUpperCase()}</div><h1>{active.label}</h1><div className="identityMeta"><span><Server size={14}/>{active.user}@{active.address}</span><span>Port: {desktopAvailable()?"saved in vault":"22 (demo)"}</span><span className={active.fingerprint?"pin ok":"pin warn"}><ShieldCheck size={14}/>{active.fingerprint?"Pin metadata present":"Host key unpinned"}</span></div></div><div className="identityActions">{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" title="Remove selected host" aria-label="Remove selected host" onClick={()=>{setError("");setDeleteTarget({kind:"host",alias:active.id})}}><Trash2 size={16}/></button>}<button className="primary" disabled title="SSH transport is not implemented yet">Connect <span>↗</span></button></div></div>
         <div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>NO ACTIVE SESSION</small></div><div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>Your terminal starts here</h2><p>Choose a host and unlock your vault to open a secure SSH session. Connection support is still under development.</p><div className="statusline"><LockKeyhole size={14}/> Vault locked <span>·</span> SSH transport unavailable</div></div></div>
         <footer><span className="footerBrand"><span className="statusDot"/> Offline preview</span><span>{active.label} · No session</span><span>Local UI prototype</span></footer>
       </main>
@@ -62,6 +79,7 @@ export default function App(){
         <><div className="contextTitle"><Activity size={18}/><h3>Port forwarding</h3></div><p className="muted">Create local, remote or dynamic SSH tunnels when connected.</p><div className="placeholder"><Activity size={23}/> No active tunnels</div></>}
       </div></aside>
     </div>
+    {deleteTarget&&<div className="overlay" onMouseDown={()=>{setDeleteTarget(null);setError("")}}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm vault removal" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}<button aria-label="Close" onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button></div><p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted vault? This cannot be undone. Removing a host keeps its SSH key; removing a key used by a host is blocked.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<div className="wizardActions"><button onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button><button className="primary" onClick={()=>void confirmRemove()}>Confirm removal</button></div></div></div>}
     {vaultDialog&&<div className="overlay" onMouseDown={()=>setVaultDialog(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Unlock encrypted vault" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><LockKeyhole size={18}/> {vaultPresent?"Unlock vault":"Create vault"}<button aria-label="Close" onClick={()=>setVaultDialog(false)}><X size={17}/></button></div><p>Master password stays in this application session only. Lock the vault when finished.</p><form onSubmit={async e=>{e.preventDefault();await unlockVault()}} className="wizardFields"><label>Master password<input autoFocus type="password" autoComplete="off" value={vaultPassword} onChange={e=>setVaultPassword(e.target.value)} minLength={12} required/></label>{error&&<p role="alert" className="wizardError">{error}</p>}<button className="primary" type="submit">{vaultPresent?"Unlock":"Create encrypted vault"}</button></form></div></div>}
     {keyDialog&&<div className="overlay" onMouseDown={()=>setKeyDialog(false)}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Import SSH key" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><KeyRound size={18}/> Import SSH key<button aria-label="Close" onClick={()=>setKeyDialog(false)}><X size={17}/></button></div><div className="wizardFields"><label>Identity name<input value={keyAlias} onChange={e=>setKeyAlias(e.target.value)} placeholder="my-ed25519"/></label><label>Private key (PEM/OpenSSH)<textarea value={keyPem} onChange={e=>setKeyPem(e.target.value)} rows={5} placeholder="Paste a private key from a trusted local source"/></label><p className="note">This input is sent to local Rust for encrypted storage. Full key parsing and key-type verification are not yet implemented; do not import production keys.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<button className="primary" onClick={async()=>{try{await importIdentity(keyAlias,keyPem);setIdentities(await getIdentities());setDraft(v=>({...v,identity:keyAlias}));setKeyPem("");setKeyAlias("");setKeyDialog(false);setError("")}catch(e){setError(String(e))}}}>Import to vault</button></div></div></div>}
     {addOpen&&<div className="overlay" onMouseDown={()=>setAddOpen(false)}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Add a new SSH host" onMouseDown={e=>e.stopPropagation()}>

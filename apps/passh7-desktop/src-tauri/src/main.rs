@@ -147,12 +147,32 @@ fn vault_import_identity(alias: String, mut private_key_pem: String,
     result
 }
 
+#[tauri::command]
+fn vault_remove_host(alias: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
+    sessions.use_password(|password| {
+        passh7_core::transaction(&vault_path()?, password, |vault| {
+            vault.remove_host(&alias)?;
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
+
+#[tauri::command]
+fn vault_remove_identity(alias: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
+    sessions.use_password(|password| {
+        passh7_core::transaction(&vault_path()?, password, |vault| {
+            vault.remove_identity(&alias)?;
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(SessionStore::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_list_identities,vault_import_identity
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");

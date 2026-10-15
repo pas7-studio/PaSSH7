@@ -40,3 +40,12 @@ export async function importIdentity(alias:string,privateKeyPem:string):Promise<
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   await invoke("vault_import_identity",{alias,privateKeyPem});
 }
+
+export async function removeHost(alias:string):Promise<void>{
+  if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
+  await invoke("vault_remove_host",{alias});
+}
+export async function removeIdentity(alias:string):Promise<void>{
+  if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
+  await invoke("vault_remove_identity",{alias});
+}
