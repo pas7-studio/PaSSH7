@@ -18,52 +18,56 @@ jobs:
     timeout-minutes: 90
     env:
       CARGO_INCREMENTAL: '0'
-      XWIN_CACHE_DIR: ${{ github.workspace }}/.xwin-cache
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: x86_64-pc-windows-gnu
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install LLVM and Clang without sudo
-        uses: KyleMayes/install-llvm-action@v2
+      - name: Cache user-local llvm-mingw toolchain
+        uses: actions/cache@v4
         with:
-          version: '18'
-          directory: ${{ runner.temp }}/passh7-llvm
-      - name: Check cross-compilation prerequisites
+          path: .toolchain/llvm-mingw
+          key: llvm-mingw-ucrt-20261006-linux-x64
+      - name: Download llvm-mingw UCRT toolchain from GitHub
         run: |
-          command -v clang
-          command -v lld-link
-          command -v llvm-rc
-      - uses: actions/cache@v4
+          if [ ! -x .toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang ]; then
+            mkdir -p .toolchain/llvm-mingw
+            curl -fL --retry 3 --output /tmp/llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-ubuntu-22.04-x86_64.tar.xz
+            tar -xJf /tmp/llvm-mingw.tar.xz -C .toolchain/llvm-mingw --strip-components=1
+          fi
+          test -x .toolchain/llvm-mingw/bin/x86_64-w64-mingw32-clang
+      - name: Cache target Rust dependencies
+        uses: actions/cache@v4
         with:
           path: |
-            .xwin-cache
             ~/.cargo/registry
             ~/.cargo/git
-            apps/passh7-desktop/src-tauri/target/x86_64-pc-windows-msvc
-          key: passh7-cross-msvc-${{ runner.os }}-${{ hashFiles('apps/passh7-desktop/src-tauri/Cargo.lock', 'apps/passh7-desktop/src-tauri/Cargo.toml') }}
+            apps/passh7-desktop/src-tauri/target/x86_64-pc-windows-gnu
+          key: passh7-cross-gnu-${{ runner.os }}-${{ hashFiles('apps/passh7-desktop/src-tauri/Cargo.toml') }}
           restore-keys: |
-            passh7-cross-msvc-${{ runner.os }}-
-      - name: Install cargo-xwin user-locally if needed
-        run: |
-          if ! command -v cargo-xwin >/dev/null 2>&1; then
-            cargo install cargo-xwin --locked
-          fi
+            passh7-cross-gnu-${{ runner.os }}-
       - name: Prepare Windows icon and frontend
         run: |
           python3 apps/passh7-desktop/scripts/create_icon.py
           npm install --no-audit --no-fund --prefix apps/passh7-desktop
-      - name: Cross-compile Windows exe
+      - name: Cross-compile Windows GNU exe
         working-directory: apps/passh7-desktop
-        run: npm run tauri build -- --runner cargo-xwin --target x86_64-pc-windows-msvc --no-bundle
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-clang
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-clang
+          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-clang++
+          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-llvm-ar
+        run: |
+          export PATH="$GITHUB_WORKSPACE/.toolchain/llvm-mingw/bin:$PATH"
+          npm run tauri build -- --target x86_64-pc-windows-gnu --no-bundle
       - uses: actions/upload-artifact@v4
         with:
-          name: PaSSH7-Windows-x64-experimental
-          path: apps/passh7-desktop/src-tauri/target/x86_64-pc-windows-msvc/release/passh7-desktop.exe
+          name: PaSSH7-Windows-GNU-x64-experimental
+          path: apps/passh7-desktop/src-tauri/target/x86_64-pc-windows-gnu/release/passh7-desktop.exe
           if-no-files-found: error
           retention-days: 14
