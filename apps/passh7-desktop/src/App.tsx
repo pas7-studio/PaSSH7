@@ -66,7 +66,7 @@ export default function App(){
   useEffect(()=>{setProbeResult(null);setProbeError("");setAuthResult("")},[selected,vaultUnlocked]);
   const probeActive=async()=>{if(!desktopAvailable()||!vaultUnlocked||!selected)return;setProbeBusy(true);setProbeError("");setProbeResult(null);try{const data=await probeSshHost(selected);setProbeResult({alias:selected,data})}catch(e){setProbeError(String(e))}finally{setProbeBusy(false)}};
   const authenticateActive=async()=>{if(!desktopAvailable()||!vaultUnlocked||!selected)return;setAuthBusy(true);setAuthResult("");setProbeError("");try{const result=await authenticateSshHost(selected);setAuthResult(`Verified SSH login: ${result.username} @ ${result.hostAlias}. Connection closed; PTY is not implemented yet.`)}catch(e){setProbeError(String(e))}finally{setAuthBusy(false)}};
-  const active=hosts.find(h=>h.id===selected) || {id:"",label:"No host selected",address:"",user:"",group:"Workspace",fingerprint:false};
+  const active=hosts.find(h=>h.id===selected) || {id:"",label:"No host selected",address:"",user:"",port:22,group:"Workspace",fingerprint:false};
   const filtered=useMemo(()=>hosts.filter(h=>(h.label+" "+h.address+" "+h.group).toLowerCase().includes(query.toLowerCase())),[query]);
   const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: disconnected\nVault: locked\nPermissions: none\nSelected resources: none";
   return <div className={"shell "+theme} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if(e.key==="Escape"){setCommandOpen(false);setShowSettings(false)}}}>
