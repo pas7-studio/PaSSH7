@@ -24,3 +24,15 @@
 .sshTab.active{color:#fff;background:#304562}
 .sshTab span{font-size:16px;cursor:pointer}
 .sshTab span:hover{color:#ffb5b5}
+
+/* Keep SSH onboarding dialogs visible on short Windows desktop screens. */
+.overlay{align-items:center;overflow-y:auto;padding:20px;overscroll-behavior:contain}
+.modal{max-height:calc(100dvh - 40px);display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.modal .wizardFields{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.modal .steps{flex-shrink:0;margin:12px 0 8px}
+.modal .wizardActions{flex-shrink:0;padding-top:12px;margin-top:8px;border-top:1px solid var(--border)}
+.modal .modalTitle{flex-shrink:0;padding-bottom:8px}
+.modal .wizardFields textarea{min-height:95px;max-height:28vh;overflow:auto}
+.modal .wizardFields button{min-height:36px}
+@media(max-height:700px){.overlay{padding:8px}.modal{max-height:calc(100dvh - 16px);padding:12px}.modal .wizardFields{gap:9px}}
+@media(max-width:560px){.overlay{padding:8px}.modal{max-height:calc(100dvh - 16px);width:100%}.twoFields{grid-template-columns:minmax(0,1fr) 90px}}
