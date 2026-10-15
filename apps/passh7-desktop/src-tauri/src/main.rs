@@ -192,6 +192,22 @@ fn vault_generate_ed25519(alias: String, comment: String, sessions: State<'_, Se
     Ok(GeneratedPublicKey { alias, public_key, fingerprint })
 }
 
+
+#[tauri::command]
+fn vault_public_identity(alias: String, sessions: State<'_, SessionStore>) -> Result<GeneratedPublicKey, String> {
+    sessions.use_password(|password| {
+        let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
+        let identity = vault.identities.iter().find(|identity| identity.alias == alias)
+            .ok_or("SSH identity not found")?;
+        let key = russh::keys::decode_secret_key(&identity.private_key_pem, None)
+            .map_err(|_| "Cannot derive public key from this identity without its passphrase".to_owned())?;
+        let public_key = key.public_key().to_openssh()
+            .map_err(|_| "Cannot format public SSH key".to_owned())?;
+        let fingerprint = key.public_key().fingerprint(russh::keys::HashAlg::Sha256).to_string();
+        Ok(GeneratedPublicKey { alias, public_key, fingerprint })
+    })
+}
+
 #[tauri::command]
 fn vault_remove_host(alias: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
     sessions.use_password(|password| {
@@ -370,7 +386,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
             ssh_sessions::ssh_session_ready
