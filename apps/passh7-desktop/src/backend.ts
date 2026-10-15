@@ -82,6 +82,9 @@ export async function writeSshSession(id:string,data:string):Promise<void>{
 export async function resizeSshSession(id:string,cols:number,rows:number):Promise<void>{
   return invoke("ssh_session_resize",{id,cols,rows});
 }
+export async function readySshSession(id:string):Promise<void>{
+  return invoke("ssh_session_ready",{id});
+}
 export async function closeSshSession(id:string):Promise<void>{
   return invoke("ssh_session_close",{id});
 }

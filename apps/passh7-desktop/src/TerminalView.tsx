@@ -3,7 +3,7 @@ import {Terminal} from "@xterm/xterm";
 import {FitAddon} from "@xterm/addon-fit";
 import {listen} from "@tauri-apps/api/event";
 import type {SshSessionEvent} from "./backend";
-import {resizeSshSession,writeSshSession} from "./backend";
+import {readySshSession,resizeSshSession,writeSshSession} from "./backend";
 import "@xterm/xterm/css/xterm.css";
 
 type Props={id:string;active:boolean;onClosed:(id:string)=>void};
@@ -35,6 +35,7 @@ export default function TerminalView({id,active,onClosed}:Props){
       void resizeSshSession(id,terminal.cols,terminal.rows).catch(()=>{});
     });
     resize.observe(node);
+    void unlistenPromise.then(()=>{if(live)return readySshSession(id)}).catch(()=>{});
     return ()=>{
       live=false;resize.disconnect();disposeInput.dispose();
       void unlistenPromise.then(unlisten=>unlisten());
