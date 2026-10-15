@@ -85,9 +85,9 @@ fn vault_unlock(mut master_password: String, sessions: State<'_, SessionStore>) 
 fn vault_lock(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<(), String> { ssh.stop_all(); sessions.lock() }
 
 #[tauri::command]
-fn vault_status(sessions: State<'_, SessionStore>) -> Result<bool, String> {
+fn vault_status(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool, String> {
     let mut guard = sessions.0.lock().map_err(|_| "Vault session unavailable")?;
-    if guard.as_ref().is_some_and(|s| s.last_used.elapsed() >= IDLE_TIMEOUT) { *guard = None; }
+    if guard.as_ref().is_some_and(|s| s.last_used.elapsed() >= IDLE_TIMEOUT) { *guard = None; ssh.stop_all(); }
     Ok(guard.is_some())
 }
 #[tauri::command]
