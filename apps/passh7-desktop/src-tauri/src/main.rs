@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use std::{io::{BufRead, BufReader, Read}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
+use std::{io::{BufRead, BufReader}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 use tauri::State;
@@ -228,14 +228,14 @@ async fn ssh_probe_host(alias: String, sessions: State<'_, SessionStore>) -> Res
         // Read a bounded amount and reject non-SSH endpoints.
         for _ in 0..8 {
             let mut raw = Vec::new();
-            let count = reader.by_ref().take(256).read_until(b'\n', &mut raw)
+            let count = reader.read_until(b'\n', &mut raw)
                 .map_err(|_| "No SSH identification received within timeout".to_owned())?;
             if count == 0 { return Err("SSH server closed the connection".to_owned()); }
             if raw.len() > 255 || raw.last() != Some(&b'\n') {
                 return Err("Invalid or oversized SSH identification".to_owned());
             }
-            let line = String::from_utf8_lossy(&raw).trim().to_owned();
-            if line.starts_with("SSH-2.0-") || line.starts_with("SSH-1.99-") {
+            let line = std::str::from_utf8(&raw).map_err(|_| "Invalid UTF-8 SSH identification".to_owned())?.trim().to_owned();
+            if (line.starts_with("SSH-2.0-") || line.starts_with("SSH-1.99-")) && line.len() > 8 && !line.chars().any(char::is_control) {
                 return Ok(SshProbeResult { banner: line, elapsed_ms: started.elapsed().as_millis() });
             }
         }
