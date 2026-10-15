@@ -58,3 +58,9 @@ export async function getBuildInfo():Promise<BuildInfo>{
   if(!desktop())return {version:"0.1.0",publisher:"PAS7 Studio",repository:"pas7-studio/PaSSH7",commit:"web-preview",builtAt:"not a packaged build",runNumber:"preview",target:"Web preview"};
   return invoke<BuildInfo>("app_build_info");
 }
+
+export type SshProbeResult = {banner:string; elapsedMs:number};
+export async function probeSshHost(alias:string):Promise<SshProbeResult>{
+  if(!desktop())throw new Error("SSH probes require the PaSSH7 desktop app");
+  return invoke<SshProbeResult>("ssh_probe_host",{alias});
+}
