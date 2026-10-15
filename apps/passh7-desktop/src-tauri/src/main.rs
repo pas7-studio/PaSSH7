@@ -248,12 +248,83 @@ async fn ssh_probe_host(alias: String, sessions: State<'_, SessionStore>) -> Res
     }).await.map_err(|_| "SSH probe task failed".to_owned())?
 }
 
+
+struct PinnedSshClient {
+    expected_pin: String,
+}
+impl russh::client::Handler for PinnedSshClient {
+    type Error = russh::Error;
+    async fn check_server_key(
+        &mut self,
+        key: &russh::keys::PublicKeyOrCertificate,
+    ) -> Result<bool, Self::Error> {
+        // Certificates require a separate CA validation policy; reject for now.
+        if key.certificate().is_some() { return Ok(false); }
+        let actual = key.public_key().fingerprint(russh::keys::HashAlg::Sha256).to_string();
+        Ok(self.expected_pin == actual)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshAuthResult {
+    username: String,
+    host_alias: String,
+    authenticated: bool,
+}
+
+/// Perform a real SSH handshake and public-key login, never skipping host-key
+/// validation. The returned connection is disconnected immediately until
+/// managed session/PTY support is implemented.
+#[tauri::command]
+async fn ssh_authenticate(alias: String, sessions: State<'_, SessionStore>) -> Result<SshAuthResult, String> {
+    let (host, secret) = sessions.use_password(|password| {
+        let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
+        let host = vault.hosts.iter().find(|h| h.alias == alias)
+            .ok_or_else(|| "Saved host not found".to_owned())?.clone();
+        let key = vault.identities.iter().find(|i| i.alias == host.identity_alias)
+            .ok_or_else(|| "Host identity is missing".to_owned())?;
+        Ok((host, Zeroizing::new(key.private_key_pem.clone())))
+    })?;
+    let pin = host.pinned_host_key.clone().ok_or("Host key is not pinned; refusing connection")?;
+    passh7_core::hostkey::validate_fingerprint(&pin).map_err(safe_err)?;
+    // No disk-based temporary key, and no private key returned to JavaScript.
+    let private_key = russh::keys::decode_secret_key(secret.as_str(), None)
+        .map_err(|_| "Unsupported or encrypted SSH private key".to_owned())?;
+    let config = std::sync::Arc::new(russh::client::Config {
+        inactivity_timeout: Some(Duration::from_secs(12)),
+        ..Default::default()
+    });
+    let endpoint = (host.hostname.as_str(), host.port);
+    let handler = PinnedSshClient { expected_pin: pin };
+    let mut connection = tokio_timeout_connect(config, endpoint, handler).await?;
+    let hash_alg = connection.best_supported_rsa_hash().await
+        .map_err(|_| "SSH key algorithm negotiation failed".to_owned())?.flatten();
+    let result = connection.authenticate_publickey(
+        host.username.as_str(),
+        russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(private_key), hash_alg)
+    ).await.map_err(|_| "SSH public-key authentication failed".to_owned())?;
+    if !result.success() { return Err("SSH server rejected this identity".to_owned()); }
+    let _ = connection.disconnect(russh::Disconnect::ByApplication, "Authentication check complete", "en").await;
+    Ok(SshAuthResult { username: host.username, host_alias: host.alias, authenticated: true })
+}
+
+async fn tokio_timeout_connect<A: tokio::net::ToSocketAddrs>(
+    config: std::sync::Arc<russh::client::Config>,
+    endpoint: A,
+    handler: PinnedSshClient,
+) -> Result<russh::client::Handle<PinnedSshClient>, String> {
+    tokio::time::timeout(Duration::from_secs(12), russh::client::connect(config, endpoint, handler))
+        .await.map_err(|_| "SSH connection timed out".to_owned())?
+        .map_err(|_| "SSH handshake or pinned host key verification failed".to_owned())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(SessionStore::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity,app_build_info,ssh_probe_host
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");
