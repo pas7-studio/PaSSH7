@@ -9,3 +9,9 @@
 .identityManageRow{display:flex;align-items:center;gap:8px;padding:5px 8px;min-width:0}
 .identityManageRow span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:12px}
 .identityManageRow .iconbtn{flex-shrink:0}
+
+.buildAbout{margin-top:18px;border-top:1px solid rgba(150,160,180,.25);padding-top:12px}
+.buildAbout h3{margin:0 0 10px;font-size:14px}
+.buildAbout dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 12px;font-size:12px}
+.buildAbout dt{opacity:.7}
+.buildAbout dd{margin:0;overflow-wrap:anywhere;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
