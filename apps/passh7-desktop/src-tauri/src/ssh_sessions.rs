@@ -185,7 +185,7 @@ mod tests {
     fn vault_lock_cancels_sessions_even_with_full_input_queues() {
         let manager = SshSessionManager::default();
         let (tx, _rx) = mpsc::channel(1);
-        tx.try_send(SessionCommand::Input(vec![b'x'])).unwrap();
+        assert!(tx.try_send(SessionCommand::Input(vec![b'x'])).is_ok());
         let (cancel, receiver) = tokio::sync::watch::channel(false);
         manager.channels.lock().unwrap().insert("test".into(), (tx, cancel));
         manager.stop_all();
