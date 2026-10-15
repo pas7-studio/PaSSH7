@@ -3,3 +3,9 @@
 .wizard{width:min(520px,100%)}.steps{display:flex;gap:7px;flex-wrap:wrap;margin:24px 0 15px}.steps span{font-size:10px;color:var(--muted);padding:6px 8px;background:var(--panel2);border-radius:6px}.steps span.active{color:var(--accent);background:var(--accentSoft)}.wizardFields{display:grid;gap:15px;padding:12px 0}.wizardFields label{display:grid;gap:7px;font-weight:600;color:var(--fg);font-size:12px}.wizardFields input,.wizardFields select{width:100%;border:1px solid var(--border);background:var(--panel2);padding:11px;border-radius:8px;color:var(--fg);outline:none}.wizardFields input:focus,.wizardFields select:focus{border-color:var(--accent)}.twoFields{display:grid;grid-template-columns:1fr 100px;gap:12px}.wizardActions{display:flex;justify-content:flex-end;gap:10px;margin-top:15px}.wizardActions>button:first-child{background:transparent;color:var(--fg);border:1px solid var(--border);padding:9px 15px;border-radius:7px}.wizardError{color:#fa9b9b;font-size:12px}
 
 .wizardFields textarea{width:100%;background:var(--panel2);color:var(--fg);border:1px solid var(--border);padding:11px;border-radius:8px;resize:vertical;font-family:ui-monospace,monospace;font-size:11px}
+
+.identityActions{display:flex;align-items:center;gap:8px}
+.identityManage{padding:12px 10px;border-top:1px solid var(--border,rgba(150,160,180,.15))}
+.identityManageRow{display:flex;align-items:center;gap:8px;padding:5px 8px;min-width:0}
+.identityManageRow span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:12px}
+.identityManageRow .iconbtn{flex-shrink:0}
