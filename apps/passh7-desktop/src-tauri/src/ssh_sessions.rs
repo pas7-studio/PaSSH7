@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::{atomic::{AtomicU64, Ordering}, Mutex}, time::Duration};
+use std::{collections::HashMap, sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex}, time::Duration};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::mpsc;
@@ -9,9 +9,9 @@ use crate::{SessionStore, PinnedSshClient, safe_err, vault_path, tokio_timeout_c
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const EVENT: &str = "passh7:ssh-session";
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SshSessionManager {
-    channels: Mutex<HashMap<String, mpsc::Sender<SessionCommand>>>,
+    channels: Arc<Mutex<HashMap<String, mpsc::Sender<SessionCommand>>>>,
 }
 
 enum SessionCommand {
