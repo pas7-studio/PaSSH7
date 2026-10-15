@@ -52,7 +52,7 @@ impl SshSessionManager {
 }
 
 #[tauri::command]
-pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
+pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, mut account_password: Option<String>,
     vault: State<'_, SessionStore>, manager: State<'_, SshSessionManager>, app: AppHandle
 ) -> Result<OpenedSession, String> {
     if !(20..=500).contains(&cols) || !(5..=200).contains(&rows) {
@@ -82,7 +82,20 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
     let auth = connection.authenticate_publickey(&host.username,
         russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash))
         .await.map_err(|_| "SSH authentication failed".to_owned())?;
-    if !auth.success() { return Err("SSH identity rejected by host".into()); }
+    match auth {
+        russh::client::AuthResult::Success => {}
+        russh::client::AuthResult::Failure { partial_success: true, .. } => {
+            let mut password = zeroize::Zeroizing::new(
+                account_password.take().filter(|p| !p.is_empty())
+                    .ok_or("SSH server requires an account password after the key")?
+            );
+            let result = connection.authenticate_password(&host.username, password.to_string()).await
+                .map_err(|_| "SSH account password authentication failed".to_owned())?;
+            zeroize::Zeroize::zeroize(&mut *password);
+            if !result.success() { return Err("SSH account password rejected".into()); }
+        }
+        russh::client::AuthResult::Failure { .. } => return Err("SSH server rejected this public key".into())
+    }
 
     let mut channel = connection.channel_open_session().await
         .map_err(|_| "Cannot open SSH channel".to_owned())?;
