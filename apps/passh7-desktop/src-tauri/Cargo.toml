@@ -19,3 +19,5 @@ russh = { version = "0.64", default-features = true }
 tokio = { version = "1", features = ["time", "net", "sync", "macros", "rt"] }
 
 base64 = "0.22"
+
+rand = "0.10"

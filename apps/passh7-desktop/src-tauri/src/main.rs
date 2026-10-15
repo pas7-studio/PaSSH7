@@ -149,6 +149,49 @@ fn vault_import_identity(alias: String, mut private_key_pem: String,
     result
 }
 
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GeneratedPublicKey {
+    alias: String,
+    public_key: String,
+    fingerprint: String,
+}
+
+/// Generate on the local device. Never send the private key to the frontend.
+#[tauri::command]
+fn vault_generate_ed25519(alias: String, comment: String, sessions: State<'_, SessionStore>) -> Result<GeneratedPublicKey, String> {
+    if alias.trim().is_empty() || alias.len() > 80 ||
+       !alias.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
+        return Err("Identity name must contain 1-80 letters, digits, dot, underscore or dash".into());
+    }
+    if comment.len() > 120 || comment.chars().any(char::is_control) {
+        return Err("Invalid public key comment".into());
+    }
+    let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+        .map_err(|_| "Could not generate SSH key".to_owned())?;
+    let private = key.to_openssh(russh::keys::ssh_key::LineEnding::LF)
+        .map_err(|_| "Could not encode private SSH key".to_owned())?;
+    let public_key = key.public_key().to_openssh()
+        .map_err(|_| "Could not encode SSH public key".to_owned())?;
+    let fingerprint = key.public_key().fingerprint(russh::keys::HashAlg::Sha256).to_string();
+    // The original public key can be installed without depending on any comment.
+    let public_key = if comment.is_empty() { public_key } else {
+        format!("{} {}", public_key, comment)
+    };
+    sessions.use_password(|password| {
+        passh7_core::transaction(&vault_path()?, password, |vault| {
+            vault.add_identity(Identity {
+                alias: alias.clone(),
+                private_key_pem: private.to_string(),
+                extensions: Default::default(),
+            })?;
+            Ok(true)
+        }).map_err(safe_err)
+    })?;
+    Ok(GeneratedPublicKey { alias, public_key, fingerprint })
+}
+
 #[tauri::command]
 fn vault_remove_host(alias: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
     sessions.use_password(|password| {
@@ -327,7 +370,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
             ssh_sessions::ssh_session_ready

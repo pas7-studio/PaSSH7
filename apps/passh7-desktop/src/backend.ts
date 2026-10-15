@@ -88,3 +88,8 @@ export async function readySshSession(id:string):Promise<void>{
 export async function closeSshSession(id:string):Promise<void>{
   return invoke("ssh_session_close",{id});
 }
+
+export type GeneratedPublicKey={alias:string;publicKey:string;fingerprint:string};
+export async function generateEd25519(alias:string,comment:string):Promise<GeneratedPublicKey>{
+  return invoke<GeneratedPublicKey>("vault_generate_ed25519",{alias,comment});
+}
