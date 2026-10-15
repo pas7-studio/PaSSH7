@@ -92,6 +92,22 @@ jobs:
           export PASSH7_BUILD_TIMESTAMP="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           export PASSH7_BUILD_RUN="$GITHUB_RUN_NUMBER"
           npm run tauri build -- --target x86_64-pc-windows-gnu --no-bundle
+      - name: Verify Windows portable executable
+        run: |
+          set -euo pipefail
+          exe="apps/passh7-desktop/src-tauri/target/x86_64-pc-windows-gnu/release/passh7-desktop.exe"
+          test -s "$exe"
+          file "$exe"
+          file "$exe" | grep -E 'PE32\+ executable.*x86-64'
+          python3 - "$exe" <<'PY'
+          import pathlib, struct, sys
+          data = pathlib.Path(sys.argv[1]).read_bytes()
+          assert data[:2] == b'MZ', 'Missing DOS header'
+          pe = struct.unpack_from('<I', data, 0x3c)[0]
+          assert data[pe:pe+4] == bytes((80, 69, 0, 0)), 'Missing PE signature'
+          assert struct.unpack_from('<H', data, pe+4)[0] == 0x8664, 'Not Windows x86_64'
+          print(f'Validated Windows x64 PE: {len(data):,} bytes')
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: PaSSH7-Windows-GNU-x64-experimental

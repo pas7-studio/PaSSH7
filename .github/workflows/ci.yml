@@ -60,6 +60,15 @@ jobs:
           export PASSH7_BUILD_TIMESTAMP="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           export PASSH7_BUILD_RUN="$GITHUB_RUN_NUMBER"
           npm run tauri build -- --no-bundle
+      - name: Verify Linux executables
+        run: |
+          set -euo pipefail
+          for binary in target/release/passh7 apps/passh7-desktop/src-tauri/target/release/passh7-desktop; do
+            test -s "$binary"
+            test -x "$binary"
+            file "$binary"
+            file "$binary" | grep -q 'ELF 64-bit'
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: PaSSH7-Linux
