@@ -15,3 +15,5 @@ passh7-core = { path = "../../../crates/passh7-core" }
 
 # Pure Rust async SSH transport; server public keys are checked against vault pins.
 russh = { version = "0.64", default-features = true }
+
+tokio = { version = "1", features = ["time", "net"] }
