@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod ssh_sessions;
 use std::{io::{BufReader, Read}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 use tauri::State;
+use ssh_sessions::SshSessionManager;
 use passh7_core::{HostProfile, HubError, Identity};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -80,7 +82,7 @@ fn vault_unlock(mut master_password: String, sessions: State<'_, SessionStore>) 
     Ok(())
 }
 #[tauri::command]
-fn vault_lock(sessions: State<'_, SessionStore>) -> Result<(), String> { sessions.lock() }
+fn vault_lock(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<(), String> { ssh.stop_all(); sessions.lock() }
 
 #[tauri::command]
 fn vault_status(sessions: State<'_, SessionStore>) -> Result<bool, String> {
@@ -322,9 +324,12 @@ async fn tokio_timeout_connect<A: tokio::net::ToSocketAddrs>(
 fn main() {
     tauri::Builder::default()
         .manage(SessionStore::default())
+        .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,
+            ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_write,
+            ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");
