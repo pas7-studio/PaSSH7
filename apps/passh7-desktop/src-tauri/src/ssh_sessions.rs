@@ -12,6 +12,7 @@ const EVENT: &str = "passh7:ssh-session";
 #[derive(Default, Clone)]
 pub struct SshSessionManager {
     channels: Arc<Mutex<HashMap<String, (mpsc::Sender<SessionCommand>, tokio::sync::watch::Sender<bool>)>>>,
+    generation: Arc<AtomicU64>,
 }
 
 enum SessionCommand {
@@ -37,6 +38,7 @@ pub struct OpenedSession { pub id: String, pub alias: String }
 impl SshSessionManager {
     pub fn stop_all(&self) {
         if let Ok(mut guard) = self.channels.lock() {
+            self.generation.fetch_add(1, Ordering::SeqCst);
             for (_, (_, cancel)) in guard.drain() {
                 let _ = cancel.send(true);
             }
@@ -56,6 +58,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
     if !(20..=500).contains(&cols) || !(5..=200).contains(&rows) {
         return Err("Invalid PTY dimensions".into());
     }
+    let generation = manager.generation.load(Ordering::SeqCst);
     let (host, secret) = vault.use_password(|password| {
         let data = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         let host = data.hosts.iter().find(|h| h.alias == alias)
@@ -89,8 +92,13 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
     let id = format!("ssh-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
     let (tx, mut rx) = mpsc::channel::<SessionCommand>(128);
     let (cancel_tx, mut cancelled) = tokio::sync::watch::channel(false);
-    manager.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?
-        .insert(id.clone(), (tx, cancel_tx));
+    {
+        let mut sessions = manager.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?;
+        if manager.generation.load(Ordering::SeqCst) != generation {
+            return Err("Vault was locked during SSH connection".into());
+        }
+        sessions.insert(id.clone(), (tx, cancel_tx));
+    }
     let cleanup_id = id.clone();
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn(async move {
@@ -180,6 +188,14 @@ pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vault_lock_invalidates_inflight_connection_generation() {
+        let manager = SshSessionManager::default();
+        let before = manager.generation.load(Ordering::SeqCst);
+        manager.stop_all();
+        assert_ne!(before, manager.generation.load(Ordering::SeqCst));
+    }
 
     #[test]
     fn vault_lock_cancels_sessions_even_with_full_input_queues() {
