@@ -21,11 +21,12 @@ export default function App(){
   const [sshTabs,setSshTabs]=useState<{id:string;alias:string}[]>([]);
   const [activeSsh,setActiveSsh]=useState("");
   const [sshBusy,setSshBusy]=useState(false);
-  useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setActiveSsh("")}},[vaultUnlocked]);
   useEffect(()=>{if(sshTabs.length&&!sshTabs.some(t=>t.id===activeSsh)){setActiveSsh(sshTabs[0].id)}},[sshTabs,activeSsh]);
   const onSessionClosed=useCallback((id:string)=>{setSshTabs(t=>t.filter(x=>x.id!==id));setActiveSsh(current=>current===id?"":current)},[]);
   const [hosts,setHosts]=useState<Host[]>(desktopAvailable()?[]:DEMO_HOSTS);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
+  useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setActiveSsh("")}},[vaultUnlocked]);
+
   const [probeResult,setProbeResult]=useState<{alias:string;data:SshProbeResult}|null>(null);
   const [probeError,setProbeError]=useState("");
   const [probeBusy,setProbeBusy]=useState(false);
