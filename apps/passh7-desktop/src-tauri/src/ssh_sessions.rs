@@ -52,11 +52,16 @@ impl SshSessionManager {
 }
 
 #[tauri::command]
-pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
+pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>, auth_mode: Option<String>,
     vault: State<'_, SessionStore>, manager: State<'_, SshSessionManager>, app: AppHandle
 ) -> Result<OpenedSession, String> {
     if !(20..=500).contains(&cols) || !(5..=200).contains(&rows) {
         return Err("Invalid PTY dimensions".into());
+    }
+    let mut account_password = account_password.map(zeroize::Zeroizing::new);
+    let auth_mode = auth_mode.as_deref().unwrap_or("key");
+    if !matches!(auth_mode, "key" | "password" | "key-password") {
+        return Err("Unsupported SSH authentication mode".into());
     }
     let generation = manager.generation.load(Ordering::SeqCst);
     let (host, secret) = vault.use_password(|password| {
@@ -69,20 +74,47 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
     })?;
     let pin = host.pinned_host_key.clone().ok_or("Host key is not pinned")?;
     passh7_core::hostkey::validate_fingerprint(&pin).map_err(safe_err)?;
-    let key = russh::keys::decode_secret_key(&secret, None)
-        .map_err(|_| "SSH key cannot be decoded or requires a passphrase".to_owned())?;
+    let key = if auth_mode != "password" {
+        Some(russh::keys::decode_secret_key(&secret, None)
+            .map_err(|_| "SSH key cannot be decoded or requires a passphrase".to_owned())?)
+    } else { None };
     let config = std::sync::Arc::new(russh::client::Config {
         inactivity_timeout: Some(Duration::from_secs(600)), ..Default::default()
     });
     let mut connection = tokio_timeout_connect(config,
         (host.hostname.as_str(), host.port),
         PinnedSshClient { expected_pin: pin }).await?;
-    let hash = connection.best_supported_rsa_hash().await
-        .map_err(|_| "SSH key negotiation failed".to_owned())?.flatten();
-    let auth = connection.authenticate_publickey(&host.username,
-        russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash))
-        .await.map_err(|_| "SSH authentication failed".to_owned())?;
-    if !auth.success() { return Err("SSH identity rejected by host".into()); }
+
+    if auth_mode == "password" {
+        let mut password = account_password.take().filter(|p| !p.is_empty())
+            .ok_or("Password is required for password-only bootstrap")?;
+        let result = connection.authenticate_password(&host.username, password.to_string()).await
+            .map_err(|_| "SSH password authentication failed".to_owned())?;
+        zeroize::Zeroize::zeroize(&mut *password);
+        if !result.success() { return Err("Server rejected the account password".into()); }
+    } else {
+        let hash = connection.best_supported_rsa_hash().await
+            .map_err(|_| "SSH key negotiation failed".to_owned())?.flatten();
+        let key = key.ok_or("SSH private key unavailable")?;
+        let auth = connection.authenticate_publickey(&host.username,
+            russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash))
+            .await.map_err(|_| "SSH authentication failed".to_owned())?;
+        match auth {
+            russh::client::AuthResult::Success => {}
+            russh::client::AuthResult::Failure { partial_success: true, .. } if auth_mode == "key-password" => {
+                let mut password = account_password.take().filter(|p| !p.is_empty())
+                    .ok_or("Server requires an account password after accepting the key")?;
+                let result = connection.authenticate_password(&host.username, password.to_string()).await
+                    .map_err(|_| "SSH account password authentication failed".to_owned())?;
+                zeroize::Zeroize::zeroize(&mut *password);
+                if !result.success() { return Err("SSH account password rejected".into()); }
+            }
+            russh::client::AuthResult::Failure { partial_success: true, .. } =>
+                return Err("Server accepted key but requires another factor. Select Key + password".into()),
+            russh::client::AuthResult::Failure { .. } =>
+                return Err("SSH server rejected this public key".into()),
+        }
+    }
 
     let mut channel = connection.channel_open_session().await
         .map_err(|_| "Cannot open SSH channel".to_owned())?;
