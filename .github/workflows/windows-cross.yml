@@ -29,6 +29,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install LLVM and Clang without sudo
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: '18'
+          directory: ${{ runner.temp }}/passh7-llvm
       - name: Check cross-compilation prerequisites
         run: |
           command -v clang
