@@ -176,3 +176,20 @@ pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>
     manager.sender(&id)?.send(SessionCommand::Ready).await
         .map_err(|_| "SSH session already closed".to_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vault_lock_cancels_sessions_even_with_full_input_queues() {
+        let manager = SshSessionManager::default();
+        let (tx, _rx) = mpsc::channel(1);
+        tx.try_send(SessionCommand::Input(vec![b'x'])).unwrap();
+        let (cancel, receiver) = tokio::sync::watch::channel(false);
+        manager.channels.lock().unwrap().insert("test".into(), (tx, cancel));
+        manager.stop_all();
+        assert!(*receiver.borrow(), "vault lock must signal cancellation");
+        assert!(manager.sender("test").is_err(), "closed sessions must not accept input");
+    }
+}
