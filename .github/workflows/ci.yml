@@ -55,7 +55,11 @@ jobs:
         run: python3 apps/passh7-desktop/scripts/create_icon.py
       - name: Build Linux desktop
         working-directory: apps/passh7-desktop
-        run: npm run tauri build -- --no-bundle
+        run: |
+          export PASSH7_BUILD_COMMIT="$GITHUB_SHA"
+          export PASSH7_BUILD_TIMESTAMP="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          export PASSH7_BUILD_RUN="$GITHUB_RUN_NUMBER"
+          npm run tauri build -- --no-bundle
       - uses: actions/upload-artifact@v4
         with:
           name: PaSSH7-Linux

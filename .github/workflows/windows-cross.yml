@@ -88,6 +88,9 @@ jobs:
           AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-llvm-ar
         run: |
           export PATH="$GITHUB_WORKSPACE/.toolchain/llvm-mingw/bin:$PATH"
+          export PASSH7_BUILD_COMMIT="$GITHUB_SHA"
+          export PASSH7_BUILD_TIMESTAMP="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          export PASSH7_BUILD_RUN="$GITHUB_RUN_NUMBER"
           npm run tauri build -- --target x86_64-pc-windows-gnu --no-bundle
       - uses: actions/upload-artifact@v4
         with:

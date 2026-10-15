@@ -49,3 +49,12 @@ export async function removeIdentity(alias:string):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   await invoke("vault_remove_identity",{alias});
 }
+
+export type BuildInfo = {
+  version:string; publisher:string; repository:string; commit:string;
+  builtAt:string; runNumber:string; target:string;
+};
+export async function getBuildInfo():Promise<BuildInfo>{
+  if(!desktop())return {version:"0.1.0",publisher:"PAS7 Studio",repository:"pas7-studio/PaSSH7",commit:"web-preview",builtAt:"not a packaged build",runNumber:"preview",target:"Web preview"};
+  return invoke<BuildInfo>("app_build_info");
+}

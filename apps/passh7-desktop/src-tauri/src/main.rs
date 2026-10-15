@@ -167,12 +167,37 @@ fn vault_remove_identity(alias: String, sessions: State<'_, SessionStore>) -> Re
     })
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildInfo {
+    version: &'static str,
+    publisher: &'static str,
+    repository: &'static str,
+    commit: &'static str,
+    built_at: &'static str,
+    run_number: &'static str,
+    target: &'static str,
+}
+
+#[tauri::command]
+fn app_build_info() -> BuildInfo {
+    BuildInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        publisher: "PAS7 Studio",
+        repository: "pas7-studio/PaSSH7",
+        commit: option_env!("PASSH7_BUILD_COMMIT").unwrap_or("local"),
+        built_at: option_env!("PASSH7_BUILD_TIMESTAMP").unwrap_or("local build"),
+        run_number: option_env!("PASSH7_BUILD_RUN").unwrap_or("local"),
+        target: if cfg!(target_os = "windows") { "Windows x64" } else if cfg!(target_os = "linux") { "Linux" } else { "Other" },
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(SessionStore::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity,app_build_info
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");
