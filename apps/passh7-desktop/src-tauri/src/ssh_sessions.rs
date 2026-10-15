@@ -52,12 +52,13 @@ impl SshSessionManager {
 }
 
 #[tauri::command]
-pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, mut account_password: Option<String>,
+pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>,
     vault: State<'_, SessionStore>, manager: State<'_, SshSessionManager>, app: AppHandle
 ) -> Result<OpenedSession, String> {
     if !(20..=500).contains(&cols) || !(5..=200).contains(&rows) {
         return Err("Invalid PTY dimensions".into());
     }
+    let mut account_password = account_password.map(zeroize::Zeroizing::new);
     let generation = manager.generation.load(Ordering::SeqCst);
     let (host, secret) = vault.use_password(|password| {
         let data = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
@@ -85,10 +86,8 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, mut account_p
     match auth {
         russh::client::AuthResult::Success => {}
         russh::client::AuthResult::Failure { partial_success: true, .. } => {
-            let mut password = zeroize::Zeroizing::new(
-                account_password.take().filter(|p| !p.is_empty())
-                    .ok_or("SSH server requires an account password after the key")?
-            );
+            let mut password = account_password.take().filter(|p| !p.is_empty())
+                .ok_or("SSH server requires an account password after the key")?;
             let result = connection.authenticate_password(&host.username, password.to_string()).await
                 .map_err(|_| "SSH account password authentication failed".to_owned())?;
             zeroize::Zeroize::zeroize(&mut *password);
