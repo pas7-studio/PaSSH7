@@ -21,3 +21,9 @@ out = pathlib.Path(__file__).resolve().parents[1] / "src-tauri" / "icons" / "ico
 out.parent.mkdir(parents=True, exist_ok=True)
 out.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 print(f"Generated {out}")
+
+# Windows icon: ICO header + one 64px PNG image. No third-party deps.
+png = out.read_bytes()
+ico = out.with_name("icon.ico")
+ico.write_bytes(struct.pack("<HHH", 0, 1, 1) + struct.pack("<BBBBHHII", size, size, 0, 0, 1, 32, len(png), 22) + png)
+print(f"Generated {ico}")
