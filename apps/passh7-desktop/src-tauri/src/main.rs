@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use std::{path::PathBuf, sync::Mutex, time::{Duration, Instant}};
+use std::{io::{BufRead, BufReader, Read}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 use tauri::State;
@@ -192,12 +192,63 @@ fn app_build_info() -> BuildInfo {
     }
 }
 
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshProbeResult {
+    banner: String,
+    elapsed_ms: u128,
+}
+
+/// Only probes a host already stored in the unlocked vault. This does NOT
+/// authenticate the server, perform key exchange or establish an SSH session.
+#[tauri::command]
+async fn ssh_probe_host(alias: String, sessions: State<'_, SessionStore>) -> Result<SshProbeResult, String> {
+    let host = sessions.use_password(|password| {
+        let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
+        vault.hosts.into_iter().find(|h| h.alias == alias)
+            .ok_or_else(|| "Host not found in vault".to_owned())
+    })?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = Instant::now();
+        let timeout = Duration::from_secs(4);
+        let addresses = (host.hostname.as_str(), host.port).to_socket_addrs()
+            .map_err(|_| "Unable to resolve host".to_owned())?;
+        let mut stream = None;
+        for address in addresses.take(8) {
+            if let Ok(socket) = TcpStream::connect_timeout(&address, timeout) {
+                stream = Some(socket);
+                break;
+            }
+        }
+        let socket = stream.ok_or_else(|| "Unable to reach SSH port within timeout".to_owned())?;
+        socket.set_read_timeout(Some(timeout)).map_err(|_| "Unable to set probe timeout".to_owned())?;
+        let mut reader = BufReader::new(socket);
+        // SSH servers may send a limited number of pre-banner lines per RFC 4253.
+        // Read a bounded amount and reject non-SSH endpoints.
+        for _ in 0..8 {
+            let mut raw = Vec::new();
+            let count = reader.by_ref().take(256).read_until(b'\n', &mut raw)
+                .map_err(|_| "No SSH identification received within timeout".to_owned())?;
+            if count == 0 { return Err("SSH server closed the connection".to_owned()); }
+            if raw.len() > 255 || raw.last() != Some(&b'\n') {
+                return Err("Invalid or oversized SSH identification".to_owned());
+            }
+            let line = String::from_utf8_lossy(&raw).trim().to_owned();
+            if line.starts_with("SSH-2.0-") || line.starts_with("SSH-1.99-") {
+                return Ok(SshProbeResult { banner: line, elapsed_ms: started.elapsed().as_millis() });
+            }
+        }
+        Err("Endpoint did not provide an SSH protocol identification".to_owned())
+    }).await.map_err(|_| "SSH probe task failed".to_owned())?
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(SessionStore::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity,app_build_info
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_remove_identity,app_build_info,ssh_probe_host
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");
