@@ -11,7 +11,7 @@ const EVENT: &str = "passh7:ssh-session";
 
 #[derive(Default, Clone)]
 pub struct SshSessionManager {
-    channels: Arc<Mutex<HashMap<String, mpsc::Sender<SessionCommand>>>>,
+    channels: Arc<Mutex<HashMap<String, (mpsc::Sender<SessionCommand>, tokio::sync::watch::Sender<bool>)>>>,
 }
 
 enum SessionCommand {
@@ -37,15 +37,15 @@ pub struct OpenedSession { pub id: String, pub alias: String }
 impl SshSessionManager {
     pub fn stop_all(&self) {
         if let Ok(mut guard) = self.channels.lock() {
-            for (_, tx) in guard.drain() {
-                let _ = tx.try_send(SessionCommand::Close);
+            for (_, (_, cancel)) in guard.drain() {
+                let _ = cancel.send(true);
             }
         }
     }
 
     fn sender(&self, id: &str) -> Result<mpsc::Sender<SessionCommand>, String> {
         self.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?
-            .get(id).cloned().ok_or_else(|| "SSH session no longer exists".to_owned())
+            .get(id).map(|(tx, _)| tx.clone()).ok_or_else(|| "SSH session no longer exists".to_owned())
     }
 }
 
@@ -88,8 +88,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
     channel.request_shell(true).await.map_err(|_| "SSH server denied shell".to_owned())?;
     let id = format!("ssh-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
     let (tx, mut rx) = mpsc::channel::<SessionCommand>(128);
+    let (cancel_tx, mut cancelled) = tokio::sync::watch::channel(false);
     manager.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?
-        .insert(id.clone(), tx);
+        .insert(id.clone(), (tx, cancel_tx));
     let cleanup_id = id.clone();
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn(async move {
@@ -99,6 +100,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32,
         let mut overflowed = false;
         loop {
             tokio::select! {
+                changed = cancelled.changed() => {
+                    if changed.is_err() || *cancelled.borrow() { break; }
+                }
                 command = rx.recv() => {
                     let result = match command {
                         Some(SessionCommand::Ready) => {
