@@ -35,6 +35,7 @@ enum SessionCommand {
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
+    SftpMutate(String,String,String,Option<String>,bool,tokio::sync::oneshot::Sender<Result<(),String>>),
     SftpDownload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
     SftpUpload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
     SftpCancel(String, tokio::sync::oneshot::Sender<Result<(),String>>),
@@ -737,6 +738,51 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
+                        Some(SessionCommand::SftpMutate(operation,directory,name,new_name,is_directory,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|e|format!("Could not open SFTP file operation channel: {e}"))?;
+                                channel.request_subsystem(true,"sftp").await
+                                    .map_err(|e|format!("SFTP subsystem refused file operation: {e}"))?;
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP operation channel timed out".into()));
+                            match opened{
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let task=async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|e|format!("SFTP operation unavailable: {e}"))?;
+                                            let path=join_sftp_path(&directory,&name);
+                                            match operation.as_str(){
+                                                "rename"=>{
+                                                    let next=new_name.as_deref().ok_or("New filename is required")?;
+                                                    let destination=join_sftp_path(&directory,next);
+                                                    if sftp.try_exists(destination.clone()).await
+                                                        .map_err(|e|format!("Cannot verify destination is free: {e}"))?{
+                                                        return Err("The requested filename already exists; rename aborted".into());
+                                                    }
+                                                    sftp.rename(path,destination).await
+                                                        .map_err(|e|format!("Remote rename failed: {e}"))?
+                                                },
+                                                "mkdir"=>sftp.create_dir(path).await
+                                                    .map_err(|e|format!("Cannot create remote directory: {e}"))?,
+                                                "delete" if is_directory=>sftp.remove_dir(path).await
+                                                    .map_err(|e|format!("Cannot remove remote directory (it must be empty): {e}"))?,
+                                                "delete"=>sftp.remove_file(path).await
+                                                    .map_err(|e|format!("Cannot delete remote file: {e}"))?,
+                                                _=>return Err("Unsupported remote file operation".into())
+                                            }
+                                            Ok::<(),String>(())
+                                        };
+                                        let result=tokio::time::timeout(Duration::from_secs(25),task).await
+                                            .unwrap_or_else(|_|Err("Remote SFTP file operation timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
                         Some(SessionCommand::SftpList(path,response)) => {
                             // Only the SSH subsystem negotiation needs the connection handle.
                             // Directory scanning and sorting happen outside the PTY loop.
@@ -1231,6 +1277,31 @@ pub async fn ssh_session_vault_backup_batch(
 
 
 #[tauri::command]
+pub async fn ssh_session_sftp_mutate(
+    id:String,operation:String,directory:String,name:String,new_name:Option<String>,is_directory:bool,
+    manager:State<'_,SshSessionManager>
+)->Result<(),String>{
+    if !matches!(operation.as_str(),"mkdir"|"delete"|"rename"){
+        return Err("Unsupported file operation".into());
+    }
+    if !valid_sftp_path(&directory)||directory.chars().any(|c|c.is_control()) ||
+        !safe_sftp_filename(&name) ||
+        join_sftp_path(&directory,&name).len()>4096||
+        (operation=="rename"&&
+          (!new_name.as_deref().is_some_and(safe_sftp_filename)||
+            join_sftp_path(&directory,new_name.as_deref().unwrap_or("")).len()>4096)){
+        return Err("Invalid remote file or directory name".into());
+    }
+    if operation=="mkdir"&&is_directory{
+        return Err("Invalid directory create request".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::SftpMutate(operation,directory,name,new_name,is_directory,tx)).await
+        .map_err(|_|"SSH session closed before file operation")?;
+    rx.await.map_err(|_|"SFTP file operation interrupted")?
+}
+
+#[tauri::command]
 pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, SshSessionManager>) -> Result<Vec<SftpEntry>, String> {
     if path.len()>4096 || path.as_bytes().contains(&0) { return Err("Invalid SFTP directory path".into()); }
     let (tx,rx)=tokio::sync::oneshot::channel();
@@ -1433,6 +1504,17 @@ pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mutation_names_are_single_safe_path_components(){
+        for name in ["","..",".","foo/bar","foo\\\\bar","line\\nfeed","x\\0y"]{
+            let actual=name.replace("\\\\n","\\n").replace("\\\\0","\\0");
+            assert!(!safe_sftp_filename(&actual), "{name:?} must not be a filename");
+        }
+        assert!(safe_sftp_filename(".env"));
+        assert!(safe_sftp_filename("new folder"));
+        assert_eq!(join_sftp_path("/home/test/","sub"),"/home/test/sub");
+    }
 
     #[test]
     fn agent_probe_rejects_arbitrary_shell_commands(){

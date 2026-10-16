@@ -6,7 +6,7 @@ import SettingsWorkspace from "./SettingsWorkspace";
 import {loadPreferences,savePreferences,type AppPreferences} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -551,6 +551,20 @@ export default function App(){
     finally{setSftpPreviewBusy(false)}
   };
 
+  const [sftpMutationBusy,setSftpMutationBusy]=useState(false);
+  const mutateRemoteSftp=async(operation:"mkdir"|"delete"|"rename",name:string,isDirectory=false,newName?:string)=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session||sftpMutationBusy)return;
+    const dir=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
+    setSftpMutationBusy(true);setSftpError("");
+    try{
+      await mutateSftpFile(session.id,operation,dir,name,isDirectory,newName);
+      const entries=await listSftpDirectory(session.id,dir);
+      setSftpEntries({session:session.id,path:dir,items:entries});
+      setSftpTransferResult({session:session.id,text:(operation==="mkdir"?"Created folder ":operation==="rename"?"Renamed ":"Deleted ")+name+(newName?" → "+newName:"")});
+    }catch(error){setSftpError("Remote "+operation+" failed: "+String(error))}
+    finally{setSftpMutationBusy(false)}
+  };
   const browseSftp=async(path:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh && t.alias===selected);
     if(!session){setSftpError("Connect to the selected host first.");return}
@@ -939,6 +953,10 @@ export default function App(){
  transferBusy={sftpTransferBusy} transferProgress={sftpTransferProgress}
  transferResult={sftpTransferResult?.session===activeSsh?sftpTransferResult.text:null}
  cancelTransfer={()=>void cancelActiveTransfer()}
+ mutationBusy={sftpMutationBusy}
+ onMkdir={name=>void mutateRemoteSftp("mkdir",name)}
+ onDelete={(name,isDir)=>void mutateRemoteSftp("delete",name,isDir)}
+ onRename={(name,newName,isDir)=>void mutateRemoteSftp("rename",name,isDir,newName)}
  backupPanel={<>
 <section className="vaultBackupCard" aria-label="Encrypted Vault backups">
 <strong><LockKeyhole size={14}/> Encrypted Vault backups</strong>
