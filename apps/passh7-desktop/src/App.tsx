@@ -1,7 +1,7 @@
 import {useCallback} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,readSftpText} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,readSftpText,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -40,10 +40,42 @@ export default function App(){
     setActiveSsh(matching?.id??"");
   },[sshTabs,activeSsh,selected]);
   const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
-  const onSessionClosed=useCallback((id:string)=>{setSshTabs(t=>t.filter(x=>x.id!==id));setTunnels(t=>t.filter(x=>x.session!==id));setActiveSsh(current=>current===id?"":current)},[]);
+  const [sessionNotice,setSessionNotice]=useState("");
+  const onSessionClosed=useCallback((id:string,detail?:string)=>{
+    setSshTabs(t=>t.filter(x=>x.id!==id));
+    setTunnels(t=>t.filter(x=>x.session!==id));
+    setActiveSsh(current=>current===id?"":current);
+    if(detail)setSessionNotice(detail);
+  },[]);
   const [hosts,setHosts]=useState<Host[]>(desktopAvailable()?[]:DEMO_HOSTS);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
-  useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setTunnels([]);setActiveSsh("")}},[vaultUnlocked]);
+  useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setTunnels([]);setActiveSsh("");setSessionNotice("")}},[vaultUnlocked]);
+  // The native SSH session manager is authoritative. Reconcile after a remote
+  // disconnect, missed Tauri close event, sleep/resume, or vault expiration.
+  useEffect(()=>{
+    if(!vaultUnlocked||!desktopAvailable())return;
+    let mounted=true;
+    const observedAtStart=new Set(sshTabs.map(t=>t.id));
+    const verify=async()=>{
+      try{
+        const live=await listLiveSshSessions();
+        if(!mounted)return;
+        const liveIds=new Set(live.map(t=>t.id));
+        const lost=sshTabs.filter(t=>!liveIds.has(t.id));
+        setSshTabs(current=>{
+          if(current.every(t=>!observedAtStart.has(t.id)||liveIds.has(t.id)))return current;
+          return current.filter(t=>!observedAtStart.has(t.id)||liveIds.has(t.id));
+        });
+        if(lost.length){
+          setTunnels(current=>current.filter(t=>!lost.some(s=>s.id===t.session)));
+          setSessionNotice("SSH session closed unexpectedly. Reconnect to restore Files, Docker and tunnels.");
+        }
+      }catch{/* A transient IPC error must not mark an authenticated session offline. */}
+    };
+    void verify();
+    const timer=window.setInterval(()=>void verify(),12000);
+    return ()=>{mounted=false;window.clearInterval(timer)};
+  },[vaultUnlocked,sshTabs]);
 
   const [probeResult,setProbeResult]=useState<{alias:string;data:SshProbeResult}|null>(null);
   const [probeError,setProbeError]=useState("");
@@ -180,6 +212,8 @@ export default function App(){
     try{
       if(deleteTarget.kind==="host"){
         await removeHost(deleteTarget.alias);
+        setSshTabs(t=>t.filter(session=>session.alias!==deleteTarget.alias));
+        setTunnels(t=>t.filter(tunnel=>!sshTabs.some(session=>session.alias===deleteTarget.alias&&session.id===tunnel.session)));
         const saved=await getHosts();
         setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode})));
         setSelected(current=>current===deleteTarget.alias?(saved[0]?.alias||""):current);
@@ -230,7 +264,7 @@ export default function App(){
     setSshBusy(true);setProbeError("");setCredentialWarning("");
     try{
       const opened=await openSshSession(selected,100,30,accountPassword,loginMode,loginKeyPassphrase,useSavedCredentials);
-      setSshTabs(t=>[...t,opened]);setActiveSsh(opened.id);setLoginOpen(false);
+      setSshTabs(t=>[...t,opened]);setActiveSsh(opened.id);setLoginOpen(false);setSessionNotice("");
       if(rememberCredentials&&(!useSavedCredentials||!!accountPassword||!!loginKeyPassphrase)){
         try{
           await saveHostCredentials(selected,loginMode,accountPassword||"",loginKeyPassphrase,useSavedCredentials);
@@ -246,7 +280,7 @@ export default function App(){
     setSshBusy(true);setProbeError("");setCredentialWarning("");
     try{
       const opened=await openSshSession(alias,100,30,undefined,mode,undefined,true);
-      setSshTabs(v=>[...v,opened]);setActiveSsh(opened.id);setLoginOpen(false);
+      setSshTabs(v=>[...v,opened]);setActiveSsh(opened.id);setLoginOpen(false);setSessionNotice("");
     }catch(e){
       setLoginMode(mode);setUseSavedCredentials(true);setRememberCredentials(true);
       setProbeError(String(e));setLoginOpen(true);
@@ -336,7 +370,7 @@ export default function App(){
   }
   setLoginPassword("");setLoginKeyPassphrase("");setLoginMode((active.savedAuthMode as "key"|"password"|"key-password")||"key-password");setUseSavedCredentials(!!active.hasSavedCredentials);setRememberCredentials(!!active.hasSavedCredentials);setLoginOpen(true)
 }}>Connect <span>↗</span></button>{active.hasSavedCredentials&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} disabled={sshBusy||!vaultUnlocked} title="Connect using credentials saved in the encrypted vault" onClick={()=>void quickConnect(active.id,(active.savedAuthMode as "key"|"password"|"key-password")||"key-password")}>Quick connect</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void authenticateActive()} disabled={authBusy} title="Verify pinned SSH host key and authenticate using encrypted vault key">{authBusy?"Authenticating…":"Test SSH login"}</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void probeActive()} disabled={probeBusy} title="Check SSH banner; not an authenticated connection">{probeBusy?"Checking…":"Test SSH port"}</button>}</div></div>
-        {credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{sshTabs.length?`${sshTabs.length} SSH session(s)`:"NO ACTIVE SESSION"}</small>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar">{sshTabs.map(t=><button key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"} onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}>{t.alias} <span role="button" title="Disconnect" onClick={e=>{e.stopPropagation();void closeInteractive(t.id)}}>×</span></button>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
+        {sessionNotice&&<div role="status" className="wizardError" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}><span>{sessionNotice}</span><button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice("")}>Dismiss</button></div>}{credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{sshTabs.length?`${sshTabs.length} SSH session(s)`:"NO ACTIVE SESSION"}</small>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar">{sshTabs.map(t=><button key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"} onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}>{t.alias} <span role="button" title="Disconnect" onClick={e=>{e.stopPropagation();void closeInteractive(t.id)}}>×</span></button>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
         <footer><span className="footerBrand"><span className="statusDot" style={{background:connected?"#22c55e":undefined}}/> {connected?"SSH connected":desktopAvailable()?"No active SSH session":"Offline preview"}</span><span>{active.label} · {sshTabs.length} session(s)</span><span>{buildInfo?.publisher ?? "PAS7 Studio"} · {buildInfo?.target ?? "Loading build info"}</span></footer>
       </main>
       <aside className="context"><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
