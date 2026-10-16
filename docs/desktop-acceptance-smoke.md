@@ -68,6 +68,8 @@ during this checklist. Use a throwaway identity and Docker container.
 | SFTP-07 | Upload while typing in terminal; then lock Vault mid-transfer | Terminal stays responsive; transfer cancels on lock, partial cleanup best effort |
 | SFTP-08 | Transfer a 10–30 MiB binary file and click Cancel during upload/download | Live byte count advances, upload percentage is correct, only targeted transfer stops while terminal stays usable |
 | SFTP-09 | Select an existing local destination (or race a second writer creating it before completion) | Existing local bytes remain unchanged; download publish fails instead of clobbering |
+| DOCKER-R1 | Open Docker Images, Volumes and Networks tabs while connected to Linux Docker host | Tables show actual remote CLI data, load only the selected tab, support search and refresh, and remain scoped to this SSH session |
+| DOCKER-R2 | Disconnect host, disable Docker permission, select a resource tab | Meaningful error or disconnected state; no fabricated resources or secret data leakage |
 | DOCKER-01 | Refresh containers; inspect logs | Real `docker ps -a` inventory; logs capped at 200 lines and 512 KiB |
 | DOCKER-02 | Start/stop/restart throwaway container | Per-operation confirmation, expected state shown after refresh |
 | DOCKER-03 | Reject action confirmation; use SSH user lacking Docker permission | No action when cancelled; explicit permission error when rejected |
