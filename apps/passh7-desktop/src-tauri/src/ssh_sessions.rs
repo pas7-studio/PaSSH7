@@ -224,8 +224,7 @@ impl SshSessionManager {
         }
         let sender={
             let sessions=self.channels.lock().map_err(|_|"SSH session manager unavailable".to_owned())?;
-            sessions.iter().filter(|(_,session)|session.alias==gateway_alias)
-                .min_by_key(|(id,_)|*id)
+            sessions.iter().find(|(_,session)|session.alias==gateway_alias)
                 .map(|(_,session)|session.sender.clone())
                 .ok_or_else(||format!("Jump gateway {gateway_alias} is not connected. Connect it first."))?
         };
