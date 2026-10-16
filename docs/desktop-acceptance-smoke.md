@@ -39,6 +39,13 @@ during this checklist. Use a throwaway identity and Docker container.
 | SSH-10 | Keep two native SSH sessions active and reload the WebView without exiting the app | If native Vault remains unlocked, saved hosts and session tabs reappear; PTY input still works |
 | SSH-11 | Close remote shell unexpectedly, then press Reconnect | Notice identifies the closed host; saved credentials initiate explicit Quick Connect, otherwise manual login dialog opens |
 | SSH-12 | Fully exit desktop app and relaunch | Vault remains locked and secrets are never automatically unlocked; user must enter master password |
+| VAULT-01 | Back up unlocked Vault to a private directory on an authenticated SSH server | New versioned ciphertext-only `passh7-vault-*.enc.json` file appears; full SFTP readback matches bytes; prior backups remain untouched |
+| VAULT-02 | Create local encrypted export using native Save As; cancel or select an existing destination | Cancel is non-destructive; never overwrite or delete a preexisting local backup; verify byte-identical export |
+| VAULT-03 | Download encrypted remote snapshot via Files and inspect it | Host/key counts and aliases show; wrong master password or corrupt ciphertext refuses recovery without writing current Vault |
+| VAULT-04 | Restore a validated older backup with typed RESTORE and final confirmation | Old local Vault is preserved in a verified encrypted backup; active SSH connections close; restored hosts and identities become visible |
+| VAULT-05 | Modify active Vault after recovery preview but before Restore | Commit fails with a generation/conflict error and original data remains intact |
+| VAULT-06 | Disconnect SSH or deny write permissions during remote backup; target path already exists | Operation fails without false success or overwriting another remote file; incomplete cleanup is best effort |
+| VAULT-07 | Restore on a second device with a matching master password, without access to the original device | Snapshot opens, Vault import is explicit, SSH keys/pins restored; no automatic background merge or silent sync |
 | SFTP-01 | Browse multiple folders, parent directory, read UTF-8 file | Correct entries and preview; unrelated session not used |
 | SFTP-02 | Preview a binary file | Helpful UTF-8/binary error, no corruption |
 | SFTP-03 | Upload test binary file via native file picker | New file present on remote host; matching SHA-256 checksum |
