@@ -346,10 +346,10 @@ export default function App(){
       setVaultBackupError("No configured backup destination has an active SSH session.");return;
     }
     const missing=connected.filter(t=>!t.session).map(t=>t.alias);
-    const list=available.map(t=>t.alias+" → "+t.directory).join("\\n");
-    if(!window.confirm("Create NEW encrypted, separately verified Vault snapshots on these "+available.length+" connected server(s)?\\n\\n"+list+
-      (missing.length?"\\n\\nDisconnected configured targets (not uploaded): "+missing.join(", "):"")+
-      "\\n\\nNo existing backups will be overwritten. This is one-way replication, not automatic sync."))return;
+    const list=available.map(t=>t.alias+" → "+t.directory).join("\n");
+    if(!window.confirm("Create NEW encrypted, separately verified Vault snapshots on these "+available.length+" connected server(s)?\n\n"+list+
+      (missing.length?"\n\nDisconnected configured targets (not uploaded): "+missing.join(", "):"")+
+      "\n\nNo existing backups will be overwritten. This is one-way replication, not automatic sync."))return;
     setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
     const success:string[]=[];const failure:string[]=[];
     for(const target of available){
