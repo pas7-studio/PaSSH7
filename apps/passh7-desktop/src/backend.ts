@@ -189,6 +189,9 @@ export async function pinSshHostKey(alias:string,fingerprint:string):Promise<voi
 }
 
 export type SftpEntry={name:string;isDir:boolean;sizeBytes:number|null;modifiedAt:number|null};
+export async function mutateSftpFile(sessionId:string,operation:"mkdir"|"delete",directory:string,name:string,isDirectory=false):Promise<void>{
+  return invoke<void>("ssh_session_sftp_mutate",{id:sessionId,operation,directory,name,isDirectory});
+}
 export async function listSftpDirectory(sessionId:string,path:string):Promise<SftpEntry[]>{
   return invoke<SftpEntry[]>("ssh_session_sftp_list",{id:sessionId,path});
 }
