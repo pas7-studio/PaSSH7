@@ -542,12 +542,16 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             let sftp=russh_sftp::client::SftpSession::new(stream).await
                                                 .map_err(|e|format!("Cannot initialize remote Vault backup: {e}"))?;
                                             let path=join_sftp_path(&directory,&snapshot_remote_name());
-                                            let mut remote=sftp.open_with_flags(
+                                            let mut remote=sftp.open_with_flags_and_attributes(
                                                 path.clone(),
                                                 russh_sftp::protocol::OpenFlags::CREATE |
                                                 russh_sftp::protocol::OpenFlags::EXCLUDE |
-                                                russh_sftp::protocol::OpenFlags::WRITE
-                                            ).await.map_err(|e|format!("Cannot create immutable encrypted backup: {e}"))?;
+                                                russh_sftp::protocol::OpenFlags::WRITE,
+                                                russh_sftp::protocol::FileAttributes{
+                                                    permissions:Some(0o600),
+                                                    ..russh_sftp::protocol::FileAttributes::empty()
+                                                }
+                                            ).await.map_err(|e|format!("Cannot create private encrypted backup: {e}"))?;
                                             let saved=async {
                                                 remote.write_all(&encrypted).await
                                                     .map_err(|e|format!("Encrypted backup write failed: {e}"))?;
