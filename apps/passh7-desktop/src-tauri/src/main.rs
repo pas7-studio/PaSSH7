@@ -128,23 +128,47 @@ fn vault_add_host(host: HostInput, sessions: State<'_, SessionStore>) -> Result<
 }
 // Credentials remain inside the existing Argon2id/XChaCha20 encrypted vault.
 // Neither this command nor host listing ever returns secret strings to the frontend.
+// When an authenticated login reused saved fields, leave any unedited fields intact
+// instead of silently replacing the existing password/passphrase with an empty string.
+fn reuse_saved_auth_fields(auth_mode: &str, saved: Option<&serde_json::Value>, account_password: &mut String, key_passphrase: &mut String) {
+    let Some(previous) = saved.filter(|v| v.get("mode").and_then(|m| m.as_str()) == Some(auth_mode)) else {
+        return;
+    };
+    if account_password.is_empty() {
+        if let Some(value) = previous.get("account_password").and_then(|v| v.as_str()) {
+            *account_password = value.to_owned();
+        }
+    }
+    if key_passphrase.is_empty() {
+        if let Some(value) = previous.get("key_passphrase").and_then(|v| v.as_str()) {
+            *key_passphrase = value.to_owned();
+        }
+    }
+}
+
 #[tauri::command]
 fn vault_save_host_credentials(alias: String, auth_mode: String, mut account_password: String,
-    mut key_passphrase: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
+    mut key_passphrase: String, preserve_existing: bool, sessions: State<'_, SessionStore>) -> Result<(), String> {
     if !matches!(auth_mode.as_str(), "key" | "password" | "key-password") {
         account_password.zeroize();
         key_passphrase.zeroize();
         return Err("Invalid authentication mode".into());
     }
-    if auth_mode != "key" && account_password.is_empty() {
-        account_password.zeroize();
-        key_passphrase.zeroize();
-        return Err("Account password is required to save this authentication mode".into());
-    }
     let result = sessions.use_password(|password| {
         passh7_core::transaction(&vault_path()?,password,|vault| {
             let host = vault.hosts.iter_mut().find(|h| h.alias == alias)
                 .ok_or(HubError::InvalidInput("host not found"))?;
+            if preserve_existing {
+                reuse_saved_auth_fields(
+                    &auth_mode,
+                    host.extensions.get("passh7_saved_auth"),
+                    &mut account_password,
+                    &mut key_passphrase,
+                );
+            }
+            if auth_mode != "key" && account_password.is_empty() {
+                return Err(HubError::InvalidInput("Account password is required to remember this authentication mode"));
+            }
             host.extensions.insert("passh7_saved_auth".to_owned(),serde_json::json!({
                 "mode":auth_mode,"account_password":account_password,"key_passphrase":key_passphrase
             }));
@@ -154,6 +178,41 @@ fn vault_save_host_credentials(alias: String, auth_mode: String, mut account_pas
     account_password.zeroize();
     key_passphrase.zeroize();
     result
+}
+
+#[cfg(test)]
+mod saved_auth_tests {
+    use super::reuse_saved_auth_fields;
+
+    #[test]
+    fn reuses_unedited_secrets_for_same_auth_mode() {
+        let previous = serde_json::json!({"mode":"key-password","account_password":"windows-secret","key_passphrase":"private-key-secret"});
+        let mut password = String::new();
+        let mut passphrase = String::new();
+        reuse_saved_auth_fields("key-password", Some(&previous), &mut password, &mut passphrase);
+        assert_eq!(password, "windows-secret");
+        assert_eq!(passphrase, "private-key-secret");
+    }
+
+    #[test]
+    fn manual_password_update_preserves_existing_key_passphrase() {
+        let previous = serde_json::json!({"mode":"key-password","account_password":"old","key_passphrase":"key-secret"});
+        let mut password = "new".to_owned();
+        let mut passphrase = String::new();
+        reuse_saved_auth_fields("key-password", Some(&previous), &mut password, &mut passphrase);
+        assert_eq!(password, "new");
+        assert_eq!(passphrase, "key-secret");
+    }
+
+    #[test]
+    fn does_not_reuse_secrets_across_auth_modes() {
+        let previous = serde_json::json!({"mode":"password","account_password":"old","key_passphrase":"old-key"});
+        let mut password = String::new();
+        let mut passphrase = String::new();
+        reuse_saved_auth_fields("key-password", Some(&previous), &mut password, &mut passphrase);
+        assert!(password.is_empty());
+        assert!(passphrase.is_empty());
+    }
 }
 
 #[tauri::command]
