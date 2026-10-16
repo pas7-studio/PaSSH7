@@ -24,9 +24,19 @@ export async function unlockVault(masterPassword:string):Promise<void>{
 export async function lockVault():Promise<void>{await invoke("vault_lock")}
 export async function vaultStatus():Promise<boolean>{return invoke<boolean>("vault_status")}
 export type VaultBackupResult={remotePath:string;bytes:number;verified:boolean};
+export type VaultDifference={
+  backupOnlyHosts:string[];
+  localOnlyHosts:string[];
+  changedHosts:string[];
+  backupOnlyIdentities:string[];
+  localOnlyIdentities:string[];
+  changedIdentities:string[];
+  otherMetadataChanged:boolean;
+};
 export type VaultRestorePreview={
   token:string;hosts:number;identities:number;hostAliases:string[];
-  bytes:number;identicalToCurrent:boolean
+  bytes:number;identicalToCurrent:boolean;sameContents:boolean;
+  difference:VaultDifference;
 };
 export async function exportEncryptedVaultLocally():Promise<string|null>{
   return invoke<string|null>("vault_export_encrypted_backup");
