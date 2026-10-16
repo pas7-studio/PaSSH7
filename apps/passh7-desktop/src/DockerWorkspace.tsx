@@ -1,4 +1,5 @@
-import {useMemo,useState} from "react";
+import {useEffect,useMemo,useState} from "react";
+import {listDockerCatalog,type DockerCatalogKind} from "./backend";
 import {Clipboard,Container,Download,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
 
 export type ContainerRow={ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string};
@@ -12,6 +13,35 @@ type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|nu
 const isRunning=(item:ContainerRow)=>(item.State||"").toLowerCase()==="running";
 export default function DockerWorkspace(p:Props){
   const [search,setSearch]=useState("");
+  const [tab,setTab]=useState<"containers"|DockerCatalogKind>("containers");
+  const [catalog,setCatalog]=useState<{session:string;kind:DockerCatalogKind;rows:Record<string,string>[]} |null>(null);
+  const [catalogBusy,setCatalogBusy]=useState(false);
+  const [catalogError,setCatalogError]=useState("");
+  const [catalogSearch,setCatalogSearch]=useState("");
+  const loadCatalog=async(kind:DockerCatalogKind)=>{
+    if(!p.connected||!p.session)return;
+    setCatalogBusy(true);setCatalogError("");
+    try{
+      const rows=await listDockerCatalog(p.session,kind);
+      setCatalog({session:p.session,kind,rows});
+    }catch(error){setCatalogError("Could not list Docker "+kind+": "+String(error))}
+    finally{setCatalogBusy(false)}
+  };
+  useEffect(()=>{
+    if(tab==="containers"||!p.connected)return;
+    if(catalog?.session===p.session&&catalog.kind===tab)return;
+    void loadCatalog(tab);
+  },[tab,p.session,p.connected]);
+  const displayCatalog=catalog?.session===p.session&&catalog.kind===tab?catalog.rows:null;
+  const filteredCatalog=(displayCatalog||[]).filter(row=>
+    Object.values(row).join(" ").toLocaleLowerCase().includes(catalogSearch.toLocaleLowerCase())
+  );
+  const catalogColumns:Record<DockerCatalogKind,string[]>={
+    images:["Repository","Tag","ID","Size","CreatedSince"],
+    volumes:["Name","Driver","Scope"],
+    networks:["Name","ID","Driver","Scope"]
+  };
+
   const [selected,setSelected]=useState("");
   const [filter,setFilter]=useState<"all"|"running"|"stopped">("all");
   const [logsSearch,setLogsSearch]=useState("");
@@ -38,7 +68,8 @@ export default function DockerWorkspace(p:Props){
       <div><small>Stopped / other</small><strong>{p.items?stopped:"—"}</strong></div>
       <div><small>Images in use</small><strong>{p.items?images:"—"}</strong></div>
     </div>
-    <div className="dockerWorkspaceGrid"><section className="dockerContainersPane">
+    <div className="dockerResourceTabs" role="tablist" aria-label="Docker resources">{(["containers","images","volumes","networks"] as const).map(kind=><button type="button" role="tab" aria-selected={tab===kind} className={tab===kind?"active":""} key={kind} onClick={()=>setTab(kind)}>{kind[0].toUpperCase()+kind.slice(1)} {tab===kind&&tab!=="containers"&&displayCatalog?"("+displayCatalog.length+")":""}</button>)}</div>
+    {tab==="containers"?<><div className="dockerWorkspaceGrid"><section className="dockerContainersPane">
       <div className="dockerToolbar"><div className="filesSearch"><Search size={15}/><input placeholder="Search containers…" value={search} onChange={e=>setSearch(e.target.value)} aria-label="Search containers"/></div>
         <select aria-label="Container state filter" value={filter} onChange={e=>setFilter(e.target.value as typeof filter)}><option value="all">All containers</option><option value="running">Running</option><option value="stopped">Stopped / other</option></select>
         <button onClick={p.onRefresh} disabled={!p.connected||p.loading}><RefreshCw size={15}/>{p.loading?" Loading…":" Refresh"}</button>
@@ -84,6 +115,23 @@ export default function DockerWorkspace(p:Props){
         {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}
       </>:<div className="workspaceEmpty">Select a container and click View logs. Log output is fetched through a dedicated SSH exec channel.</div>}
     </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines</span><span>{p.follow?"Polling every 4 s":"Manual refresh"}</span></div>
-    </section>
+    </section></>:<section className="dockerCatalogWorkspace">
+      <div className="dockerToolbar">
+        <div className="filesSearch"><Search size={15}/><input value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder={"Search "+tab+"…"} aria-label={"Search Docker "+tab}/></div>
+        <button disabled={!p.connected||catalogBusy} onClick={()=>void loadCatalog(tab)}><RefreshCw size={15}/>{catalogBusy?" Loading…":" Refresh "+tab}</button>
+      </div>
+      {catalogError&&<div className="workspaceError" role="alert">{catalogError}</div>}
+      <div className="dockerTableScroll">
+      <table className="workspaceTable"><thead><tr>{catalogColumns[tab].map(name=><th key={name}>{name}</th>)}</tr></thead><tbody>
+        {filteredCatalog.map((row,index)=><tr key={(row.ID||row.Name||row.Repository||"")+index}>
+          {catalogColumns[tab].map(key=><td key={key} title={row[key]||""}>{row[key]||"—"}</td>)}
+        </tr>)}
+      </tbody></table>
+      {!p.connected?<div className="workspaceEmpty">Connect to your SSH host to browse Docker resources.</div>:
+        displayCatalog&&filteredCatalog.length===0?<div className="workspaceEmpty">No matching {tab}.</div>:
+        !displayCatalog&&!catalogBusy?<div className="workspaceEmpty">Select Refresh to load {tab}.</div>:null}
+      </div>
+      <p className="prefInfo">Read-only {tab} inventory using the connected SSH account. No resource is modified by browsing.</p>
+    </section>}
   </div>;
 }
