@@ -64,7 +64,7 @@ After unlocking the encrypted vault, select a saved host and approve its verifie
 
 - **Terminal:** authenticated pinned SSH connection with PTY and multiple tabs; active host and selected tab stay aligned
 - **Files:** SFTP directory browsing and read-only UTF-8 text previews (256 KiB limit); remote file writes, uploads and downloads are not implemented
-- **Docker:** read-only `docker ps -a` inventory using the SSH account's Docker permissions
+- **Docker:** read-only `docker ps -a` inventory and bounded (`200` lines, `512 KiB`, `20 s`) timestamped container logs using the SSH account's Docker permissions; no container mutations
 - **Ports:** localhost-bound local TCP forwarding to destinations reachable by the SSH server; tunnels stop on session shutdown or vault lock; SOCKS/remote forwarding are not implemented
 - **AI Agent:** launches an already-installed remote Codex / Claude Code / OpenCode command in an interactive SSH terminal, with the remote account's **full permissions**; this is **not** a sandbox, MCP authorization layer or provider setup wizard
 
