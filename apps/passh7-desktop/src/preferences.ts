@@ -18,27 +18,33 @@ export const defaultPreferences:AppPreferences={
   rememberWorkspace:true
 };
 const KEY="passh7.preferences.v1";
-// Settings here contain no secrets. SSH keys, credentials, host pins and vault
-// backups remain native Rust Vault data, never stored in browser storage.
+// This is non-secret UI configuration only. SSH keys, passwords and host pins
+// never enter browser storage; they live in the separately encrypted native Vault.
+export function validatePreferences(source:unknown):AppPreferences{
+  if(source===null||typeof source!=="object"||Array.isArray(source)){
+    return {...defaultPreferences};
+  }
+  const data=source as Partial<AppPreferences>;
+  return {
+    theme:data.theme==="light"?"light":"dark",
+    density:data.density==="compact"?"compact":"comfortable",
+    terminalFontSize:typeof data.terminalFontSize==="number"&&Number.isInteger(data.terminalFontSize)&&data.terminalFontSize>=10&&data.terminalFontSize<=22?data.terminalFontSize:13,
+    terminalScrollback:[1000,5000,10000,20000].includes(data.terminalScrollback??0)?data.terminalScrollback!:5000,
+    dockerTail:[50,100,200,500,1000].includes(data.dockerTail??0)?data.dockerTail!:200,
+    dockerAutoRefresh:data.dockerAutoRefresh===true,
+    dockerFollowLogs:data.dockerFollowLogs===true,
+    sftpShowHidden:data.sftpShowHidden!==false,
+    sftpSort:["folders","name","size","modified"].includes(data.sftpSort??"")?data.sftpSort!:"folders",
+    confirmTransfer:data.confirmTransfer!==false,
+    rememberWorkspace:data.rememberWorkspace!==false
+  };
+}
 export function loadPreferences():AppPreferences{
-  try{
-    const data=JSON.parse(localStorage.getItem(KEY)||"{}") as Partial<AppPreferences>;
-    return {
-      theme:data.theme==="light"?"light":"dark",
-      density:data.density==="compact"?"compact":"comfortable",
-      terminalFontSize:Number.isInteger(data.terminalFontSize)&&data.terminalFontSize!>=10&&data.terminalFontSize!<=22?data.terminalFontSize!:13,
-      terminalScrollback:[1000,5000,10000,20000].includes(data.terminalScrollback||0)?data.terminalScrollback!:5000,
-      dockerTail:[50,100,200,500,1000].includes(data.dockerTail||0)?data.dockerTail!:200,
-      dockerAutoRefresh:data.dockerAutoRefresh===true,
-      dockerFollowLogs:data.dockerFollowLogs===true,
-      sftpShowHidden:data.sftpShowHidden!==false,
-      sftpSort:["folders","name","size","modified"].includes(data.sftpSort||"")?data.sftpSort!: "folders",
-      confirmTransfer:data.confirmTransfer!==false,
-      rememberWorkspace:data.rememberWorkspace!==false
-    };
-  }catch{return {...defaultPreferences}}
+  try{return validatePreferences(JSON.parse(localStorage.getItem(KEY)||"{}"))}
+  catch{return {...defaultPreferences}}
 }
 export function savePreferences(value:AppPreferences):void{
-  localStorage.setItem(KEY,JSON.stringify(value));
-  window.dispatchEvent(new CustomEvent("passh7:preferences",{detail:value}));
+  const normalized=validatePreferences(value);
+  localStorage.setItem(KEY,JSON.stringify(normalized));
+  window.dispatchEvent(new CustomEvent("passh7:preferences",{detail:normalized}));
 }
