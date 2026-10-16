@@ -11,8 +11,14 @@ const EVENT: &str = "passh7:ssh-session";
 
 #[derive(Default, Clone)]
 pub struct SshSessionManager {
-    channels: Arc<Mutex<HashMap<String, (mpsc::Sender<SessionCommand>, tokio::sync::watch::Sender<bool>)>>>,
+    channels: Arc<Mutex<HashMap<String, ManagedSession>>>,
     generation: Arc<AtomicU64>,
+}
+
+struct ManagedSession {
+    alias: String,
+    sender: mpsc::Sender<SessionCommand>,
+    cancel: tokio::sync::watch::Sender<bool>,
 }
 
 enum SessionCommand {
@@ -41,7 +47,7 @@ pub struct SessionEvent {
     pub detail: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenedSession { pub id: String, pub alias: String }
 
@@ -49,15 +55,35 @@ impl SshSessionManager {
     pub fn stop_all(&self) {
         if let Ok(mut guard) = self.channels.lock() {
             self.generation.fetch_add(1, Ordering::SeqCst);
-            for (_, (_, cancel)) in guard.drain() {
-                let _ = cancel.send(true);
+            for (_, session) in guard.drain() {
+                let _ = session.cancel.send(true);
             }
         }
     }
 
     fn sender(&self, id: &str) -> Result<mpsc::Sender<SessionCommand>, String> {
         self.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?
-            .get(id).map(|(tx, _)| tx.clone()).ok_or_else(|| "SSH session no longer exists".to_owned())
+            .get(id).map(|session| session.sender.clone()).ok_or_else(|| "SSH session no longer exists".to_owned())
+    }
+
+    pub fn active_sessions(&self) -> Result<Vec<OpenedSession>, String> {
+        let guard = self.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?;
+        let mut sessions: Vec<OpenedSession> = guard.iter().map(|(id, session)| OpenedSession {
+            id: id.clone(), alias: session.alias.clone()
+        }).collect();
+        sessions.sort_by(|a,b| a.id.cmp(&b.id));
+        Ok(sessions)
+    }
+
+    pub fn stop_host(&self, alias: &str) {
+        if let Ok(mut guard) = self.channels.lock() {
+            guard.retain(|_, session| {
+                if session.alias == alias {
+                    let _ = session.cancel.send(true);
+                    false
+                } else { true }
+            });
+        }
     }
 }
 
@@ -152,7 +178,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         if manager.generation.load(Ordering::SeqCst) != generation {
             return Err("Vault was locked during SSH connection".into());
         }
-        sessions.insert(id.clone(), (tx, cancel_tx));
+        sessions.insert(id.clone(), ManagedSession { alias: alias.clone(), sender: tx, cancel: cancel_tx });
     }
     let cleanup_id = id.clone();
     let manager = manager.inner().clone();
@@ -161,11 +187,15 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut backlog: Vec<Vec<u8>> = Vec::new();
         let mut buffered = 0usize;
         let mut overflowed = false;
+        let mut closure_detail: Option<String> = None;
         let mut forwarders: HashMap<u16,tokio::sync::oneshot::Sender<()>> = HashMap::new();
         loop {
             tokio::select! {
                 changed = cancelled.changed() => {
-                    if changed.is_err() || *cancelled.borrow() { break; }
+                    if changed.is_err() || *cancelled.borrow() {
+                        closure_detail = Some("SSH session terminated: vault locked or host removed".into());
+                        break;
+                    }
                 }
                 command = rx.recv() => {
                     let result = match command {
@@ -317,7 +347,14 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
-                        Some(SessionCommand::Close) | None => break,
+                        Some(SessionCommand::Close) => {
+                            closure_detail = Some("Disconnected by user".into());
+                            break;
+                        },
+                        None => {
+                            closure_detail = Some("SSH session command queue was closed".into());
+                            break;
+                        },
                     };
                     if result.is_err() { break; }
                 }
@@ -337,7 +374,10 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 overflowed = true;
                             }
                         }
-                        Some(russh::ChannelMsg::Close) | None => break,
+                        Some(russh::ChannelMsg::Close) | None => {
+                            closure_detail = Some("Remote SSH shell closed the connection".into());
+                            break;
+                        },
                         _ => {}
                     }
                 }
@@ -347,9 +387,14 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let _ = channel.close().await;
         let _ = connection.disconnect(russh::Disconnect::ByApplication, "Session closed", "en").await;
         if let Ok(mut guard) = manager.channels.lock() { guard.remove(&cleanup_id); }
-        let _ = app.emit(EVENT, SessionEvent { id: cleanup_id, kind: "closed", data: None, detail: None });
+        let _ = app.emit(EVENT, SessionEvent { id: cleanup_id, kind: "closed", data: None, detail: closure_detail });
     });
     Ok(OpenedSession { id, alias })
+}
+
+#[tauri::command]
+pub fn ssh_session_list(manager: State<'_, SshSessionManager>) -> Result<Vec<OpenedSession>, String> {
+    manager.active_sessions()
 }
 
 #[tauri::command]
@@ -437,12 +482,38 @@ mod tests {
     }
 
     #[test]
+    fn host_removal_only_cancels_its_own_sessions() {
+        let manager = SshSessionManager::default();
+        let (tx_a, _) = mpsc::channel(1);
+        let (cancel_a, watch_a) = tokio::sync::watch::channel(false);
+        let (tx_b, _) = mpsc::channel(1);
+        let (cancel_b, watch_b) = tokio::sync::watch::channel(false);
+        let mut guard = manager.channels.lock().unwrap();
+        guard.insert("ssh-1".into(), ManagedSession {
+            alias: "host-a".into(), sender: tx_a, cancel: cancel_a
+        });
+        guard.insert("ssh-2".into(), ManagedSession {
+            alias: "host-b".into(), sender: tx_b, cancel: cancel_b
+        });
+        drop(guard);
+        assert_eq!(manager.active_sessions().unwrap().len(), 2);
+        manager.stop_host("host-a");
+        assert!(*watch_a.borrow());
+        assert!(!*watch_b.borrow());
+        let remaining = manager.active_sessions().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].alias, "host-b");
+    }
+
+    #[test]
     fn vault_lock_cancels_sessions_even_with_full_input_queues() {
         let manager = SshSessionManager::default();
         let (tx, _rx) = mpsc::channel(1);
         assert!(tx.try_send(SessionCommand::Input(vec![b'x'])).is_ok());
         let (cancel, receiver) = tokio::sync::watch::channel(false);
-        manager.channels.lock().unwrap().insert("test".into(), (tx, cancel));
+        manager.channels.lock().unwrap().insert("test".into(), ManagedSession {
+            alias: "primary".into(), sender: tx, cancel
+        });
         manager.stop_all();
         assert!(*receiver.borrow(), "vault lock must signal cancellation");
         assert!(manager.sender("test").is_err(), "closed sessions must not accept input");
