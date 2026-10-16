@@ -33,10 +33,11 @@ export default function App(){
   const [accessPublicKey,setAccessPublicKey]=useState("");
   const [loginMode,setLoginMode]=useState<"key"|"password"|"key-password">("key-password");
   useEffect(()=>{if(sshTabs.length&&!sshTabs.some(t=>t.id===activeSsh)){setActiveSsh(sshTabs[0].id)}},[sshTabs,activeSsh]);
+  const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
   const onSessionClosed=useCallback((id:string)=>{setSshTabs(t=>t.filter(x=>x.id!==id));setTunnels(t=>t.filter(x=>x.session!==id));setActiveSsh(current=>current===id?"":current)},[]);
   const [hosts,setHosts]=useState<Host[]>(desktopAvailable()?[]:DEMO_HOSTS);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
-  useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setActiveSsh("")}},[vaultUnlocked]);
+  useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setTunnels([]);setActiveSsh("")}},[vaultUnlocked]);
 
   const [probeResult,setProbeResult]=useState<{alias:string;data:SshProbeResult}|null>(null);
   const [probeError,setProbeError]=useState("");
@@ -103,7 +104,7 @@ export default function App(){
   const [tunnelRemotePort,setTunnelRemotePort]=useState(8080);
   const [tunnelBusy,setTunnelBusy]=useState(false);
   const [tunnelError,setTunnelError]=useState("");
-  const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
+
   const addTunnel=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setTunnelError("Select an active SSH session for this host.");return}
