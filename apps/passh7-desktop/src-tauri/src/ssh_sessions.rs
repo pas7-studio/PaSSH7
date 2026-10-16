@@ -75,10 +75,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let saved = if use_saved_credentials.unwrap_or(false) {
             host.extensions.get("passh7_saved_auth").filter(|v| v.get("mode").and_then(|m| m.as_str()) == Some(auth_mode))
         } else { None };
-        let saved_account = saved.and_then(|v| v.get("account_password")).and_then(|v| v.as_str()).unwrap_or_default();
-        let saved_key = saved.and_then(|v| v.get("key_passphrase")).and_then(|v| v.as_str()).unwrap_or_default();
-        Ok((host, zeroize::Zeroizing::new(identity.private_key_pem.clone()),
-            zeroize::Zeroizing::new(saved_account.to_owned()), zeroize::Zeroizing::new(saved_key.to_owned())))
+        let saved_account = zeroize::Zeroizing::new(saved.and_then(|v| v.get("account_password")).and_then(|v| v.as_str()).unwrap_or_default().to_owned());
+        let saved_key = zeroize::Zeroizing::new(saved.and_then(|v| v.get("key_passphrase")).and_then(|v| v.as_str()).unwrap_or_default().to_owned());
+        Ok((host, zeroize::Zeroizing::new(identity.private_key_pem.clone()), saved_account, saved_key))
     })?;
     if account_password.as_ref().map(|v| v.is_empty()).unwrap_or(true) && !saved_account.is_empty() {
         account_password = Some(saved_account);
