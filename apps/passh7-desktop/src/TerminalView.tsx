@@ -1,8 +1,7 @@
 import {useEffect,useRef} from "react";
 import {Terminal} from "@xterm/xterm";
 import {FitAddon} from "@xterm/addon-fit";
-import {listen} from "@tauri-apps/api/event";
-import type {SshSessionEvent} from "./backend";
+import {subscribeSshSession} from "./sshEventBus";
 import {closeSshSession,readySshSession,resizeSshSession,writeSshSession} from "./backend";
 import "@xterm/xterm/css/xterm.css";
 
@@ -32,14 +31,14 @@ export default function TerminalView({id,active,onClosed}:Props){
       });
     });
     const decoder=new TextDecoder();
-    const unlistenPromise=listen<SshSessionEvent>("passh7:ssh-session",event=>{
-      if(!live||event.payload.id!==id)return;
-      if(event.payload.kind==="closed"){
-        onClosed(id,event.payload.detail);
+    const unsubscribePromise=subscribeSshSession(id,event=>{
+      if(!live||event.id!==id)return;
+      if(event.kind==="closed"){
+        onClosed(id,event.detail);
         return;
       }
-      if(event.payload.data){
-        const bytes=Uint8Array.from(atob(event.payload.data),x=>x.charCodeAt(0));
+      if(event.data){
+        const bytes=Uint8Array.from(atob(event.data),x=>x.charCodeAt(0));
         terminal.write(decoder.decode(bytes,{stream:true}));
       }
     });
@@ -52,7 +51,7 @@ export default function TerminalView({id,active,onClosed}:Props){
     resize.observe(node);
     // Backend buffers early PTY data until its listener has been installed.
     // A missing Ready signal previously left the shell output buffered forever.
-    void unlistenPromise.then(async ()=>{
+    void unsubscribePromise.then(async ()=>{
       if(!live)return;
       try { await readySshSession(id); }
       catch(error) {
@@ -71,7 +70,7 @@ export default function TerminalView({id,active,onClosed}:Props){
     });
     return ()=>{
       live=false;resize.disconnect();disposeInput.dispose();
-      void unlistenPromise.then(unlisten=>unlisten());
+      void unsubscribePromise.then(unsubscribe=>unsubscribe());
       terminal.dispose();fitRef.current=null;termRef.current=null;
     };
   },[id,onClosed]);
