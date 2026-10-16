@@ -297,7 +297,7 @@ pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionMa
 
 #[tauri::command]
 pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, SshSessionManager>) -> Result<Vec<SftpEntry>, String> {
-    if path.len()>4096 || path.contains('\\0') { return Err("Invalid SFTP directory path".into()); }
+    if path.len()>4096 || path.as_bytes().contains(&0) { return Err("Invalid SFTP directory path".into()); }
     let (tx,rx)=tokio::sync::oneshot::channel();
     manager.sender(&id)?.send(SessionCommand::SftpList(path,tx)).await
         .map_err(|_| "SSH connection has closed".to_owned())?;
