@@ -30,7 +30,7 @@ enum SessionCommand {
     Resize(u32, u32),
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
-    DockerLogs(String,tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerLogs(String,u32,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
@@ -473,11 +473,11 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
-                        Some(SessionCommand::DockerLogs(container_id,response)) => {
+                        Some(SessionCommand::DockerLogs(container_id,tail,response)) => {
                             let setup=tokio::time::timeout(Duration::from_secs(10),async {
                                 let mut channel=connection.channel_open_session().await
                                     .map_err(|_|"Could not open Docker log channel".to_owned())?;
-                                let command=format!("docker logs --tail 200 --timestamps {container_id}");
+                                let command=format!("docker logs --tail {tail} --timestamps {container_id}");
                                 channel.exec(true,command.as_bytes()).await
                                     .map_err(|_|"SSH server refused Docker logs command".to_owned())?;
                                 Ok::<_,String>(channel)
@@ -486,14 +486,14 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 Err(error)=>{let _=response.send(Err(error));},
                                 Ok(mut channel)=>{
                                     tauri::async_runtime::spawn(async move {
-                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                        let result=tokio::time::timeout(Duration::from_secs(35),async {
                                             let mut output=Vec::new();
                                             let mut exit_status=None;
                                             while let Some(message)=channel.wait().await {
                                                 match message {
                                                     russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
-                                                        if output.len().saturating_add(data.len())>512*1024{
-                                                            return Err("Docker logs exceed 512 KiB; inspect them in the SSH terminal".to_owned());
+                                                        if output.len().saturating_add(data.len())>3*1024*1024{
+                                                            return Err("Recent Docker logs exceed 3 MiB. Reduce the number of requested lines.".to_owned());
                                                         }
                                                         output.extend_from_slice(&data);
                                                     },
@@ -503,11 +503,11 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 }
                                             }
                                             let message=String::from_utf8_lossy(&output).into_owned();
-                                            if exit_status.unwrap_or(1)!=0{
-                                                return Err(format!("Docker logs failed: {}",message.chars().take(500).collect::<String>()));
+                                            if exit_status.is_some_and(|code|code!=0){
+                                                return Err(format!("Docker logs failed: {}",message.chars().take(700).collect::<String>()));
                                             }
                                             Ok::<String,String>(message)
-                                        }).await.unwrap_or_else(|_|Err("Docker logs timed out after 20 seconds".into()));
+                                        }).await.unwrap_or_else(|_|Err("Docker logs timed out; try fewer lines or check remote Docker service".into()));
                                         let _=response.send(result);
                                     });
                                 }
@@ -1099,12 +1099,14 @@ fn valid_docker_container_id(id: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn ssh_session_docker_logs(id: String, container_id: String, manager: State<'_, SshSessionManager>) -> Result<String, String> {
+pub async fn ssh_session_docker_logs(id: String, container_id: String, tail: Option<u32>, manager: State<'_, SshSessionManager>) -> Result<String, String> {
     if !valid_docker_container_id(&container_id) {
         return Err("Invalid Docker container ID: use the hex ID from the inventory".into());
     }
+    let count=tail.unwrap_or(200);
+    if !(10..=1000).contains(&count){return Err("Docker log tail must be 10–1000 lines".into());}
     let (tx,rx)=tokio::sync::oneshot::channel();
-    manager.sender(&id)?.send(SessionCommand::DockerLogs(container_id,tx)).await
+    manager.sender(&id)?.send(SessionCommand::DockerLogs(container_id,count,tx)).await
         .map_err(|_|"SSH session closed".to_owned())?;
     rx.await.map_err(|_|"Docker logs request was cancelled".to_owned())?
 }
