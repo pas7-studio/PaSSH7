@@ -63,7 +63,7 @@ npm run tauri dev    # native SSH desktop app
 After unlocking the encrypted vault, select a saved host and approve its verified SHA-256 host-key pin. Use **Connect** for first login or **Quick connect** when the authentication mode and required secrets have been saved in the encrypted vault. When **Remember authentication** is checked, PaSSH7 stores successful login credentials encrypted and can reuse them after the next vault unlock. **Forget saved passwords** removes them. The UI does not receive stored secrets from the Rust vault.
 
 - **Terminal:** authenticated pinned SSH connection with PTY and multiple tabs; active host and selected tab stay aligned
-- **Files:** SFTP directory browsing and read-only UTF-8 text previews (256 KiB limit); remote file writes, uploads and downloads are not implemented
+- **Files:** authenticated SFTP directory browsing, read-only UTF-8 text preview (256 KiB), native **Upload** and **Download** dialogs for binary files up to 64 MiB per operation; existing local/remote files are not intentionally overwritten. Native transfers use independent SSH channels to avoid blocking interactive terminal output.
 - **Docker:** read-only `docker ps -a` inventory and bounded (`200` lines, `512 KiB`, `20 s`) timestamped container logs using the SSH account's Docker permissions; no container mutations
 - **Ports:** localhost-bound local TCP forwarding to destinations reachable by the SSH server; tunnels stop on session shutdown or vault lock; SOCKS/remote forwarding are not implemented
 - **AI Agent:** launches an already-installed remote Codex / Claude Code / OpenCode command in an interactive SSH terminal, with the remote account's **full permissions**; this is **not** a sandbox, MCP authorization layer or provider setup wizard
