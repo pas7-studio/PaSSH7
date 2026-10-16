@@ -30,6 +30,9 @@ during this checklist. Use a throwaway identity and Docker container.
 | SSH-04 | Check **Remember authentication**, successfully connect, lock and unlock, use **Quick connect** | No password prompts when saved valid credentials can be reused |
 | SSH-05 | Forget credentials; attempt Quick connect | Saved password reuse unavailable, manual authentication required |
 | SSH-06 | Open 10+ terminals across two hosts; switch rapidly | Correct host status and selected terminal; input never goes to another host |
+| SSH-06A | Type a 60-character command normally in a responsive SSH shell; compare with system OpenSSH client on the same host | Characters appear smoothly, in order; no bursts of late letters or duplicated characters; 3 ms maximum intentional input batch delay |
+| SSH-06B | Hold an arrow key, run `vim`/`nano` and an interactive Codex/Claude/OpenCode CLI | Escape sequences, control keys, password/no-echo prompts and full-screen TUI remain correct, without speculative local echo |
+| SSH-06C | Paste UTF-8 text longer than 64 KiB, run fast terminal output, open SFTP/Docker panels concurrently | No reordered keyboard input, truncated Unicode surrogate pairs or frozen terminal; normal CLI output and prompts remain usable |
 | SSH-07 | Abruptly stop remote sshd / disconnect VPN | Disconnected status and reason after reconnect/poll; stale tunnels cleaned |
 | SSH-08 | Remove a saved host with active SSH and forward | Only that host's sessions and tunnels close |
 | SSH-09 | Browse a slow SFTP directory and load Docker inventory/logs while running interactive commands | Terminal input and output stay responsive; slow inspections time out independently |
