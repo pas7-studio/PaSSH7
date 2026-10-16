@@ -2,7 +2,7 @@ import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -193,6 +193,58 @@ export default function App(){
     return()=>{mounted=false};
   },[]);
   useEffect(()=>{if(!desktopAvailable()||!vaultUnlocked)return;const id=window.setInterval(()=>{void vaultStatus().then(ok=>{if(!ok){setVaultUnlocked(false);setHosts([]);setSelected("");}}).catch(()=>{})},30000);return ()=>window.clearInterval(id)},[vaultUnlocked]);
+  const [configImportOpen,setConfigImportOpen]=useState(false);
+  const [configImportBusy,setConfigImportBusy]=useState(false);
+  const [configImportError,setConfigImportError]=useState("");
+  const [configImportResult,setConfigImportResult]=useState("");
+  const [configCandidates,setConfigCandidates]=useState<(LocalSshConfigHost&{selected:boolean})[]>([]);
+  const inspectLocalSshConfig=async()=>{
+    if(!desktopAvailable()||!vaultUnlocked){setVaultDialog(true);return}
+    setConfigImportOpen(true);setConfigImportBusy(true);
+    setConfigImportError("");setConfigImportResult("");
+    try{
+      const existing=new Set(hosts.map(h=>h.id));
+      const found=await discoverLocalSshConfigHosts();
+      setConfigCandidates(found.filter(h=>!existing.has(h.alias))
+        .map(h=>({...h,selected:!!h.username.trim()})));
+      if(!found.length)setConfigImportResult("No direct hosts found in your local ~/.ssh/config. Add a host manually if needed.");
+      else if(found.every(h=>existing.has(h.alias)))setConfigImportResult("All supported SSH config hosts are already in your vault.");
+    }catch(error){setConfigImportError("Could not inspect local SSH config: "+String(error))}
+    finally{setConfigImportBusy(false)}
+  };
+  const importSelectedConfigHosts=async()=>{
+    if(configImportBusy)return;
+    const selected=configCandidates.filter(h=>h.selected);
+    if(selected.length===0)return;
+    if(selected.some(h=>!h.username.trim()||/\\s/.test(h.username))){
+      setConfigImportError("Specify a valid SSH username for each selected host.");return;
+    }
+    setConfigImportBusy(true);setConfigImportError("");setConfigImportResult("");
+    const imported:string[]=[];
+    const failures:string[]=[];
+    for(const host of selected){
+      try{
+        await addHost({
+          alias:host.alias,hostname:host.hostname,port:host.port,
+          username:host.username.trim(),identityAlias:"",pinnedHostKey:null
+        });
+        imported.push(host.alias);
+      }catch(error){failures.push(host.alias+": "+String(error))}
+    }
+    try{
+      const saved=await getHosts();
+      setHosts(saved.map(h=>({
+        id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
+        group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,
+        hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode
+      })));
+      if(imported.length)setSelected(imported[0]);
+    }catch(error){failures.push("Vault host list refresh: "+String(error))}
+    setConfigCandidates(current=>current.filter(h=>!imported.includes(h.alias)));
+    setConfigImportResult(imported.length?imported.length+" host(s) imported. Verify each server's fingerprint before your first connection.":"No hosts imported.");
+    if(failures.length)setConfigImportError(failures.join("; "));
+    setConfigImportBusy(false);
+  };
   const [addOpen,setAddOpen]=useState(false);
   const [step,setStep]=useState(0);
   const [draft,setDraft]=useState<HostDraft>({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});
@@ -579,7 +631,7 @@ export default function App(){
   return <div className={"shell "+theme} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if(e.key==="Escape"){setCommandOpen(false);setShowSettings(false)}}}>
     <header className="topbar"><div className="brand"><div className="brandicon"><TerminalSquare size={19}/></div><strong>PaSSH7</strong><span className="alpha">v{buildInfo?.version ?? "0.1.0"} · PREVIEW</span></div><div className="topactions"><button className="lock" onClick={()=>{if(desktopAvailable()){if(vaultUnlocked){void lockVault()}else{setVaultDialog(true)}}}}><LockKeyhole size={14}/> {vaultUnlocked?"Lock vault":desktopAvailable()?"Unlock vault":"Vault unavailable"}</button><button className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button><button className="iconbtn" title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)}><Settings2 size={17}/></button></div></header>
     <div className="workspace">
-      {sidebar&&<aside className="sidebar"><div className="sectionHeading"><span>YOUR HOSTS</span><button className="iconbtn" title="Add host" aria-label="Add host" onClick={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}><Plus size={16}/></button></div><label className="search"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hosts" aria-label="Search hosts"/><span>⌘ K</span></label>
+      {sidebar&&<aside className="sidebar"><div className="sectionHeading"><span>YOUR HOSTS</span><button className="iconbtn" title="Import hosts from local OpenSSH config" aria-label="Import SSH config" onClick={()=>void inspectLocalSshConfig()}><FileText size={15}/></button><button className="iconbtn" title="Add host" aria-label="Add host" onClick={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}><Plus size={16}/></button></div><label className="search"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hosts" aria-label="Search hosts"/><span>⌘ K</span></label>
         {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} onClick={()=>setSelected(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}</small></span><span className={"hostDot "+(sshTabs.some(t=>t.alias===h.id)?"connected":h.fingerprint?"trusted":"untrusted")} title={sshTabs.some(t=>t.alias===h.id)?"SSH connected ("+sshTabs.filter(t=>t.alias===h.id).length+" session(s))":h.fingerprint?"Host key pinned; SSH disconnected":"SSH disconnected; host key not pinned"}/></button>)}</section>)}
         {!filtered.length&&<div className="emptySearch"><p>{!vaultUnlocked&&desktopAvailable()?"Unlock your vault to access saved hosts.":hosts.length===0?"No saved SSH hosts yet. Add your first server to get started.":query.trim()?"No hosts match your search.":"No matching hosts."}</p>{desktopAvailable()&&vaultUnlocked&&hosts.length===0&&<button type="button" className="contextAction" onClick={()=>{setAddOpen(true);setStep(0);setError("")}}><Plus size={14}/> Add your first host</button>}{desktopAvailable()&&!vaultUnlocked&&<button type="button" className="contextAction" onClick={()=>setVaultDialog(true)}><LockKeyhole size={14}/> Unlock vault</button>}</div>}
         {desktopAvailable()&&vaultUnlocked&&<section className="identityManage"><div className="groupLabel">SSH IDENTITIES</div>{identities.map(name=><div className="identityManageRow" key={name}><KeyRound size={14}/><span title={name}>{name}</span><button className="iconbtn" title={"Show public key "+name} aria-label={"Show public key "+name} onClick={async()=>{try{const pub=await getPublicIdentity(name);setGeneratedKey(pub);setKeyDialog(true);setError("")}catch(e){setError(String(e))}}}><KeyRound size={14}/></button><button className="iconbtn" title={"Remove identity "+name} aria-label={"Remove identity "+name} onClick={()=>{setError("");setDeleteTarget({kind:"identity",alias:name})}}><Trash2 size={14}/></button></div>)}{!identities.length&&<p className="emptySearch">No keys imported</p>}</section>}
@@ -650,6 +702,33 @@ export default function App(){
     setError("Install command sent to "+target.alias+". Check terminal output and verify a second key-based login before changing SSH policy.")
   }catch(e){setError(String(e))}
 }}>Install PUBLIC key into active Windows SSH session</button><p className="note">Your private key stays in the encrypted local vault. Add this public key to Windows OpenSSH administrators_authorized_keys if the login belongs to the Administrators group.</p><p className="note">Run the copied commands in an elevated PowerShell session on the Windows server. They add the public key without removing existing keys. Never enable AuthenticationMethods publickey,password until you have confirmed key-only login from another terminal.</p></div>}<hr/><label>Private key (PEM/OpenSSH)<textarea value={keyPem} onChange={e=>setKeyPem(e.target.value)} rows={5} placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"/></label><label>Private key passphrase (optional)<input type="password" autoComplete="off" value={importKeyPassphrase} onChange={e=>setImportKeyPassphrase(e.target.value)} placeholder="Only needed for encrypted SSH keys"/></label><p className="note">This input is sent to local Rust for encrypted storage. Paste the full PRIVATE key, not a .pub line. For new hosts, use Generate new Ed25519 key instead. Encrypted and unencrypted private keys are supported. If encrypted, enter the key passphrase below; it is not saved.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<button className="primary" onClick={async()=>{setError("");if(!keyAlias.trim()){setError("Enter an identity name");return}if(keyPem.trim().startsWith("ssh-")){setError("This is a PUBLIC key (.pub). Paste your PRIVATE key or use Generate new Ed25519 key.");return}try{await importIdentity(keyAlias,keyPem,importKeyPassphrase);setIdentities(await getIdentities());setDraft(v=>({...v,identity:keyAlias}));setKeyPem("");setImportKeyPassphrase("");setKeyAlias("");setKeyDialog(false);setError("")}catch(e){setError(String(e))}}}>Import to vault</button></div></div></div>}
+    {configImportOpen&&<div className="overlay" onMouseDown={()=>{if(!configImportBusy)setConfigImportOpen(false)}}>
+      <div className="modal wizard" role="dialog" aria-modal="true" aria-label="Import OpenSSH config hosts" onMouseDown={e=>e.stopPropagation()}>
+        <div className="modalTitle"><FileText size={18}/> Import OpenSSH hosts
+          <button type="button" aria-label="Close" disabled={configImportBusy} onClick={()=>setConfigImportOpen(false)}><X size={17}/></button>
+        </div>
+        <p className="note">Preview direct entries from your computer's ~/.ssh/config. Nothing is imported until you select hosts and confirm. This reads only aliases, hostnames, usernames and ports — no private keys, passwords or provider tokens.</p>
+        <p className="note">Wildcards, Include, Match, ProxyJump and ProxyCommand are not imported. Unsupported SSH options must be configured manually. Every imported host starts without a trusted host key or stored login password.</p>
+        {configImportBusy&&<p className="note" role="status">Working with local OpenSSH profiles…</p>}
+        <div className="configImportList">
+          {configCandidates.map((host,index)=><div key={host.alias} className="configImportItem">
+            <label className="configImportHeader"><input type="checkbox" checked={host.selected} disabled={configImportBusy}
+              onChange={e=>setConfigCandidates(prev=>prev.map((h,i)=>i===index?{...h,selected:e.target.checked}:h))}/>
+              <strong>{host.alias}</strong>
+            </label>
+            <small>{host.hostname}:{host.port}</small>
+            <label>SSH username<input value={host.username} disabled={configImportBusy} placeholder="e.g. ubuntu or Administrator"
+              onChange={e=>setConfigCandidates(prev=>prev.map((h,i)=>i===index?{...h,username:e.target.value}:h))}/></label>
+          </div>)}
+        </div>
+        {configImportError&&<p role="alert" className="wizardError">{configImportError}</p>}
+        {configImportResult&&<p role="status" className="note">{configImportResult}</p>}
+        <div className="wizardActions">
+          <button type="button" disabled={configImportBusy} onClick={()=>setConfigImportOpen(false)}>Close</button>
+          <button type="button" className="primary" disabled={configImportBusy||!configCandidates.some(h=>h.selected)} onClick={()=>void importSelectedConfigHosts()}>Import {configCandidates.filter(h=>h.selected).length} selected host(s)</button>
+        </div>
+      </div>
+    </div>}
     {addOpen&&!keyDialog&&<div className="overlay" onMouseDown={()=>setAddOpen(false)}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Add a new SSH host" onMouseDown={e=>e.stopPropagation()}>
       <div className="modalTitle"><Server size={18}/> Add a host <button aria-label="Close" onClick={()=>setAddOpen(false)}><X size={17}/></button></div>
       <div className="steps">{["Connection","Authentication","Trust","Review"].map((t,i)=><span className={i===step?"active":""} key={t}>{i+1}. {t}</span>)}</div>
