@@ -206,3 +206,18 @@
 @media(max-width:1100px){.settingsLayout{grid-template-columns:170px minmax(0,1fr)}.settingsHelp{grid-column:2;display:flex}.settingsHelp>.settingsCard{flex:1}.filesGrid{grid-template-columns:150px minmax(0,1fr)}.filesInspector{grid-column:1/-1;height:230px}.filesGrid{height:auto}.filesTablePane{height:400px}}
 @media(max-width:800px){.workspaceFull>.context.fullContext{display:flex!important}.widePage{padding:14px}.workspaceNav button{font-size:11px}.filesGrid,.dockerWorkspaceGrid,.settingsLayout{display:flex;flex-direction:column;height:auto}.filesFolders{max-height:180px}.filesTablePane{height:340px}.filesInspector,.dockerInspector{height:auto;max-height:300px}.dockerMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.settingsHelp{display:grid}.filesPathBar{flex-wrap:wrap}.filesCrumbs{min-width:100%}}
 .shell.compact .workspaceTable td{padding:6px 9px}.shell.compact .workspaceTable th{padding:8px 9px}
+
+
+/* Fixed access to the workspaces is available even when the host sidebar is collapsed. */
+.topWorkspaces{display:flex;align-items:center;justify-content:center;gap:3px;min-width:0;overflow:auto;scrollbar-width:none;padding:0 8px;height:100%}
+.topWorkspaces::-webkit-scrollbar{display:none}
+.topWorkspaces button{display:flex;align-items:center;gap:7px;white-space:nowrap;border:0;background:transparent;color:var(--muted);height:38px;padding:0 11px;border-radius:8px;font-weight:650;font-size:11px}
+.topWorkspaces button:hover{background:var(--surface);color:var(--fg)}
+.topWorkspaces button.active{background:var(--accentSoft);color:var(--accent)}
+.topactions{flex:none}
+.topbar .brand{flex:none}
+.settingsImportBar{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.settingsImportBar button{min-height:34px}
+.settingsImportBar .workspaceError{flex-basis:100%}
+@media(max-width:1170px){.topWorkspaces button{padding:0 8px;font-size:10px;gap:5px}.topWorkspaces{padding:0 4px}.brand .alpha{display:none}}
+@media(max-width:850px){.topWorkspaces button span{display:none}.topWorkspaces button{width:36px;justify-content:center}.topbar{padding:0 9px}}
