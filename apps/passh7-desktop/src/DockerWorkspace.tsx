@@ -6,7 +6,7 @@ export type ContainerRow={ID?:string;Names?:string;Image?:string;State?:string;S
 type Logs={session:string;containerId:string;containerName:string;text:string}|null;
 type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|null;
   loading:boolean;error:string;actionStatus:string|null;actionBusy:string;
-  logs:Logs;logsBusy:boolean;tail:number;follow:boolean;
+  logs:Logs;logsBusy:boolean;logsError:string;tail:number;follow:boolean;
   onFollow:(value:boolean)=>void;onTail:(value:number)=>void;
   onRefresh:()=>void;onAction:(id:string,name:string,action:"start"|"stop"|"restart")=>void;
   onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;};
@@ -105,11 +105,12 @@ export default function DockerWorkspace(p:Props){
       <label className="compactToggle"><input type="checkbox" checked={wrap} onChange={e=>setWrap(e.target.checked)}/> Wrap</label>
       <button title="Reload selected container logs" disabled={!p.logs||p.logsBusy} onClick={()=>{if(p.logs)p.onLogs(p.logs.containerId,p.logs.containerName)}}><RefreshCw size={15}/></button>
       <button title="Copy visible logs" disabled={!logLines.length} onClick={()=>navigator.clipboard.writeText(logLines.join("\n"))}><Clipboard size={15}/></button>
+      <button title="Close log viewer" disabled={!p.logs} onClick={p.onCloseLogs}>Clear</button>
       <button title="Save recent logs to a local text file" disabled={!logLines.length} onClick={()=>{
         const blob=new Blob([logLines.join("\n")],{type:"text/plain;charset=utf-8"});
         const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=(p.logs?.containerName||"docker")+"-logs.txt";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
       }}><Download size={15}/></button>
-    </div><div className={"dockerLogsBody "+(wrap?"wrapped":"")}>
+    </div>{p.logsError&&<div className="workspaceError" role="alert">{p.logsError} <button type="button" disabled={p.logsBusy||!chosen?.ID} onClick={()=>{if(chosen?.ID)p.onLogs(chosen.ID,chosen.Names||chosen.ID)}}>Retry logs</button></div>}<div className={"dockerLogsBody "+(wrap?"wrapped":"")}>
       {p.logs?.session===p.session?<>{p.logsBusy&&<div className="logsLoading">Refreshing latest Docker logs…</div>}
         {logLines.map((line,index)=><div className="dockerLogLine" key={index}><span>{index+1}</span><code className={/\berror\b|fatal|panic/i.test(line)?"logError":/\bwarn/i.test(line)?"logWarn":""}>{line}</code></div>)}
         {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}

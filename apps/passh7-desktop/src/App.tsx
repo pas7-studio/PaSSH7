@@ -667,6 +667,7 @@ export default function App(){
   const [dockerActionBusy,setDockerActionBusy]=useState("");
   const [dockerActionStatus,setDockerActionStatus]=useState<{session:string;text:string}|null>(null);
   const [dockerLogs,setDockerLogs]=useState<{session:string;containerId:string;containerName:string;text:string}|null>(null);
+  const [dockerLogsError,setDockerLogsError]=useState<{session:string;message:string}|null>(null);
   const [dockerError,setDockerError]=useState("");
   const runDockerAction=async(containerId:string,containerName:string,action:"start"|"stop"|"restart")=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -691,11 +692,13 @@ export default function App(){
   const viewDockerLogs=async(containerId:string,containerName:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setDockerError("Select a connected SSH session to read Docker logs.");return}
-    setDockerLogsBusy(true);setDockerError("");
+    setDockerLogsBusy(true);setDockerLogsError(null);setDockerError("");
+    // A new selection must never display stale log data from another container.
+    setDockerLogs(previous=>previous?.session===session.id&&previous.containerId===containerId?previous:null);
     try{
       const text=await readDockerLogs(session.id,containerId,preferences.dockerTail);
       setDockerLogs({session:session.id,containerId,containerName,text});
-    }catch(e){setDockerError("Could not read Docker logs: "+String(e))}
+    }catch(e){setDockerLogsError({session:session.id,message:"Could not read Docker logs: "+String(e)})}
     finally{setDockerLogsBusy(false)}
   };
   const refreshDocker=async()=>{
@@ -1025,13 +1028,14 @@ export default function App(){
  loading={dockerBusy} error={dockerError}
  actionStatus={dockerActionStatus?.session===activeSsh?dockerActionStatus.text:null}
  actionBusy={dockerActionBusy} logs={dockerLogs} logsBusy={dockerLogsBusy}
+ logsError={dockerLogsError?.session===activeSsh?dockerLogsError.message:""}
  tail={preferences.dockerTail} follow={preferences.dockerFollowLogs}
  onTail={tail=>updatePreferences({...preferences,dockerTail:tail})}
  onFollow={follow=>updatePreferences({...preferences,dockerFollowLogs:follow})}
  onRefresh={()=>void refreshDocker()}
  onAction={(id,name,action)=>void runDockerAction(id,name,action)}
  onLogs={(id,name)=>void viewDockerLogs(id,name)}
- onCloseLogs={()=>setDockerLogs(null)}
+ onCloseLogs={()=>{setDockerLogs(null);setDockerLogsError(null)}}
  />:
         panel==="settings"?<SettingsWorkspace
  preferences={preferences} onChange={updatePreferences}
