@@ -1506,6 +1506,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mutation_names_are_single_safe_path_components(){
+        for name in ["","..",".","foo/bar","foo\\\\bar","line\\nfeed","x\\0y"]{
+            let actual=name.replace("\\\\n","\\n").replace("\\\\0","\\0");
+            assert!(!safe_sftp_filename(&actual), "{name:?} must not be a filename");
+        }
+        assert!(safe_sftp_filename(".env"));
+        assert!(safe_sftp_filename("new folder"));
+        assert_eq!(join_sftp_path("/home/test/","sub"),"/home/test/sub");
+    }
+
+    #[test]
     fn agent_probe_rejects_arbitrary_shell_commands(){
         assert_eq!(allowed_agent_binary("codex"),Some("codex"));
         assert_eq!(allowed_agent_binary("claude"),Some("claude"));
