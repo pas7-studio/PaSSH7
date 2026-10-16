@@ -28,6 +28,9 @@ export type VaultRestorePreview={
   token:string;hosts:number;identities:number;hostAliases:string[];
   bytes:number;identicalToCurrent:boolean
 };
+export async function exportEncryptedVaultLocally():Promise<string|null>{
+  return invoke<string|null>("vault_export_encrypted_backup");
+}
 export async function backupEncryptedVaultToSsh(sessionId:string,directory:string):Promise<VaultBackupResult>{
   return invoke<VaultBackupResult>("ssh_session_vault_backup",{id:sessionId,directory});
 }
