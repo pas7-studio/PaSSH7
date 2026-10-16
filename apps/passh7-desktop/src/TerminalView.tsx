@@ -98,13 +98,19 @@ export default function TerminalView({id,active,onClosed}:Props){
       outputChunks.length=0;outputLength=0;
       terminal.write(bytes);
     };
+    let lastOutputAt=0;
     const receiveOutput=(encoded:string)=>{
       const raw=atob(encoded);
       const chunk=new Uint8Array(raw.length);
       for(let i=0;i<raw.length;i++)chunk[i]=raw.charCodeAt(i);
+      const now=performance.now();
+      const inBurst=lastOutputAt>0&&now-lastOutputAt<=12;
+      lastOutputAt=now;
       outputChunks.push(chunk);
       outputLength+=chunk.length;
-      if(outputLength>=MAX_OUTPUT_BATCH_BYTES)flushOutput();
+      // Shell echo and short prompts render immediately. Burst output from
+      // ls, logs and coding agents is coalesced to minimize xterm layout work.
+      if(outputLength>=MAX_OUTPUT_BATCH_BYTES||!inBurst)flushOutput();
       else if(outputTimer===undefined)outputTimer=window.setTimeout(flushOutput,OUTPUT_BATCH_MS);
     };
     const unsubscribePromise=subscribeSshSession(id,event=>{
