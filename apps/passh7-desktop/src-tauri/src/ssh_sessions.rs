@@ -910,6 +910,25 @@ mod transfer_tests{
         assert!(!tokio::fs::try_exists(&stage).await.unwrap());
         tokio::fs::remove_dir_all(folder).await.unwrap();
     }
+    #[tokio::test]
+    async fn concurrent_download_publish_allows_only_one_winner(){
+        let folder=std::env::temp_dir().join(format!("passh7-publish-race-{}-{}",
+            std::process::id(),NEXT_ID.fetch_add(1,Ordering::Relaxed)));
+        tokio::fs::create_dir(&folder).await.unwrap();
+        let a=folder.join("first.part");
+        let b=folder.join("second.part");
+        let output=folder.join("final.bin");
+        tokio::fs::write(&a,b"first").await.unwrap();
+        tokio::fs::write(&b,b"second").await.unwrap();
+        let (one,two)=tokio::join!(
+            publish_download_exclusive(&a,&output),
+            publish_download_exclusive(&b,&output)
+        );
+        assert_ne!(one.is_ok(),two.is_ok(),"exactly one download must publish");
+        let content=tokio::fs::read(&output).await.unwrap();
+        assert!(content==b"first" || content==b"second");
+        tokio::fs::remove_dir_all(folder).await.unwrap();
+    }
     #[test]
     fn denies_remote_path_separator_and_dot_filename(){
         for name in ["","..",".","a/b","a\\b","bad\0name"]{
