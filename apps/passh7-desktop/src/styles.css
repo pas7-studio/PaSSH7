@@ -76,6 +76,11 @@
 @media(max-width:1100px){.context{width:280px}.sidebar{width:214px}.identity{padding:18px 14px}}
 
 
+.fullContext .widePage select{width:auto;max-width:100%}
+.fullContext .widePage .filesActions select{min-width:135px}
+.fullContext .widePage .dockerToolbar select{min-width:120px}
+.fullContext .widePage .dockerLogToolbar select{min-width:85px}
+
 /* PaSSH7 workspaces — file manager, Docker and settings use the entire app,
    rather than the historic 302px Context aside. Terminal stays mounted. */
 .workspaceNav{display:grid;gap:4px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border)}
