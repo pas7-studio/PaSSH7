@@ -155,26 +155,10 @@ async fn vault_export_encrypted_backup(
     Ok(Some(format!("Encrypted Vault exported and verified ({} bytes)",data.len())))
 }
 
-/// User chooses a local encrypted backup; Rust validates the full
-/// Argon2id/XChaCha20-Poly1305 payload using the unlocked master password.
-/// JS gets only counts and a short-lived single-use token, never credentials.
-#[tauri::command]
-async fn vault_restore_inspect(
-    app:tauri::AppHandle,sessions:State<'_,SessionStore>,
-    pending:State<'_,PendingVaultRestore>
-)->Result<Option<VaultRestorePreview>,String>{
-    use tauri_plugin_dialog::DialogExt;
-    {
-        let mut slot=pending.0.lock().map_err(|_|"Restore preview unavailable")?;
-        *slot=None;
-    }
-    let (tx,rx)=tokio::sync::oneshot::channel();
-    app.dialog().file().pick_file(move |selected|{let _=tx.send(selected);});
-    let chosen=rx.await.map_err(|_|"Backup file selection failed")?;
-    let Some(chosen)=chosen else{return Ok(None)};
-    let path=chosen.into_path().map_err(|_|"Choose a local encrypted backup file")?;
-    let bytes=std::fs::read(&path).map_err(|e|format!("Cannot read selected backup: {e}"))?;
-    if bytes.len()>16*1024*1024 {return Err("Encrypted backup exceeds 16 MiB".into());}
+fn prepare_vault_restore_preview(
+    bytes:Vec<u8>,sessions:&SessionStore,pending:&PendingVaultRestore
+)->Result<VaultRestorePreview,String>{
+    if bytes.len()>16*1024*1024{return Err("Encrypted backup exceeds 16 MiB".into());}
     let (candidate,current,host_aliases,identities)=sessions.use_password(|password|{
         let candidate=passh7_core::decrypt(&bytes,password).map_err(safe_err)?;
         let current=std::fs::read(vault_path()?)
@@ -193,7 +177,49 @@ async fn vault_restore_inspect(
     };
     let mut slot=pending.0.lock().map_err(|_|"Restore preview unavailable")?;
     *slot=Some(BackupCandidate{token,encrypted:bytes,baseline:current});
-    Ok(Some(preview))
+    Ok(preview)
+}
+
+#[tauri::command]
+async fn vault_restore_inspect_remote(
+    id:String,path:String,sessions:State<'_,SessionStore>,
+    pending:State<'_,PendingVaultRestore>,ssh:State<'_,SshSessionManager>
+)->Result<VaultRestorePreview,String>{
+    {
+        let mut slot=pending.0.lock().map_err(|_|"Restore preview unavailable")?;
+        *slot=None;
+    }
+    // A live, pinned authenticated SSH connection is required. Remote bytes
+    // remain in native Rust and are decrypted only to validate the preview.
+    let bytes=ssh_sessions::read_vault_snapshot_for_restore(&id,&path,&ssh).await?;
+    prepare_vault_restore_preview(bytes,&sessions,&pending)
+}
+
+/// User chooses a local encrypted backup; Rust validates the full
+/// Argon2id/XChaCha20-Poly1305 payload using the unlocked master password.
+/// JS gets only counts and a short-lived single-use token, never credentials.
+#[tauri::command]
+async fn vault_restore_inspect(
+    app:tauri::AppHandle,sessions:State<'_,SessionStore>,
+    pending:State<'_,PendingVaultRestore>
+)->Result<Option<VaultRestorePreview>,String>{
+    use tauri_plugin_dialog::DialogExt;
+    {
+        let mut slot=pending.0.lock().map_err(|_|"Restore preview unavailable")?;
+        *slot=None;
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    app.dialog().file().pick_file(move |selected|{let _=tx.send(selected);});
+    let chosen=rx.await.map_err(|_|"Backup file selection failed")?;
+    let Some(chosen)=chosen else{return Ok(None)};
+    let path=chosen.into_path().map_err(|_|"Choose a local encrypted backup file")?;
+    let meta=std::fs::metadata(&path)
+        .map_err(|e|format!("Cannot inspect selected encrypted backup: {e}"))?;
+    if !meta.is_file() || meta.len()>16*1024*1024{
+        return Err("Select an encrypted backup file no larger than 16 MiB".into());
+    }
+    let bytes=std::fs::read(&path).map_err(|e|format!("Cannot read selected backup: {e}"))?;
+    prepare_vault_restore_preview(bytes,&sessions,&pending).map(Some)
 }
 
 /// This is a destructive, explicit whole-vault restore. The core transaction
@@ -718,7 +744,7 @@ fn main() {
         .manage(PendingVaultRestore::default())
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_commit,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_set_host_identity,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
