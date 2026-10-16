@@ -164,6 +164,10 @@ export async function listDockerContainers(sessionId:string):Promise<string>{
   return invoke<string>("ssh_session_docker_list",{id:sessionId});
 }
 /** Returns at most 200 timestamped lines for one container. Does not start, stop or mutate Docker. */
+export async function listDockerResources(sessionId:string,kind:"images"|"volumes"|"networks"):Promise<Record<string,string>[]>{
+  const text=await invoke<string>("ssh_session_docker_resources",{id:sessionId,kind});
+  return text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).map(line=>JSON.parse(line) as Record<string,string>);
+}
 export async function readDockerLogs(sessionId:string,containerId:string,tail=200):Promise<string>{
   return invoke<string>("ssh_session_docker_logs",{id:sessionId,containerId,tail});
 }
