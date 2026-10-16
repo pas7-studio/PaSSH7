@@ -2,7 +2,7 @@ import {invoke} from "@tauri-apps/api/core";
 
 export type HostSummary = {
   alias:string; hostname:string; port:number; username:string;
-  identityAlias:string; hostKeyPinned:boolean; hasSavedCredentials:boolean; savedAuthMode:string|null; backupDirectory:string|null;
+  identityAlias:string; hostKeyPinned:boolean; hasSavedCredentials:boolean; savedAuthMode:string|null; backupDirectory:string|null; jumpAlias:string|null;
 };
 export type AddHostInput = {
   alias:string; hostname:string; port:number; username:string;
@@ -77,6 +77,9 @@ export async function setHostBackupDirectory(alias:string,directory:string|null)
   await invoke<void>("vault_set_backup_directory",{alias,directory});
 }
 
+export async function setHostJumpRoute(alias:string,jumpAlias:string|null):Promise<void>{
+  await invoke<void>("vault_set_jump_host",{alias,jumpAlias});
+}
 export async function setHostIdentity(alias:string,identityAlias:string):Promise<void>{
   await invoke("vault_set_host_identity",{alias,identityAlias});
 }
@@ -175,6 +178,9 @@ export async function probeRemoteAgent(sessionId:string,agent:"codex"|"claude"|"
 }
 
 export type DiscoveredHostKey = {fingerprint:string};
+export async function discoverSshHostKeyVia(alias:string):Promise<DiscoveredHostKey>{
+  return invoke<DiscoveredHostKey>("ssh_discover_host_key_via",{alias});
+}
 export async function discoverSshHostKey(alias:string):Promise<DiscoveredHostKey>{
   return invoke<DiscoveredHostKey>("ssh_discover_host_key",{alias});
 }
