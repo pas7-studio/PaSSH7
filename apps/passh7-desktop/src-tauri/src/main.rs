@@ -48,38 +48,49 @@ struct VaultDifference {
     other_metadata_changed:bool,
 }
 
-fn compare_vault_contents(local:&passh7_core::Vault,backup:&passh7_core::Vault)->Result<VaultDifference,String>{
+fn compare_vault_contents(local:&passh7_core::Vault,backup:&passh7_core::Vault)->VaultDifference{
     use std::collections::BTreeMap;
-    fn compare<'a,T:serde::Serialize>(
+    fn compare<'a,T>(
         local:impl IntoIterator<Item=(&'a str,&'a T)>,
-        backup:impl IntoIterator<Item=(&'a str,&'a T)>
-    )->Result<(Vec<String>,Vec<String>,Vec<String>),String> where T:'a {
-        let a:BTreeMap<String,serde_json::Value>=local.into_iter()
-            .map(|(name,item)|serde_json::to_value(item)
-                .map(|value|(name.to_owned(),value)).map_err(|e|e.to_string()))
-            .collect::<Result<_,_>>()?;
-        let b:BTreeMap<String,serde_json::Value>=backup.into_iter()
-            .map(|(name,item)|serde_json::to_value(item)
-                .map(|value|(name.to_owned(),value)).map_err(|e|e.to_string()))
-            .collect::<Result<_,_>>()?;
-        let remote_only=b.keys().filter(|name|!a.contains_key(*name)).cloned().collect();
-        let local_only=a.keys().filter(|name|!b.contains_key(*name)).cloned().collect();
+        backup:impl IntoIterator<Item=(&'a str,&'a T)>,
+        equal:impl Fn(&T,&T)->bool
+    )->(Vec<String>,Vec<String>,Vec<String>) where T:'a {
+        let a:BTreeMap<&str,&T>=local.into_iter().collect();
+        let b:BTreeMap<&str,&T>=backup.into_iter().collect();
+        let remote_only=b.keys().filter(|name|!a.contains_key(*name))
+            .map(|name|(*name).to_owned()).collect();
+        let local_only=a.keys().filter(|name|!b.contains_key(*name))
+            .map(|name|(*name).to_owned()).collect();
         let modified=b.iter().filter_map(|(name,value)|a.get(name)
-            .filter(|local_value|*local_value!=value).map(|_|name.clone())).collect();
-        Ok((remote_only,local_only,modified))
+            .filter(|local_value|!equal(*local_value,value))
+            .map(|_|(*name).to_owned())).collect();
+        (remote_only,local_only,modified)
     }
     let (backup_only_hosts,local_only_hosts,changed_hosts)=compare(
         local.hosts.iter().map(|h|(h.alias.as_str(),h)),
-        backup.hosts.iter().map(|h|(h.alias.as_str(),h)))?;
+        backup.hosts.iter().map(|h|(h.alias.as_str(),h)),
+        |a,b| a.hostname==b.hostname && a.port==b.port &&
+            a.username==b.username && a.identity_alias==b.identity_alias &&
+            a.pinned_host_key==b.pinned_host_key && a.extensions==b.extensions
+    );
     let (backup_only_identities,local_only_identities,changed_identities)=compare(
         local.identities.iter().map(|i|(i.alias.as_str(),i)),
-        backup.identities.iter().map(|i|(i.alias.as_str(),i)))?;
-    Ok(VaultDifference{
+        backup.identities.iter().map(|i|(i.alias.as_str(),i)),
+        |a,b| a.private_key_pem==b.private_key_pem && a.extensions==b.extensions
+    );
+    VaultDifference{
         backup_only_hosts,local_only_hosts,changed_hosts,
         backup_only_identities,local_only_identities,changed_identities,
         other_metadata_changed:local.schema_version!=backup.schema_version ||
             local.extensions!=backup.extensions
-    })
+    }
+}
+
+fn vault_difference_is_empty(diff:&VaultDifference)->bool{
+    diff.backup_only_hosts.is_empty()&&diff.local_only_hosts.is_empty()&&
+    diff.changed_hosts.is_empty()&&diff.backup_only_identities.is_empty()&&
+    diff.local_only_identities.is_empty()&&diff.changed_identities.is_empty()&&
+    !diff.other_metadata_changed
 }
 
 #[derive(Default)]
@@ -215,13 +226,12 @@ fn prepare_vault_restore_preview(
         let current=std::fs::read(vault_path()?)
             .map_err(|e|format!("Cannot inspect current Vault generation: {e}"))?;
         let local=passh7_core::decrypt(&current,password).map_err(safe_err)?;
-        let difference=compare_vault_contents(&local,&candidate)?;
-        // Encryption uses a random nonce, so ciphertext inequality does not
-        // imply that any actual host/key data differs.
-        let same_contents=serde_json::to_value(&candidate)
-            .map_err(|e|format!("Cannot inspect backup content: {e}"))? ==
-            serde_json::to_value(&local)
-            .map_err(|e|format!("Cannot inspect local Vault content: {e}"))?;
+        // Compare in native memory without serializing or duplicating secret
+        // key/password material into additional unzeroized JSON buffers.
+        let difference=compare_vault_contents(&local,&candidate);
+        // Encryption uses random nonces; ciphertext differences aren't
+        // necessarily content differences.
+        let same_contents=vault_difference_is_empty(&difference);
         let names=candidate.hosts.iter().map(|h|h.alias.clone()).collect::<Vec<_>>();
         let key_count=candidate.identities.len();
         Ok((candidate,current,names,key_count,difference,same_contents))
@@ -259,7 +269,7 @@ mod vault_diff_tests {
         let mut remote=Vault::default();
         remote.hosts.push(host("backup",22));
         remote.hosts.push(host("shared",2222));
-        let diff=compare_vault_contents(&local,&remote).unwrap();
+        let diff=compare_vault_contents(&local,&remote);
         assert_eq!(diff.local_only_hosts,vec!["local"]);
         assert_eq!(diff.backup_only_hosts,vec!["backup"]);
         assert_eq!(diff.changed_hosts,vec!["shared"]);
@@ -276,7 +286,7 @@ mod vault_diff_tests {
         local.hosts.push(host("same",22));
         let mut remote=Vault::default();
         remote.hosts.push(host("same",22));
-        let diff=compare_vault_contents(&local,&remote).unwrap();
+        let diff=compare_vault_contents(&local,&remote);
         assert!(diff.local_only_hosts.is_empty());
         assert!(diff.backup_only_hosts.is_empty());
         assert!(diff.changed_hosts.is_empty());
