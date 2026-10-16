@@ -39,6 +39,7 @@ enum SessionCommand {
     SftpUpload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
     SftpCancel(String, tokio::sync::oneshot::Sender<Result<(),String>>),
     SftpFinished(String),
+    VaultBackup(String,Vec<u8>,tokio::sync::oneshot::Sender<Result<VaultBackupResult,String>>),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardList(tokio::sync::oneshot::Sender<Vec<ActiveLocalForward>>),
@@ -48,6 +49,16 @@ enum SessionCommand {
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct SftpEntry { pub name: String, pub is_dir: bool }
+
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct VaultBackupResult { pub remote_path: String, pub bytes: usize, pub verified: bool }
+
+fn snapshot_remote_name()->String{
+    let secs=std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    format!("passh7-vault-{secs}-{}.enc.json",NEXT_ID.fetch_add(1,Ordering::Relaxed))
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
@@ -513,6 +524,77 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
+                        Some(SessionCommand::VaultBackup(directory,encrypted,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(15),async {
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|e|format!("Could not open encrypted Vault backup SSH channel: {e}"))?;
+                                channel.request_subsystem(true,"sftp").await
+                                    .map_err(|e|format!("SFTP backup subsystem refused: {e}"))?;
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("Vault backup SFTP channel timed out".into()));
+                            match opened {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    let mut stopped=cancelled.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        use tokio::io::{AsyncReadExt,AsyncWriteExt};
+                                        let backup=async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|e|format!("Cannot initialize remote Vault backup: {e}"))?;
+                                            let path=join_sftp_path(&directory,&snapshot_remote_name());
+                                            let mut remote=sftp.open_with_flags(
+                                                path.clone(),
+                                                russh_sftp::protocol::OpenFlags::CREATE |
+                                                russh_sftp::protocol::OpenFlags::EXCLUDE |
+                                                russh_sftp::protocol::OpenFlags::WRITE
+                                            ).await.map_err(|e|format!("Cannot create immutable encrypted backup: {e}"))?;
+                                            let saved=async {
+                                                remote.write_all(&encrypted).await
+                                                    .map_err(|e|format!("Encrypted backup write failed: {e}"))?;
+                                                remote.flush().await
+                                                    .map_err(|e|format!("Encrypted backup flush failed: {e}"))?;
+                                                remote.shutdown().await
+                                                    .map_err(|e|format!("Encrypted backup close failed: {e}"))?;
+                                                Ok::<(),String>(())
+                                            }.await;
+                                            drop(remote);
+                                            let result=match saved {
+                                                Err(e)=>Err(e),
+                                                Ok(())=>async {
+                                                    let mut verify=sftp.open(path.clone()).await
+                                                        .map_err(|e|format!("Cannot verify remote Vault backup: {e}"))?;
+                                                    let mut copy=Vec::new();
+                                                    verify.take(encrypted.len() as u64 + 1)
+                                                        .read_to_end(&mut copy).await
+                                                        .map_err(|e|format!("Remote backup readback failed: {e}"))?;
+                                                    if copy!=encrypted {
+                                                        return Err("Remote Vault backup did not match its original encrypted bytes".to_owned());
+                                                    }
+                                                    Ok(VaultBackupResult{
+                                                        remote_path:path.clone(),bytes:encrypted.len(),verified:true
+                                                    })
+                                                }.await,
+                                            };
+                                            if result.is_err(){
+                                                // Failed writes or mismatched bytes are never presented
+                                                // as a valid backup; deletion is best effort.
+                                                let _=tokio::time::timeout(
+                                                    Duration::from_secs(5),sftp.remove_file(path)
+                                                ).await;
+                                            }
+                                            result
+                                        };
+                                        let result=tokio::select!{
+                                            _=stopped.changed()=>Err("Vault backup cancelled: SSH disconnected or Vault locked".into()),
+                                            output=tokio::time::timeout(Duration::from_secs(90),backup) =>
+                                                output.unwrap_or_else(|_|Err("Encrypted Vault backup timed out after 90 seconds".into()))
+                                        };
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
                         Some(SessionCommand::SftpList(path,response)) => {
                             // Only the SSH subsystem negotiation needs the connection handle.
                             // Directory scanning and sorting happen outside the PTY loop.
@@ -913,6 +995,30 @@ pub async fn ssh_session_agent_probe(id:String,agent:String,
     manager.sender(&id)?.send(SessionCommand::AgentProbe(binary,tx)).await
         .map_err(|_|"SSH session closed during AI CLI detection")?;
     rx.await.map_err(|_|"AI CLI probe response cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_vault_backup(
+    id:String,directory:String,vault:State<'_,SessionStore>,manager:State<'_,SshSessionManager>
+)->Result<VaultBackupResult,String>{
+    if !valid_sftp_path(&directory){return Err("Invalid remote backup directory".into());}
+    // All reads/decryption verification remain in native Rust. Never return
+    // a secret or even an encrypted Vault buffer to the WebView.
+    let encrypted=vault.use_password(|password|{
+        let source=vault_path()?;
+        let metadata=std::fs::metadata(&source)
+            .map_err(|e|format!("Cannot inspect encrypted Vault: {e}"))?;
+        if !metadata.is_file() || metadata.len()>16*1024*1024 {
+            return Err("Encrypted Vault is not a regular file below 16 MiB".into());
+        }
+        let bytes=std::fs::read(&source).map_err(|e|format!("Cannot read encrypted Vault: {e}"))?;
+        let _verified=passh7_core::decrypt(&bytes,password).map_err(safe_err)?;
+        Ok(bytes)
+    })?;
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::VaultBackup(directory,encrypted,tx)).await
+        .map_err(|_|"SSH connection closed before Vault backup")?;
+    rx.await.map_err(|_|"Encrypted Vault backup interrupted")?
 }
 
 #[tauri::command]
