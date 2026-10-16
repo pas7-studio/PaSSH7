@@ -279,6 +279,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let data = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         let host = data.hosts.iter().find(|h| h.alias == alias)
             .ok_or_else(|| "Host not found".to_owned())?.clone();
+        let jump=host.extensions.get("passh7_jump_alias")
+            .and_then(|v|v.as_str()).filter(|s|!s.is_empty());
+        crate::validate_jump_host(&data,&alias,jump).map_err(safe_err)?;
         let identity = if auth_mode == "password" {
             None
         } else {
