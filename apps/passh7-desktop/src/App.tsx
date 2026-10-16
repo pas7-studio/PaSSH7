@@ -1,7 +1,8 @@
 import {useCallback} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,readSftpText,downloadSftpFile,uploadSftpFile,listLiveSshSessions} from "./backend";
+import {listen} from "@tauri-apps/api/event";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -131,26 +132,67 @@ export default function App(){
   const [sftpPreview,setSftpPreview]=useState<{session:string;path:string;body:string}|null>(null);
   const [sftpPreviewBusy,setSftpPreviewBusy]=useState(false);
   const [sftpTransferBusy,setSftpTransferBusy]=useState(false);
+  const [sftpTransferProgress,setSftpTransferProgress]=useState<{
+    session:string;id:string;direction:"upload"|"download";
+    stage:"selecting"|"started"|"progress"|"cancelling";
+    bytes:number;totalBytes:number|null
+  }|null>(null);
   const [sftpTransferResult,setSftpTransferResult]=useState<{session:string;text:string}|null>(null);
+  const cancelActiveTransfer=async()=>{
+    const current=sftpTransferProgress;
+    if(!current||current.stage==="selecting"||current.stage==="cancelling")return;
+    setSftpTransferProgress(prev=>prev?.id===current.id?{...prev,stage:"cancelling"}:prev);
+    try{await cancelSftpTransfer(current.session,current.id)}
+    catch(e){setSftpError("Could not cancel transfer: "+String(e))}
+  };
   const transferSftp=async(direction:"upload"|"download",path?:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Select a connected SSH session before transferring files.");return}
+    if(sftpTransferBusy)return;
+    const transferId=crypto.randomUUID();
     setSftpTransferBusy(true);setSftpError("");setSftpTransferResult(null);
+    setSftpTransferProgress({session:session.id,id:transferId,direction,stage:"selecting",bytes:0,totalBytes:null});
+    let unlisten:(()=>void)|null=null;
     try{
+      // Install the progress listener before opening the native picker. This
+      // avoids missing the first event when the selected file is small.
+      unlisten=await listen<SftpTransferEvent>("passh7:sftp-transfer",event=>{
+        const value=event.payload;
+        if(value.sessionId!==session.id||value.transferId!==transferId)return;
+        setSftpTransferProgress(previous=>previous?.id===transferId&&previous.stage!=="cancelling"
+          ? {...previous,stage:value.stage,bytes:value.bytes,totalBytes:value.totalBytes}
+          :previous);
+      });
       const targetDir=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
       const result=direction==="download"
-        ? await downloadSftpFile(session.id,path||"")
-        : await uploadSftpFile(session.id,targetDir);
+        ? await downloadSftpFile(session.id,path||"",transferId)
+        : await uploadSftpFile(session.id,targetDir,transferId);
       if(result){
         setSftpTransferResult({session:session.id,text:result});
         if(direction==="upload"){
-          const items=await listSftpDirectory(session.id,targetDir);
-          setSftpEntries({session:session.id,path:targetDir,items});
-          setSftpPath(targetDir);
+          // Upload completion is independent of a subsequent directory refresh.
+          try{
+            const items=await listSftpDirectory(session.id,targetDir);
+            setSftpEntries({session:session.id,path:targetDir,items});
+            setSftpPath(targetDir);
+          }catch(refreshError){
+            setSftpError("Upload succeeded, but directory refresh failed: "+String(refreshError));
+          }
         }
       }
-    }catch(e){setSftpError((direction==="download"?"Download":"Upload")+" failed: "+String(e))}
-    finally{setSftpTransferBusy(false)}
+    }catch(e){
+      const reason=String(e);
+      if(/cancelled by user/i.test(reason)){
+        setSftpTransferResult({session:session.id,text:"Transfer cancelled. Remote partial-file cleanup is best effort."});
+      }else{
+        setSftpError((direction==="download"?"Download":"Upload")+" failed: "+reason);
+      }
+    }
+    finally{
+      unlisten?.();
+      setSftpTransferProgress(previous=>previous?.id===transferId?null:previous);
+      setSftpTransferBusy(false);
+    }
   };
   const readSftpPreview=async(path:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -431,7 +473,12 @@ export default function App(){
       </main>
       <aside className="context"><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
         {panel==="agent"?<><div className="contextTitle"><Bot size={18}/><h3>AI Agent</h3></div><p className="muted">Launch Codex, Claude Code or OpenCode in the SSH terminal. These tools run with your remote account permissions.</p><label className="fieldLabel">Agent</label><select value={agent} onChange={e=>setAgent(e.target.value as AgentKind)} aria-label="Select AI agent">{AGENTS.map(a=><option key={a.kind} value={a.kind}>{a.name}</option>)}</select><label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Launches an installed CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
-        panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Browse remote directories, preview UTF-8 text, or transfer files through encrypted SFTP. Transfers are limited to 64 MiB per file; existing files are never silently overwritten.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button><button className="contextAction" disabled={!connected||!activeSsh||sftpTransferBusy||sftpBusy} onClick={()=>void transferSftp("upload")}>{sftpTransferBusy?"Transferring…":"Upload file to this directory"}</button>{sftpTransferResult?.session===activeSsh&&<p className="note" role="status">{sftpTransferResult.text}</p>}{sftpEntries?.session===activeSsh&&<div className="dockerInventory"><p className="muted">{sftpEntries.path} · {sftpEntries.items.length} entries</p><button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/..")} disabled={sftpBusy}>↑ Parent directory</button>{sftpEntries.items.map((item,index)=><div className="dockerItem" key={item.name+"-"+index}>{item.isDir?<button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/"+item.name)} disabled={sftpBusy}>📁 {item.name}</button>:<div className="sftpFile"><button type="button" disabled={sftpBusy||sftpPreviewBusy||sftpTransferBusy} onClick={()=>void readSftpPreview(sftpEntries.path+"/"+item.name)}>📄 {item.name} · Preview</button><button type="button" disabled={sftpBusy||sftpTransferBusy} onClick={()=>void transferSftp("download",sftpEntries.path+"/"+item.name)}>Download</button></div>}</div>)}</div>}{sftpPreview?.session===activeSsh&&<div><p className="muted" style={{overflowWrap:"anywhere"}}>Read-only preview: {sftpPreview.path}</p><textarea aria-label="Remote file preview" readOnly value={sftpPreview.body} rows={12} style={{width:"100%",fontFamily:"monospace",fontSize:"12px"}}/><button type="button" onClick={()=>setSftpPreview(null)}>Close preview</button></div>}{sftpPreviewBusy&&<p className="note">Loading file preview…</p>}{sftpError&&<p className="wizardError" role="alert">{sftpError}</p>}{!connected&&<div className="placeholder">Connect to the selected host before browsing.</div>}</>:
+        panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Browse remote directories, preview UTF-8 text, or transfer files through encrypted SFTP. Transfers are limited to 64 MiB per file; existing files are never silently overwritten.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button><button className="contextAction" disabled={!connected||!activeSsh||sftpTransferBusy||sftpBusy} onClick={()=>void transferSftp("upload")}>{sftpTransferBusy?"Transferring…":"Upload file to this directory"}</button>{sftpTransferProgress?.session===activeSsh&&<div className="sftpProgress" role="status">
+  <strong>{sftpTransferProgress.direction==="upload"?"Uploading":"Downloading"} · {sftpTransferProgress.stage==="selecting"?"Choose a local file":sftpTransferProgress.stage==="cancelling"?"Cancelling…":"Transfer in progress"}</strong>
+  <small>{(sftpTransferProgress.bytes/1048576).toFixed(2)} MiB{sftpTransferProgress.totalBytes!==null?" / "+(sftpTransferProgress.totalBytes/1048576).toFixed(2)+" MiB":""}</small>
+  {sftpTransferProgress.totalBytes!==null&&<progress value={sftpTransferProgress.bytes} max={Math.max(1,sftpTransferProgress.totalBytes)} style={{width:"100%"}}/>}
+  {sftpTransferProgress.stage!=="selecting"&&sftpTransferProgress.stage!=="cancelling"&&<button type="button" onClick={()=>void cancelActiveTransfer()}>Cancel transfer</button>}
+</div>}{sftpTransferResult?.session===activeSsh&&<p className="note" role="status">{sftpTransferResult.text}</p>}{sftpEntries?.session===activeSsh&&<div className="dockerInventory"><p className="muted">{sftpEntries.path} · {sftpEntries.items.length} entries</p><button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/..")} disabled={sftpBusy}>↑ Parent directory</button>{sftpEntries.items.map((item,index)=><div className="dockerItem" key={item.name+"-"+index}>{item.isDir?<button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/"+item.name)} disabled={sftpBusy}>📁 {item.name}</button>:<div className="sftpFile"><button type="button" disabled={sftpBusy||sftpPreviewBusy||sftpTransferBusy} onClick={()=>void readSftpPreview(sftpEntries.path+"/"+item.name)}>📄 {item.name} · Preview</button><button type="button" disabled={sftpBusy||sftpTransferBusy} onClick={()=>void transferSftp("download",sftpEntries.path+"/"+item.name)}>Download</button></div>}</div>)}</div>}{sftpPreview?.session===activeSsh&&<div><p className="muted" style={{overflowWrap:"anywhere"}}>Read-only preview: {sftpPreview.path}</p><textarea aria-label="Remote file preview" readOnly value={sftpPreview.body} rows={12} style={{width:"100%",fontFamily:"monospace",fontSize:"12px"}}/><button type="button" onClick={()=>setSftpPreview(null)}>Close preview</button></div>}{sftpPreviewBusy&&<p className="note">Loading file preview…</p>}{sftpError&&<p className="wizardError" role="alert">{sftpError}</p>}{!connected&&<div className="placeholder">Connect to the selected host before browsing.</div>}</>:
         panel==="docker"?<><div className="contextTitle"><Container size={18}/><h3>Docker containers</h3></div><p className="muted">Runs <code>docker ps -a</code> on the connected host using your SSH account. Read-only inventory.</p><button className="contextAction" disabled={!connected||!activeSsh||dockerBusy} onClick={()=>void refreshDocker()}>{dockerBusy?"Loading containers…":"Refresh containers"}</button>{dockerError&&<p className="wizardError" role="alert">{dockerError}</p>}{dockerActionStatus?.session===activeSsh&&<p role="status" className="note">{dockerActionStatus.text}</p>}{dockerInventory?.session===activeSsh?<div className="dockerInventory"><p className="muted">{dockerInventory.items.length} container(s)</p>{dockerInventory.items.map((item,index)=><div key={item.ID||index} className="dockerItem"><strong>{item.Names||item.ID||"Unnamed"}</strong><small>{item.Image||"Unknown image"}</small><span>{item.Status||item.State||"Unknown status"}</span>{item.Ports&&<small>{item.Ports}</small>}{item.ID&&<button type="button" disabled={dockerLogsBusy||!connected} onClick={()=>void viewDockerLogs(item.ID!,item.Names||item.ID||"Container")}>{dockerLogsBusy?"Loading logs…":"View logs"}</button>}{item.ID&&<div className="dockerActions">{(item.State||"").toLowerCase()==="running"?<><button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"restart")}>{dockerActionBusy===item.ID?"Working…":"Restart"}</button><button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"stop")}>Stop</button></>:<button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"start")}>{dockerActionBusy===item.ID?"Working…":"Start"}</button>}</div>}</div>)}</div>:
 <div className="placeholder"><Container size={23}/>{connected?"Click Refresh containers to fetch the real inventory.":"Connect to the server to inspect Docker."}</div>}{dockerLogs?.session===activeSsh&&<div className="dockerItem" style={{marginTop:14}}><strong>Recent logs: {dockerLogs.containerName}</strong><small>Last 200 lines · read-only · timestamps included</small><pre className="preview" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",maxHeight:"300px",overflow:"auto"}}>{dockerLogs.text||"No logs returned for this container."}</pre><button type="button" onClick={()=>setDockerLogs(null)}>Close logs</button></div>}</>:
         <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusy} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
