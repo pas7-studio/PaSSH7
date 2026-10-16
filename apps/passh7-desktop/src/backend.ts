@@ -116,3 +116,8 @@ export async function discoverSshHostKey(alias:string):Promise<DiscoveredHostKey
 export async function pinSshHostKey(alias:string,fingerprint:string):Promise<void>{
   return invoke("vault_pin_host_key",{alias,fingerprint});
 }
+
+export type SftpEntry={name:string;isDir:boolean};
+export async function listSftpDirectory(sessionId:string,path:string):Promise<SftpEntry[]>{
+  return invoke<SftpEntry[]>("ssh_session_sftp_list",{id:sessionId,path});
+}
