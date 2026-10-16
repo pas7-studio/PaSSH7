@@ -40,6 +40,7 @@ enum SessionCommand {
     SftpCancel(String, tokio::sync::oneshot::Sender<Result<(),String>>),
     SftpFinished(String),
     VaultBackup(String,Vec<u8>,tokio::sync::oneshot::Sender<Result<VaultBackupResult,String>>),
+    VaultRead(String,tokio::sync::oneshot::Sender<Result<Vec<u8>,String>>),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardList(tokio::sync::oneshot::Sender<Vec<ActiveLocalForward>>),
@@ -524,6 +525,44 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
+                        Some(SessionCommand::VaultRead(path,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(15),async {
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|e|format!("Could not open encrypted Vault restore SSH channel: {e}"))?;
+                                channel.request_subsystem(true,"sftp").await
+                                    .map_err(|e|format!("SFTP restore subsystem refused: {e}"))?;
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("Vault restore SFTP channel timed out".into()));
+                            match opened {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    let mut stopped=cancelled.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        use tokio::io::AsyncReadExt;
+                                        let read=async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|e|format!("Cannot initialize remote backup reader: {e}"))?;
+                                            let mut source=sftp.open(path).await
+                                                .map_err(|e|format!("Cannot open encrypted remote Vault backup: {e}"))?;
+                                            let mut bytes=Vec::new();
+                                            source.take(16*1024*1024+1).read_to_end(&mut bytes).await
+                                                .map_err(|e|format!("Cannot download encrypted Vault backup: {e}"))?;
+                                            if bytes.len()>16*1024*1024{
+                                                return Err("Remote encrypted Vault backup exceeds 16 MiB".into());
+                                            }
+                                            Ok::<Vec<u8>,String>(bytes)
+                                        };
+                                        let result=tokio::select! {
+                                            _=stopped.changed()=>Err("Remote backup inspection cancelled by SSH disconnection".into()),
+                                            output=tokio::time::timeout(Duration::from_secs(45),read) =>
+                                                output.unwrap_or_else(|_|Err("Remote backup inspection timed out".into()))
+                                        };
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
                         Some(SessionCommand::VaultBackup(directory,encrypted,response)) => {
                             let opened=tokio::time::timeout(Duration::from_secs(15),async {
                                 let channel=connection.channel_open_session().await
@@ -999,6 +1038,24 @@ pub async fn ssh_session_agent_probe(id:String,agent:String,
     manager.sender(&id)?.send(SessionCommand::AgentProbe(binary,tx)).await
         .map_err(|_|"SSH session closed during AI CLI detection")?;
     rx.await.map_err(|_|"AI CLI probe response cancelled".to_owned())?
+}
+
+/// Only encrypted snapshot bytes flow from the authenticated SSH host to
+/// the native Vault restore verifier. They are NEVER returned to the WebView.
+pub async fn read_vault_snapshot_for_restore(
+    id:&str,path:&str,manager:&SshSessionManager
+)->Result<Vec<u8>,String>{
+    if !valid_sftp_path(path){return Err("Invalid remote backup path".into());}
+    let name=path.rsplit('/').next().unwrap_or("");
+    if !name.starts_with("passh7-vault-") ||
+        !name.ends_with(".enc.json") ||
+        name.len()>160 || name.contains('\\') || name.chars().any(|c|c.is_control()){
+        return Err("Select a versioned PaSSH7 encrypted Vault snapshot".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(id)?.send(SessionCommand::VaultRead(path.to_owned(),tx)).await
+        .map_err(|_|"SSH session closed before remote backup inspection")?;
+    rx.await.map_err(|_|"Remote encrypted Vault backup inspection interrupted")?
 }
 
 #[tauri::command]
