@@ -296,68 +296,84 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::DockerList(response)) => {
-                            // Runs on a separate session channel; command is fixed by native code,
-                            // never constructed from untrusted renderer arguments.
-                            let listed = tokio::time::timeout(Duration::from_secs(20), async {
-                                let mut cmd = connection.channel_open_session().await
-                                    .map_err(|_| "Could not open remote command channel")?;
-                                cmd.exec(true, b"docker ps -a --format \"{{json .}}\"").await
-                                    .map_err(|_| "Docker command was rejected by the SSH server")?;
-                                let mut output = Vec::new();
-                                let mut exit_status = None;
-                                while let Some(message) = cmd.wait().await {
-                                    match message {
-                                        russh::ChannelMsg::Data { data } | russh::ChannelMsg::ExtendedData { data, .. } => {
-                                            if output.len().saturating_add(data.len()) > 2 * 1024 * 1024 {
-                                                return Err("Docker response exceeds 2 MiB".to_owned());
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker listing channel".to_owned())?;
+                                channel.exec(true,b"docker ps -a --format \"{{json .}}\"").await
+                                    .map_err(|_|"SSH server refused Docker inventory command".to_owned())?;
+                                Ok::<_,String>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker SSH channel setup timed out".into()));
+                            match setup {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let mut output=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await {
+                                                match message {
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if output.len().saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker inventory exceeds 2 MiB".to_owned());
+                                                        }
+                                                        output.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
                                             }
-                                            output.extend_from_slice(&data);
-                                        }
-                                        russh::ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
-                                        russh::ChannelMsg::Close => break,
-                                        _ => {}
-                                    }
+                                            let message=String::from_utf8_lossy(&output).into_owned();
+                                            if exit_status.unwrap_or(1)!=0{
+                                                return Err(format!("Docker inventory failed: {}",message.chars().take(500).collect::<String>()));
+                                            }
+                                            Ok::<String,String>(message)
+                                        }).await.unwrap_or_else(|_|Err("Docker inventory timed out after 20 seconds".into()));
+                                        let _=response.send(result);
+                                    });
                                 }
-                                let result = String::from_utf8_lossy(&output).into_owned();
-                                if exit_status.unwrap_or(1) != 0 {
-                                    return Err(format!("Docker listing failed: {}", result.chars().take(500).collect::<String>()));
-                                }
-                                Ok(result)
-                            }).await.unwrap_or_else(|_| Err("Docker listing timed out after 20 seconds".to_owned()));
-                            let _ = response.send(listed);
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::DockerLogs(container_id,response)) => {
-                            // The native IPC command only accepts a Docker hex ID.
-                            // No shell metacharacters or arbitrary commands can be supplied.
-                            let result = tokio::time::timeout(Duration::from_secs(20), async {
-                                let mut cmd = connection.channel_open_session().await
-                                    .map_err(|_| "Could not open Docker log channel".to_owned())?;
-                                let command = format!("docker logs --tail 200 --timestamps {container_id}");
-                                cmd.exec(true, command.as_bytes()).await
-                                    .map_err(|_| "SSH server rejected Docker log request".to_owned())?;
-                                let mut output = Vec::new();
-                                let mut exit_status = None;
-                                while let Some(message) = cmd.wait().await {
-                                    match message {
-                                        russh::ChannelMsg::Data { data } | russh::ChannelMsg::ExtendedData { data, .. } => {
-                                            if output.len().saturating_add(data.len()) > 512 * 1024 {
-                                                return Err("Docker log exceeds 512 KiB. Narrow the output in the SSH terminal.".to_owned());
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker log channel".to_owned())?;
+                                let command=format!("docker logs --tail 200 --timestamps {container_id}");
+                                channel.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"SSH server refused Docker logs command".to_owned())?;
+                                Ok::<_,String>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker log SSH channel setup timed out".into()));
+                            match setup {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let mut output=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await {
+                                                match message {
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if output.len().saturating_add(data.len())>512*1024{
+                                                            return Err("Docker logs exceed 512 KiB; inspect them in the SSH terminal".to_owned());
+                                                        }
+                                                        output.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
                                             }
-                                            output.extend_from_slice(&data);
-                                        },
-                                        russh::ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
-                                        russh::ChannelMsg::Close => break,
-                                        _ => {}
-                                    }
+                                            let message=String::from_utf8_lossy(&output).into_owned();
+                                            if exit_status.unwrap_or(1)!=0{
+                                                return Err(format!("Docker logs failed: {}",message.chars().take(500).collect::<String>()));
+                                            }
+                                            Ok::<String,String>(message)
+                                        }).await.unwrap_or_else(|_|Err("Docker logs timed out after 20 seconds".into()));
+                                        let _=response.send(result);
+                                    });
                                 }
-                                let result = String::from_utf8_lossy(&output).into_owned();
-                                if exit_status.unwrap_or(1) != 0 {
-                                    return Err(format!("Docker logs failed: {}",result.chars().take(500).collect::<String>()));
-                                }
-                                Ok(result)
-                            }).await.unwrap_or_else(|_|Err("Docker logs timed out after 20 seconds".to_owned()));
-                            let _=response.send(result);
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::DockerAction(action,container_id,response)) => {
