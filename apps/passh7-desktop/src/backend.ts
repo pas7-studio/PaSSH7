@@ -27,6 +27,10 @@ export async function getHosts():Promise<HostSummary[]>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   return invoke<HostSummary[]>("vault_list_hosts");
 }
+export type LocalSshConfigHost={alias:string;hostname:string;username:string;port:number};
+export async function discoverLocalSshConfigHosts():Promise<LocalSshConfigHost[]>{
+  return invoke<LocalSshConfigHost[]>("ssh_discover_local_config_hosts");
+}
 export async function addHost(host:AddHostInput):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   await invoke("vault_add_host",{host});
