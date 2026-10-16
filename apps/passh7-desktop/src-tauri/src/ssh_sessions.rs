@@ -769,6 +769,11 @@ pub async fn ssh_session_sftp_read_text(id:String,path:String,manager:State<'_,S
     rx.await.map_err(|_|"SFTP preview was cancelled".to_owned())?
 }
 
+fn valid_transfer_id(id:&str)->bool{
+    (8..=96).contains(&id.len()) &&
+    id.bytes().all(|byte|byte.is_ascii_alphanumeric() || byte==b'-')
+}
+
 fn safe_sftp_filename(name:&str)->bool{
     !name.is_empty() && name!="." && name!=".." &&
     !name.contains('/') && !name.contains('\\') &&
@@ -783,9 +788,10 @@ fn valid_sftp_path(path:&str)->bool{
 
 #[tauri::command]
 pub async fn ssh_session_sftp_download(
-    id:String,path:String,manager:State<'_,SshSessionManager>,app:AppHandle
+    id:String,path:String,transfer_id:String,manager:State<'_,SshSessionManager>,app:AppHandle
 )->Result<Option<String>,String>{
     if !valid_sftp_path(&path){return Err("Invalid remote download path".into());}
+    if !valid_transfer_id(&transfer_id){return Err("Invalid transfer ID".into());}
     let remote_name=path.rsplit('/').next().unwrap_or("");
     if !safe_sftp_filename(remote_name){return Err("Select a regular file to download".into());}
     let sender=manager.sender(&id)?;
@@ -798,7 +804,7 @@ pub async fn ssh_session_sftp_download(
     let destination=selected.into_path().map_err(|_|"Only local filesystem destinations are supported")?;
     let file_label=destination.file_name().and_then(|s|s.to_str()).unwrap_or("file").to_owned();
     let (tx,rx)=tokio::sync::oneshot::channel();
-    sender.send(SessionCommand::SftpDownload(path,destination,tx)).await
+    sender.send(SessionCommand::SftpDownload(transfer_id,path,destination,tx)).await
         .map_err(|_|"SSH connection closed before download")?;
     let bytes=rx.await.map_err(|_|"Download interrupted by SSH disconnection")??;
     Ok(Some(format!("Downloaded {bytes} bytes to {file_label}")))
@@ -806,9 +812,10 @@ pub async fn ssh_session_sftp_download(
 
 #[tauri::command]
 pub async fn ssh_session_sftp_upload(
-    id:String,directory:String,manager:State<'_,SshSessionManager>,app:AppHandle
+    id:String,directory:String,transfer_id:String,manager:State<'_,SshSessionManager>,app:AppHandle
 )->Result<Option<String>,String>{
     if !valid_sftp_path(&directory){return Err("Invalid destination directory".into());}
+    if !valid_transfer_id(&transfer_id){return Err("Invalid transfer ID".into());}
     let sender=manager.sender(&id)?;
     let (selected_tx,selected_rx)=tokio::sync::oneshot::channel();
     app.dialog().file().pick_file(move |selection|{let _=selected_tx.send(selection);});
@@ -819,15 +826,49 @@ pub async fn ssh_session_sftp_upload(
         .ok_or("Selected local filename is invalid UTF-8")?.to_owned();
     if !safe_sftp_filename(&file_label){return Err("Selected local filename is not safe for upload".into());}
     let (tx,rx)=tokio::sync::oneshot::channel();
-    sender.send(SessionCommand::SftpUpload(directory,source,tx)).await
+    sender.send(SessionCommand::SftpUpload(transfer_id,directory,source,tx)).await
         .map_err(|_|"SSH connection closed before upload")?;
     let bytes=rx.await.map_err(|_|"Upload interrupted by SSH disconnection")??;
     Ok(Some(format!("Uploaded {bytes} bytes as {file_label}")))
 }
 
+#[tauri::command]
+pub async fn ssh_session_sftp_cancel(id:String,transfer_id:String,
+    manager:State<'_,SshSessionManager>)->Result<(),String>{
+    if !valid_transfer_id(&transfer_id){return Err("Invalid transfer ID".into());}
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::SftpCancel(transfer_id,tx)).await
+        .map_err(|_|"SSH session closed")?;
+    rx.await.map_err(|_|"SFTP cancellation request interrupted".to_owned())?
+}
+
 #[cfg(test)]
 mod transfer_tests{
     use super::*;
+    #[test]
+    fn rejects_unsafe_transfer_tokens(){
+        assert!(valid_transfer_id("eb80cd3d-78b0-4d2c-a7ce-72baaad9e7ae"));
+        for token in ["","../../bad","id;rm -rf","short","with spaces"]{
+            assert!(!valid_transfer_id(token));
+        }
+    }
+    #[tokio::test]
+    async fn download_publish_never_replaces_an_existing_file(){
+        let folder=std::env::temp_dir().join(format!("passh7-download-{}-{}",
+            std::process::id(),NEXT_ID.fetch_add(1,Ordering::Relaxed)));
+        tokio::fs::create_dir(&folder).await.unwrap();
+        let stage=folder.join("stage.part");
+        let target=folder.join("output.bin");
+        tokio::fs::write(&stage,b"new").await.unwrap();
+        tokio::fs::write(&target,b"old").await.unwrap();
+        assert!(publish_download_exclusive(&stage,&target).await.is_err());
+        assert_eq!(tokio::fs::read(&target).await.unwrap(),b"old");
+        tokio::fs::remove_file(&target).await.unwrap();
+        publish_download_exclusive(&stage,&target).await.unwrap();
+        assert_eq!(tokio::fs::read(&target).await.unwrap(),b"new");
+        assert!(!tokio::fs::try_exists(&stage).await.unwrap());
+        tokio::fs::remove_dir_all(folder).await.unwrap();
+    }
     #[test]
     fn denies_remote_path_separator_and_dot_filename(){
         for name in ["","..",".","a/b","a\\b","bad\0name"]{
