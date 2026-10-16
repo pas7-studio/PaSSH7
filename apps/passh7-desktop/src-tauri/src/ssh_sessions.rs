@@ -52,13 +52,14 @@ impl SshSessionManager {
 }
 
 #[tauri::command]
-pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>, auth_mode: Option<String>,
+pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>, auth_mode: Option<String>, key_passphrase: Option<String>,
     vault: State<'_, SessionStore>, manager: State<'_, SshSessionManager>, app: AppHandle
 ) -> Result<OpenedSession, String> {
     if !(20..=500).contains(&cols) || !(5..=200).contains(&rows) {
         return Err("Invalid PTY dimensions".into());
     }
     let mut account_password = account_password.map(zeroize::Zeroizing::new);
+    let key_passphrase = zeroize::Zeroizing::new(key_passphrase.unwrap_or_default());
     let auth_mode = auth_mode.as_deref().unwrap_or("key");
     if !matches!(auth_mode, "key" | "password" | "key-password") {
         return Err("Unsupported SSH authentication mode".into());
@@ -75,8 +76,8 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
     let pin = host.pinned_host_key.clone().ok_or("Host key is not pinned")?;
     passh7_core::hostkey::validate_fingerprint(&pin).map_err(safe_err)?;
     let key = if auth_mode != "password" {
-        Some(russh::keys::decode_secret_key(&secret, None)
-            .map_err(|_| "SSH key cannot be decoded or requires a passphrase".to_owned())?)
+        Some(russh::keys::decode_secret_key(&secret, if key_passphrase.is_empty() { None } else { Some(key_passphrase.as_str()) })
+            .map_err(|_| "Cannot unlock SSH private key. Enter its key passphrase, or verify the imported key.".to_owned())?)
     } else { None };
     let config = std::sync::Arc::new(russh::client::Config {
         inactivity_timeout: Some(Duration::from_secs(600)), ..Default::default()

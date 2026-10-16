@@ -36,9 +36,9 @@ export async function getIdentities():Promise<string[]>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   return invoke<string[]>("vault_list_identities");
 }
-export async function importIdentity(alias:string,privateKeyPem:string):Promise<void>{
+export async function importIdentity(alias:string,privateKeyPem:string,keyPassphrase?:string):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
-  await invoke("vault_import_identity",{alias,privateKeyPem});
+  await invoke("vault_import_identity",{alias,privateKeyPem,keyPassphrase:keyPassphrase||null});
 }
 
 export async function removeHost(alias:string):Promise<void>{
@@ -73,8 +73,8 @@ export async function authenticateSshHost(alias:string):Promise<SshAuthResult>{
 
 export type OpenedSshSession = {id:string;alias:string};
 export type SshSessionEvent = {id:string;kind:"data"|"closed";data?:string;detail?:string};
-export async function openSshSession(alias:string,cols:number,rows:number,accountPassword?:string,authMode:"key"|"password"|"key-password"="key"):Promise<OpenedSshSession>{
-  return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows,accountPassword:accountPassword||null,authMode});
+export async function openSshSession(alias:string,cols:number,rows:number,accountPassword?:string,authMode:"key"|"password"|"key-password"="key",keyPassphrase?:string):Promise<OpenedSshSession>{
+  return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows,accountPassword:accountPassword||null,authMode,keyPassphrase:keyPassphrase||null});
 }
 export async function writeSshSession(id:string,data:string):Promise<void>{
   return invoke("ssh_session_write",{id,data});

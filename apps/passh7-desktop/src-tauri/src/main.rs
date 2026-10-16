@@ -131,8 +131,9 @@ fn vault_list_identities(sessions: State<'_, SessionStore>) -> Result<Vec<String
 /// Accepts a pasted key from the user, never a path selected by an agent.
 /// Key content remains in memory and is never returned to JS.
 #[tauri::command]
-fn vault_import_identity(alias: String, mut private_key_pem: String,
+fn vault_import_identity(alias: String, mut private_key_pem: String, key_passphrase: Option<String>,
     sessions: State<'_, SessionStore>) -> Result<(), String> {
+    let key_passphrase = Zeroizing::new(key_passphrase.unwrap_or_default());
     if private_key_pem.len() > 128 * 1024 {
         private_key_pem.zeroize();
         return Err("SSH identity exceeds 128 KiB".into());
@@ -141,9 +142,15 @@ fn vault_import_identity(alias: String, mut private_key_pem: String,
         private_key_pem.zeroize();
         return Err("Paste the PRIVATE key (file without .pub), including BEGIN/END PRIVATE KEY lines. A public ssh-ed25519 line cannot be imported here.".into());
     }
-    if russh::keys::decode_secret_key(&private_key_pem, None).is_err() {
-        private_key_pem.zeroize();
-        return Err("SSH private key could not be parsed. Check the complete OpenSSH/PEM key; passphrase-protected keys are not supported by this import yet.".into());
+    match russh::keys::decode_secret_key(
+        &private_key_pem,
+        if key_passphrase.is_empty() { None } else { Some(key_passphrase.as_str()) },
+    ) {
+        Ok(_) => {}
+        Err(_) => {
+            private_key_pem.zeroize();
+            return Err("Could not unlock SSH private key. Check the complete key and its passphrase (if encrypted).".into());
+        }
     }
     let result = sessions.use_password(|password| {
         passh7_core::transaction(&vault_path()?, password, |vault| {
