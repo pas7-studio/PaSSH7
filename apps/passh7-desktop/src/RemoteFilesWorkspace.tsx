@@ -1,5 +1,5 @@
 import {useMemo,useState,type ReactNode} from "react";
-import {ArrowLeft,ArrowRight,ArrowUp,Clipboard,Download,FileText,FolderClosed,FolderPlus,Home,RefreshCw,Search,Trash2,Upload} from "lucide-react";
+import {ArrowLeft,ArrowRight,ArrowUp,Clipboard,Download,FileText,FolderClosed,FolderPlus,Home,Pencil,RefreshCw,Search,Trash2,Upload} from "lucide-react";
 import type {SftpEntry} from "./backend";
 
 const size=(n:number|null)=>n===null?"—":n<1024?n+" B":n<1048576?(n/1024).toFixed(1)+" KiB":(n/1048576).toFixed(2)+" MiB";
@@ -22,7 +22,8 @@ type Props={
   sort:"folders"|"name"|"size"|"modified";setSort:(s:Props["sort"])=>void;
   showHidden:boolean;navigate:(path:string)=>void;
   upload:()=>void;download:(path:string)=>void;readPreview:(path:string)=>void;
-  onMkdir:(name:string)=>void;onDelete:(name:string,isDirectory:boolean)=>void;mutationBusy:boolean;
+  onMkdir:(name:string)=>void;onDelete:(name:string,isDirectory:boolean)=>void;
+  onRename:(name:string,newName:string,isDirectory:boolean)=>void;mutationBusy:boolean;
   preview:Preview;previewBusy:boolean;
   transferBusy:boolean;transferProgress:Progress;transferResult:string|null;
   cancelTransfer:()=>void;backupPanel:ReactNode;
@@ -73,6 +74,15 @@ export default function RemoteFilesWorkspace(p:Props){
         if(!name)return;
         p.onMkdir(name);
       }}><FolderPlus size={16}/> New folder</button>
+      <button disabled={!p.connected||!selectedItem||p.mutationBusy||p.busy} onClick={()=>{
+        if(!selectedItem)return;
+        const requested=window.prompt("Rename "+selectedItem.name+" to:",selectedItem.name);
+        const next=requested?.trim();
+        if(!next||next===selectedItem.name)return;
+        if(window.confirm("Rename "+JSON.stringify(selectedItem.name)+" to "+JSON.stringify(next)+"?\n\nExisting destinations are checked, but concurrent server-side changes may race. Ensure nobody else is renaming into the same name.")){
+          p.onRename(selectedItem.name,next,selectedItem.isDir);
+        }
+      }}><Pencil size={16}/> Rename</button>
       <button className="dangerButton" disabled={!p.connected||!selectedItem||p.mutationBusy||p.busy} onClick={()=>{
         if(!selectedItem)return;
         if(window.confirm("Delete "+(selectedItem.isDir?"the empty directory ":"the file ")+
