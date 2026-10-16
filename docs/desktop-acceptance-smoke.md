@@ -46,7 +46,7 @@ during this checklist. Use a throwaway identity and Docker container.
 | VAULT-05 | Modify active Vault after recovery preview but before Restore | Commit fails with a generation/conflict error and original data remains intact |
 | VAULT-06 | Disconnect SSH or deny write permissions during remote backup; target path already exists | Operation fails without false success or overwriting another remote file; incomplete cleanup is best effort |
 | VAULT-07 | Restore on a second device with a matching master password, without access to the original device | Snapshot opens, Vault import is explicit, SSH keys/pins restored; no automatic background merge or silent sync |
-| SFTP-01 | Browse multiple folders, parent directory, read UTF-8 file | Correct entries and preview; unrelated session not used |
+| SFTP-01 | Browse multiple folders, use breadcrumbs and parent directory, filter/sort by name, size and modified date, read UTF-8 file | Correct remote entries, local timestamps and readable size; unrelated session not used |
 | SFTP-02 | Preview a binary file | Helpful UTF-8/binary error, no corruption |
 | SFTP-03 | Upload test binary file via native file picker | New file present on remote host; matching SHA-256 checksum |
 | SFTP-04 | Download same binary via native Save As dialog | Matching SHA-256 checksum and byte size locally |
