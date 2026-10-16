@@ -216,6 +216,17 @@ export default function App(){
     }catch(e){setProbeError(String(e))}
     finally{setLoginPassword("");setLoginKeyPassphrase("");setSshBusy(false)}
   };
+  const quickConnect=async(alias:string,mode:"key"|"password"|"key-password")=>{
+    if(!desktopAvailable()||!vaultUnlocked||sshBusy)return;
+    setSshBusy(true);setProbeError("");setCredentialWarning("");
+    try{
+      const opened=await openSshSession(alias,100,30,undefined,mode,undefined,true);
+      setSshTabs(v=>[...v,opened]);setActiveSsh(opened.id);setLoginOpen(false);
+    }catch(e){
+      setLoginMode(mode);setUseSavedCredentials(true);setRememberCredentials(true);
+      setProbeError(String(e));setLoginOpen(true);
+    }finally{setSshBusy(false)}
+  };
   const runWindowsAdminScript=async(script:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh);
     if(!session)throw new Error("Open and select a Windows SSH session first");
@@ -299,7 +310,7 @@ export default function App(){
     return;
   }
   setLoginPassword("");setLoginKeyPassphrase("");setLoginMode((active.savedAuthMode as "key"|"password"|"key-password")||"key-password");setUseSavedCredentials(!!active.hasSavedCredentials);setRememberCredentials(!!active.hasSavedCredentials);setLoginOpen(true)
-}}>Connect <span>↗</span></button>{desktopAvailable()&&vaultUnlocked&&active.id&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void authenticateActive()} disabled={authBusy} title="Verify pinned SSH host key and authenticate using encrypted vault key">{authBusy?"Authenticating…":"Test SSH login"}</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void probeActive()} disabled={probeBusy} title="Check SSH banner; not an authenticated connection">{probeBusy?"Checking…":"Test SSH port"}</button>}</div></div>
+}}>Connect <span>↗</span></button>{active.hasSavedCredentials&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} disabled={sshBusy||!vaultUnlocked} title="Connect using credentials saved in the encrypted vault" onClick={()=>void quickConnect(active.id,(active.savedAuthMode as "key"|"password"|"key-password")||"key-password")}>Quick connect</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void authenticateActive()} disabled={authBusy} title="Verify pinned SSH host key and authenticate using encrypted vault key">{authBusy?"Authenticating…":"Test SSH login"}</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void probeActive()} disabled={probeBusy} title="Check SSH banner; not an authenticated connection">{probeBusy?"Checking…":"Test SSH port"}</button>}</div></div>
         {credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{sshTabs.length?`${sshTabs.length} SSH session(s)`:"NO ACTIVE SESSION"}</small>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar">{sshTabs.map(t=><button key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"} onClick={()=>setActiveSsh(t.id)}>{t.alias} <span role="button" title="Disconnect" onClick={e=>{e.stopPropagation();void closeInteractive(t.id)}}>×</span></button>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{sshTabs.length===0&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>Your terminal starts here</h2><p>Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal.</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
         <footer><span className="footerBrand"><span className="statusDot" style={{background:connected?"#22c55e":undefined}}/> {connected?"SSH connected":desktopAvailable()?"No active SSH session":"Offline preview"}</span><span>{active.label} · {sshTabs.length} session(s)</span><span>{buildInfo?.publisher ?? "PAS7 Studio"} · {buildInfo?.target ?? "Loading build info"}</span></footer>
       </main>
