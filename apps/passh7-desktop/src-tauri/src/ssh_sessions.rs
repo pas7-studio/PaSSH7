@@ -1164,6 +1164,20 @@ mod tests {
     }
 
     #[test]
+    fn terminal_input_has_priority_lane_independent_of_blocked_tool_queue(){
+        let manager=SshSessionManager::default();
+        let (commands,_unread_commands)=mpsc::channel(1);
+        commands.try_send(SessionCommand::Ready).unwrap();
+        let (input,mut read_input)=mpsc::channel(2);
+        let (cancel,_cancel_receiver)=tokio::sync::watch::channel(false);
+        manager.channels.lock().unwrap().insert("ssh-keyboard".into(),ManagedSession{
+            alias:"low-latency".into(),sender:commands,input_sender:input,cancel
+        });
+        manager.input_sender("ssh-keyboard").unwrap().try_send(b"hello".to_vec()).unwrap();
+        assert_eq!(read_input.try_recv().unwrap(),b"hello");
+    }
+
+    #[test]
     fn vault_lock_cancels_sessions_even_with_full_input_queues() {
         let manager = SshSessionManager::default();
         let (tx, _rx) = mpsc::channel(1);
