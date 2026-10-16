@@ -281,6 +281,25 @@ mod vault_diff_tests {
         assert!(!summary.contains("example.org"));
     }
     #[test]
+    fn saved_credential_changes_are_reported_without_disclosing_passwords(){
+        let mut local=Vault::default();
+        let mut original=host("web",22);
+        original.extensions.insert("passh7_saved_auth".into(),
+            serde_json::json!({"mode":"password","accountPassword":"secret-one"}));
+        local.hosts.push(original);
+        let mut remote=Vault::default();
+        let mut updated=host("web",22);
+        updated.extensions.insert("passh7_saved_auth".into(),
+            serde_json::json!({"mode":"password","accountPassword":"secret-two"}));
+        remote.hosts.push(updated);
+        let diff=compare_vault_contents(&local,&remote);
+        assert_eq!(diff.changed_hosts,vec!["web"]);
+        let serialized=serde_json::to_string(&diff).unwrap();
+        assert!(!serialized.contains("secret-one"));
+        assert!(!serialized.contains("secret-two"));
+        assert!(!vault_difference_is_empty(&diff));
+    }
+    #[test]
     fn equal_plaintext_vaults_have_no_metadata_diff(){
         let mut local=Vault::default();
         local.hosts.push(host("same",22));
