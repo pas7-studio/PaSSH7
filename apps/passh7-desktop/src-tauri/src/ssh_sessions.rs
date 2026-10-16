@@ -20,6 +20,7 @@ enum SessionCommand {
     Input(Vec<u8>),
     Resize(u32, u32),
     Close,
+    DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
 }
 
 #[derive(Clone, Serialize)]
@@ -170,6 +171,38 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                         },
                         Some(SessionCommand::Input(bytes)) => channel.data_bytes(bytes).await,
                         Some(SessionCommand::Resize(c, r)) => channel.window_change(c, r, 0, 0).await,
+                        Some(SessionCommand::DockerList(response)) => {
+                            // Runs on a separate session channel; command is fixed by native code,
+                            // never constructed from untrusted renderer arguments.
+                            let listed = tokio::time::timeout(Duration::from_secs(20), async {
+                                let mut cmd = connection.channel_open_session().await
+                                    .map_err(|_| "Could not open remote command channel")?;
+                                cmd.exec(true, b"docker ps -a --format \"{{json .}}\"").await
+                                    .map_err(|_| "Docker command was rejected by the SSH server")?;
+                                let mut output = Vec::new();
+                                let mut exit_status = None;
+                                while let Some(message) = cmd.wait().await {
+                                    match message {
+                                        russh::ChannelMsg::Data { data } | russh::ChannelMsg::ExtendedData { data, .. } => {
+                                            if output.len().saturating_add(data.len()) > 2 * 1024 * 1024 {
+                                                return Err("Docker response exceeds 2 MiB".to_owned());
+                                            }
+                                            output.extend_from_slice(&data);
+                                        }
+                                        russh::ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
+                                        russh::ChannelMsg::Close => break,
+                                        _ => {}
+                                    }
+                                }
+                                let result = String::from_utf8_lossy(&output).into_owned();
+                                if exit_status.unwrap_or(1) != 0 {
+                                    return Err(format!("Docker listing failed: {}", result.chars().take(500).collect::<String>()));
+                                }
+                                Ok(result)
+                            }).await.unwrap_or_else(|_| Err("Docker listing timed out after 20 seconds".to_owned()));
+                            let _ = response.send(listed);
+                            Ok(())
+                        },
                         Some(SessionCommand::Close) | None => break,
                     };
                     if result.is_err() { break; }
@@ -222,6 +255,14 @@ pub async fn ssh_session_resize(id: String, cols: u32, rows: u32,
 #[tauri::command]
 pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>) -> Result<(), String> {
     manager.sender(&id)?.send(SessionCommand::Close).await.map_err(|_| "SSH session already closed".to_owned())
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionManager>) -> Result<String, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerList(tx)).await
+        .map_err(|_| "SSH session closed".to_owned())?;
+    rx.await.map_err(|_| "Docker request was cancelled".to_owned())?
 }
 
 #[tauri::command]
