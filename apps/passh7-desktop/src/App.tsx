@@ -1035,7 +1035,7 @@ export default function App(){
  onRefresh={()=>void refreshDocker()}
  onAction={(id,name,action)=>void runDockerAction(id,name,action)}
  onLogs={(id,name)=>void viewDockerLogs(id,name)}
- onCloseLogs={()=>setDockerLogs(null)}
+ onCloseLogs={()=>{setDockerLogs(null);setDockerLogsError(null)}}
  />:
         panel==="settings"?<SettingsWorkspace
  preferences={preferences} onChange={updatePreferences}
