@@ -24,6 +24,12 @@ export async function unlockVault(masterPassword:string):Promise<void>{
 export async function lockVault():Promise<void>{await invoke("vault_lock")}
 export async function vaultStatus():Promise<boolean>{return invoke<boolean>("vault_status")}
 export type VaultBackupResult={remotePath:string;bytes:number;verified:boolean};
+export type VaultBackupBatchTarget={id:string;alias:string;directory:string};
+export type VaultBackupBatchOutcome={alias:string;remotePath:string|null;error:string|null};
+export type VaultBackupBatchProgress={alias:string;index:number;total:number;stage:"started"|"verified"|"failed"};
+export async function backupEncryptedVaultBatch(targets:VaultBackupBatchTarget[]):Promise<VaultBackupBatchOutcome[]>{
+  return invoke<VaultBackupBatchOutcome[]>("ssh_session_vault_backup_batch",{targets});
+}
 export type VaultDifference={
   backupOnlyHosts:string[];
   localOnlyHosts:string[];
