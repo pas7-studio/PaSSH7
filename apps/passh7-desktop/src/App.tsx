@@ -125,6 +125,39 @@ export default function App(){
   useEffect(()=>{if(desktopAvailable()){void vaultExists().then(setVaultPresent).catch(()=>setVaultPresent(false))}},[]);
   const lockVault=async()=>{await lockNativeVault();setVaultPassword("");setVaultUnlocked(false);setHosts([]);setIdentities([])};
   const unlockVault=async()=>{try{if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}await unlockNativeVault(vaultPassword);setVaultPassword("");const saved=await getHosts();setIdentities(await getIdentities());setHosts(saved.map((h,i)=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode})));setSelected(saved[0]?.alias||"");setVaultUnlocked(true);setVaultDialog(false);setError("")}catch(e){setError(String(e))}};
+  // A WebView refresh can remount React without terminating the Rust process.
+  // Recover ONLY an already-unlocked native vault and already-open sessions;
+  // never auto-unlock persisted vault data or request secret material.
+  useEffect(()=>{
+    if(!desktopAvailable())return;
+    let mounted=true;
+    const restore=async()=>{
+      try{
+        if(!await vaultStatus())return;
+        const [saved,identities,live]=await Promise.all([
+          getHosts(),getIdentities(),listLiveSshSessions()
+        ]);
+        if(!mounted)return;
+        const allowed=new Set(saved.map(h=>h.alias));
+        const sessions=live.filter(t=>allowed.has(t.alias));
+        setHosts(saved.map(h=>({
+          id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
+          group:"My hosts",fingerprint:h.hostKeyPinned,
+          hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode
+        })));
+        setIdentities(identities);
+        sshTabsRef.current=sessions;
+        setSshTabs(sessions);
+        setSelected(sessions[0]?.alias||saved[0]?.alias||"");
+        setActiveSsh(sessions[0]?.id||"");
+        setVaultUnlocked(true);
+      }catch(error){
+        if(mounted)setError("Could not restore the active Vault window: "+String(error));
+      }
+    };
+    void restore();
+    return()=>{mounted=false};
+  },[]);
   useEffect(()=>{if(!desktopAvailable()||!vaultUnlocked)return;const id=window.setInterval(()=>{void vaultStatus().then(ok=>{if(!ok){setVaultUnlocked(false);setHosts([]);setSelected("");}}).catch(()=>{})},30000);return ()=>window.clearInterval(id)},[vaultUnlocked]);
   const [addOpen,setAddOpen]=useState(false);
   const [step,setStep]=useState(0);
@@ -387,6 +420,20 @@ export default function App(){
       setLoginMode(mode);setUseSavedCredentials(true);setRememberCredentials(true);
       setProbeError(String(e));setLoginOpen(true);
     }finally{setSshBusy(false)}
+  };
+  const reconnectNotice=(alias:string)=>{
+    const host=hosts.find(h=>h.id===alias);
+    if(!host||!vaultUnlocked)return;
+    setSelected(alias);
+    setSessionNotice(null);
+    const mode=(host.savedAuthMode as "key"|"password"|"key-password")||"key-password";
+    if(host.hasSavedCredentials){
+      void quickConnect(alias,mode);
+    }else{
+      setLoginMode(mode);setUseSavedCredentials(false);setRememberCredentials(false);
+      setLoginPassword("");setLoginKeyPassphrase("");setProbeError("");
+      setLoginOpen(true);
+    }
   };
   const runWindowsAdminScript=async(script:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh);
