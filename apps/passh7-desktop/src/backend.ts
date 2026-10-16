@@ -143,11 +143,22 @@ export async function stopLocalForward(sessionId:string,localPort:number):Promis
 /** Returns a completion message or null if the native Save As dialog was cancelled.
  * Transfers are native streamed SFTP, never JS blobs or browser downloads.
  */
-export async function downloadSftpFile(sessionId:string,path:string):Promise<string|null>{
-  return invoke<string|null>("ssh_session_sftp_download",{id:sessionId,path});
+export type SftpTransferEvent={
+  sessionId:string;
+  transferId:string;
+  direction:"upload"|"download";
+  stage:"started"|"progress";
+  bytes:number;
+  totalBytes:number|null;
+};
+export async function downloadSftpFile(sessionId:string,path:string,transferId:string):Promise<string|null>{
+  return invoke<string|null>("ssh_session_sftp_download",{id:sessionId,path,transferId});
 }
-export async function uploadSftpFile(sessionId:string,directory:string):Promise<string|null>{
-  return invoke<string|null>("ssh_session_sftp_upload",{id:sessionId,directory});
+export async function uploadSftpFile(sessionId:string,directory:string,transferId:string):Promise<string|null>{
+  return invoke<string|null>("ssh_session_sftp_upload",{id:sessionId,directory,transferId});
+}
+export async function cancelSftpTransfer(sessionId:string,transferId:string):Promise<void>{
+  await invoke("ssh_session_sftp_cancel",{id:sessionId,transferId});
 }
 
 export async function readSftpText(sessionId:string,path:string):Promise<string>{
