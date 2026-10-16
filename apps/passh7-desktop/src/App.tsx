@@ -493,6 +493,10 @@ export default function App(){
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Select a connected SSH session before transferring files.");return}
     if(sftpTransferBusy)return;
+    if(preferences.confirmTransfer && !window.confirm(
+      direction==="upload"?"Upload a local file to "+(sftpEntries?.path||sftpPath)+" on "+session.alias+"?":
+      "Download remote file "+(path||"")+" from "+session.alias+"?"
+    ))return;
     const transferId=crypto.randomUUID();
     setSftpTransferBusy(true);setSftpError("");setSftpTransferResult(null);
     setSftpTransferProgress({session:session.id,id:transferId,direction,stage:"selecting",bytes:0,totalBytes:null});
@@ -868,7 +872,7 @@ export default function App(){
   const activeConnections=sshTabs.filter(t=>t.alias===active.id).length;
   const connected=activeConnections>0;
   const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: "+(connected?`connected (${activeConnections} SSH session${activeConnections===1?"":"s"})`:"disconnected")+"\nVault: "+(vaultUnlocked?"unlocked":"locked")+"\nPermissions: "+(connected?"Remote SSH account privileges (not sandboxed)":"No active SSH account")+"\nSelected resources: none"+"\nSSH route: "+(active.jumpAlias?"via "+active.jumpAlias+" (gateway LAN → "+active.address+":"+active.port+")":"direct");
-  return <div className={"shell "+theme} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if(e.key==="Escape"){setCommandOpen(false);setShowSettings(false)}}}>
+  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if(e.key==="Escape"){setCommandOpen(false);}}}>
     <header className="topbar"><div className="brand"><div className="brandicon"><TerminalSquare size={19}/></div><strong>PaSSH7</strong><span className="alpha">v{buildInfo?.version ?? "0.1.0"} · PREVIEW</span></div><div className="topactions"><button className="lock" onClick={()=>{if(desktopAvailable()){if(vaultUnlocked){void lockVault()}else{setVaultDialog(true)}}}}><LockKeyhole size={14}/> {vaultUnlocked?"Lock vault":desktopAvailable()?"Unlock vault":"Vault unavailable"}</button><button className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button><button className="iconbtn" title="Settings" aria-label="Settings" onClick={()=>setPanel("settings")}><Settings2 size={17}/></button></div></header>
     <div className={"workspace "+(["files","docker","settings"].includes(panel)?"workspaceFull":"")}>
       {sidebar&&<aside className="sidebar"><nav className="workspaceNav" aria-label="Workspaces">
