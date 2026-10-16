@@ -22,6 +22,7 @@ enum SessionCommand {
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
+    SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardOpen(tokio::net::TcpStream,String,u16),
@@ -238,6 +239,27 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let _ = response.send(result);
                             Ok(())
                         },
+                        Some(SessionCommand::SftpRead(path,response)) => {
+                            let result=tokio::time::timeout(Duration::from_secs(20), async {
+                                use tokio::io::AsyncReadExt;
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|e|format!("Could not open SFTP channel: {e}"))?;
+                                channel.request_subsystem(true,"sftp").await
+                                    .map_err(|e|format!("SFTP subsystem unavailable: {e}"))?;
+                                let sftp=russh_sftp::client::SftpSession::new(channel.into_stream()).await
+                                    .map_err(|e|format!("SFTP initialization failed: {e}"))?;
+                                let mut file=sftp.open(path).await.map_err(|e|format!("Cannot open remote file: {e}"))?;
+                                const MAX:u64=262_144;
+                                let mut bytes=Vec::new();
+                                (&mut file).take(MAX+1).read_to_end(&mut bytes).await
+                                    .map_err(|e|format!("Cannot read remote file: {e}"))?;
+                                if bytes.len()>MAX as usize { return Err("File too large for preview (256 KiB limit)".to_owned()); }
+                                if bytes.contains(&0) { return Err("Binary file cannot be previewed as text".to_owned()); }
+                                String::from_utf8(bytes).map_err(|_|"Text preview requires UTF-8; use the terminal or a binary transfer tool".to_owned())
+                            }).await.unwrap_or_else(|_|Err("SFTP preview timed out after 20 seconds".to_owned()));
+                            let _=response.send(result);
+                            Ok(())
+                        },
                         Some(SessionCommand::ForwardStart(local_port,target_host,remote_port,response)) => {
                             if forwarders.contains_key(&local_port) {
                                 let _ = response.send(Err("Local port already forwarded by this session".into()));
@@ -365,6 +387,15 @@ pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, 
     manager.sender(&id)?.send(SessionCommand::SftpList(path,tx)).await
         .map_err(|_| "SSH connection has closed".to_owned())?;
     rx.await.map_err(|_| "SFTP listing cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_sftp_read_text(id:String,path:String,manager:State<'_,SshSessionManager>)->Result<String,String>{
+    if path.len()>4096 || path.as_bytes().contains(&0) {return Err("Invalid SFTP file path".into());}
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::SftpRead(path,tx)).await
+        .map_err(|_|"SSH connection has closed".to_owned())?;
+    rx.await.map_err(|_|"SFTP preview was cancelled".to_owned())?
 }
 
 #[tauri::command]
