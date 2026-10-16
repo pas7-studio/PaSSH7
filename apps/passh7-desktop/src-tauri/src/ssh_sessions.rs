@@ -30,6 +30,7 @@ enum SessionCommand {
     Resize(u32, u32),
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerCatalog(String,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogs(String,u32,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
@@ -468,6 +469,47 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             }
                                             Ok::<String,String>(message)
                                         }).await.unwrap_or_else(|_|Err("Docker inventory timed out after 20 seconds".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerCatalog(kind,response)) => {
+                            let command=match docker_catalog_command(&kind){Some(command)=>command,None=>{let _=response.send(Err("Unsupported Docker catalog category".into()));continue}};
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker catalog channel".to_owned())?;
+                                channel.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"SSH server refused Docker catalog command".to_owned())?;
+                                Ok::<_,String>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker catalog SSH channel setup timed out".into()));
+                            match setup {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let mut output=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await {
+                                                match message {
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if output.len().saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker catalog exceeds 2 MiB".to_owned());
+                                                        }
+                                                        output.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
+                                            }
+                                            let message=String::from_utf8_lossy(&output).into_owned();
+                                            if exit_status.is_some_and(|code|code!=0){
+                                                return Err(format!("Docker catalog failed: {}",message.chars().take(500).collect::<String>()));
+                                            }
+                                            Ok::<String,String>(message)
+                                        }).await.unwrap_or_else(|_|Err("Docker catalog timed out after 20 seconds".into()));
                                         let _=response.send(result);
                                     });
                                 }
@@ -1128,6 +1170,46 @@ pub async fn ssh_session_resize(id: String, cols: u32, rows: u32,
 #[tauri::command]
 pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>) -> Result<(), String> {
     manager.sender(&id)?.send(SessionCommand::Close).await.map_err(|_| "SSH session already closed".to_owned())
+}
+
+/// Fixed commands only: no user-supplied shell command or arbitrary container
+/// names. The catalog response is bounded in the SSH actor.
+fn docker_catalog_command(kind:&str)->Option<&'static str>{
+    match kind{
+        "images"=>Some("docker image ls --format \"{{json .}}\""),
+        "volumes"=>Some("docker volume ls --format \"{{json .}}\""),
+        "networks"=>Some("docker network ls --format \"{{json .}}\""),
+        _=>None
+    }
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_catalog(
+    id:String,kind:String,manager:State<'_,SshSessionManager>
+)->Result<String,String>{
+    if docker_catalog_command(&kind).is_none(){
+        return Err("Unsupported Docker catalog category".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerCatalog(kind,tx)).await
+        .map_err(|_|"SSH session closed before Docker catalog request")?;
+    rx.await.map_err(|_|"Docker catalog response interrupted")?
+}
+
+#[cfg(test)]
+mod docker_catalog_tests{
+    use super::docker_catalog_command;
+    #[test]
+    fn only_fixed_read_only_catalog_commands_are_accepted(){
+        for kind in ["images","volumes","networks"]{
+            let command=docker_catalog_command(kind).unwrap();
+            assert!(command.starts_with("docker "));
+            assert!(command.contains("--format"));
+        }
+        for bad in ["containers","images; rm -rf /","logs","docker ps",""]{
+            assert!(docker_catalog_command(bad).is_none());
+        }
+    }
 }
 
 #[tauri::command]
