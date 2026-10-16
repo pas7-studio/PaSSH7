@@ -347,10 +347,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
-                        Some(SessionCommand::Close) => {
-                            closure_detail = Some("Disconnected by user".into());
-                            break;
-                        },
+                        Some(SessionCommand::Close) => break,
                         None => {
                             closure_detail = Some("SSH session command queue was closed".into());
                             break;
