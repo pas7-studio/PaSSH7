@@ -211,3 +211,12 @@
 @media(max-width:1100px){.settingsLayout{grid-template-columns:170px minmax(0,1fr)}.settingsHelp{grid-column:2;display:flex}.settingsHelp>.settingsCard{flex:1}.filesGrid{grid-template-columns:150px minmax(0,1fr)}.filesInspector{grid-column:1/-1;height:230px}.filesGrid{height:auto}.filesTablePane{height:400px}}
 @media(max-width:800px){.workspaceFull>.context.fullContext{display:flex!important}.widePage{padding:14px}.workspaceNav button{font-size:11px}.filesGrid,.dockerWorkspaceGrid,.settingsLayout{display:flex;flex-direction:column;height:auto}.filesFolders{max-height:180px}.filesTablePane{height:340px}.filesInspector,.dockerInspector{height:auto;max-height:300px}.dockerMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.settingsHelp{display:grid}.filesPathBar{flex-wrap:wrap}.filesCrumbs{min-width:100%}}
 .shell.compact .workspaceTable td{padding:6px 9px}.shell.compact .workspaceTable th{padding:8px 9px}
+
+/* Docker resource management: container/image/volume/network inventory */
+.dockerResourceTabs{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-top:-5px}
+.dockerResourceTabs button{min-height:35px;padding:7px 15px;font-size:12px;font-weight:650}
+.dockerResourceTabs button.active{background:var(--accentSoft);border-color:var(--accent);color:var(--accent)}
+.dockerCatalogWorkspace{display:flex;flex-direction:column;min-height:400px;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.dockerCatalogWorkspace .dockerTableScroll{flex:1;min-height:260px;overflow:auto}
+.dockerCatalogWorkspace .prefInfo{border-top:1px solid var(--border);padding:12px 16px}
+.dockerCatalogWorkspace .workspaceTable td{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
