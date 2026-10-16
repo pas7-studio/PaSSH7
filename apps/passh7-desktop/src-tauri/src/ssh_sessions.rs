@@ -77,7 +77,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
     passh7_core::hostkey::validate_fingerprint(&pin).map_err(safe_err)?;
     let key = if auth_mode != "password" {
         Some(russh::keys::decode_secret_key(&secret, if key_passphrase.is_empty() { None } else { Some(key_passphrase.as_str()) })
-            .map_err(|_| "Cannot unlock SSH private key. Enter its key passphrase, or verify the imported key.".to_owned())?)
+            .map_err(|_| "SSH_KEY_UNLOCK: Cannot unlock the selected private key. Check the key passphrase and that the imported private key matches the chosen identity.".to_owned())?)
     } else { None };
     let config = std::sync::Arc::new(russh::client::Config {
         inactivity_timeout: Some(Duration::from_secs(600)), ..Default::default()
@@ -88,40 +88,40 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
 
     if auth_mode == "password" {
         let mut password = account_password.take().filter(|p| !p.is_empty())
-            .ok_or("Password is required for password-only bootstrap")?;
+            .ok_or("SSH_PASSWORD_REQUIRED: Enter the Windows account password for password-only authentication.")?;
         let result = connection.authenticate_password(&host.username, password.to_string()).await
-            .map_err(|_| "SSH password authentication failed".to_owned())?;
+            .map_err(|_| "SSH_PASSWORD_ERROR: Password authentication could not complete. The server may have closed the connection or disallowed this method.".to_owned())?;
         zeroize::Zeroize::zeroize(&mut *password);
-        if !result.success() { return Err("Server rejected the account password".into()); }
+        if !result.success() { return Err("SSH_PASSWORD_REJECTED: The server did not accept password-only login. Verify the username/password and whether the server allows password authentication.".into()); }
     } else {
         let hash = connection.best_supported_rsa_hash().await
-            .map_err(|_| "SSH key negotiation failed".to_owned())?.flatten();
+            .map_err(|_| "SSH_KEY_NEGOTIATION: The server and client could not agree on the public-key authentication algorithm.".to_owned())?.flatten();
         let key = key.ok_or("SSH private key unavailable")?;
         let auth = connection.authenticate_publickey(&host.username,
             russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash))
-            .await.map_err(|_| "SSH authentication failed".to_owned())?;
+            .await.map_err(|_| "SSH_AUTH_ERROR: Public-key authentication could not complete. Check network stability and server authentication logs.".to_owned())?;
         match auth {
             russh::client::AuthResult::Success => {}
             russh::client::AuthResult::Failure { partial_success: true, .. } if auth_mode == "key-password" => {
                 let mut password = account_password.take().filter(|p| !p.is_empty())
-                    .ok_or("Server requires an account password after accepting the key")?;
+                    .ok_or("SSH_SECOND_FACTOR_REQUIRED: The server accepted the public key but requires the account password. Choose SSH key + Windows password.")?;
                 let result = connection.authenticate_password(&host.username, password.to_string()).await
-                    .map_err(|_| "SSH account password authentication failed".to_owned())?;
+                    .map_err(|_| "SSH_SECOND_FACTOR_ERROR: The server accepted the key, but the password step could not complete.".to_owned())?;
                 zeroize::Zeroize::zeroize(&mut *password);
-                if !result.success() { return Err("SSH account password rejected".into()); }
+                if !result.success() { return Err("SSH_SECOND_FACTOR_REJECTED: The public key was accepted, but the Windows account password was rejected.".into()); }
             }
             russh::client::AuthResult::Failure { partial_success: true, .. } =>
-                return Err("Server accepted key but requires another factor. Select Key + password".into()),
+                return Err("SSH_PARTIAL_AUTH: The public key was accepted, but another authentication factor is required. Select SSH key + Windows password.".into()),
             russh::client::AuthResult::Failure { .. } =>
-                return Err("SSH server rejected this public key".into()),
+                return Err("SSH_PUBLICKEY_REJECTED: The server did not accept the offered public key. Verify the selected identity, account username, authorized_keys location and server-side permissions. The client cannot determine the exact server-side reason.".into()),
         }
     }
 
     let mut channel = connection.channel_open_session().await
-        .map_err(|_| "Cannot open SSH channel".to_owned())?;
+        .map_err(|_| "SSH_CHANNEL_ERROR: Authentication completed, but opening a session channel failed. Check server session limits and SSHD logs.".to_owned())?;
     channel.request_pty(true, "xterm-256color", cols, rows, 0, 0, &[])
-        .await.map_err(|_| "SSH server denied PTY".to_owned())?;
-    channel.request_shell(true).await.map_err(|_| "SSH server denied shell".to_owned())?;
+        .await.map_err(|_| "SSH_PTY_DENIED: Authentication completed, but the server denied terminal allocation. Check PermitTTY and server policies.".to_owned())?;
+    channel.request_shell(true).await.map_err(|_| "SSH_SHELL_DENIED: Authentication completed, but the server denied the interactive shell. Check the configured login shell and SSHD logs.".to_owned())?;
     let id = format!("ssh-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
     let (tx, mut rx) = mpsc::channel::<SessionCommand>(128);
     let (cancel_tx, mut cancelled) = tokio::sync::watch::channel(false);
