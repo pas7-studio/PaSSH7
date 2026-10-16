@@ -32,8 +32,8 @@ export async function addHost(host:AddHostInput):Promise<void>{
   await invoke("vault_add_host",{host});
 }
 
-export async function saveHostCredentials(alias:string,authMode:"key"|"password"|"key-password",accountPassword:string,keyPassphrase:string):Promise<void>{
-  await invoke("vault_save_host_credentials",{alias,authMode,accountPassword,keyPassphrase});
+export async function saveHostCredentials(alias:string,authMode:"key"|"password"|"key-password",accountPassword:string,keyPassphrase:string,preserveExisting=false):Promise<void>{
+  await invoke("vault_save_host_credentials",{alias,authMode,accountPassword,keyPassphrase,preserveExisting});
 }
 export async function forgetHostCredentials(alias:string):Promise<void>{
   await invoke("vault_forget_host_credentials",{alias});
@@ -80,7 +80,7 @@ export async function authenticateSshHost(alias:string):Promise<SshAuthResult>{
 export type OpenedSshSession = {id:string;alias:string};
 export type SshSessionEvent = {id:string;kind:"data"|"closed";data?:string;detail?:string};
 export async function openSshSession(alias:string,cols:number,rows:number,accountPassword?:string,authMode:"key"|"password"|"key-password"="key",keyPassphrase?:string,useSavedCredentials=false):Promise<OpenedSshSession>{
-  return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows,accountPassword:accountPassword||null,authMode,keyPassphrase:keyPassphrase||null});
+  return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows,accountPassword:accountPassword||null,authMode,keyPassphrase:keyPassphrase||null,useSavedCredentials});
 }
 export async function writeSshSession(id:string,data:string):Promise<void>{
   return invoke("ssh_session_write",{id,data});
