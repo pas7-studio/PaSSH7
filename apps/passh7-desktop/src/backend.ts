@@ -2,7 +2,7 @@ import {invoke} from "@tauri-apps/api/core";
 
 export type HostSummary = {
   alias:string; hostname:string; port:number; username:string;
-  identityAlias:string; hostKeyPinned:boolean; hasSavedCredentials:boolean; savedAuthMode:string|null;
+  identityAlias:string; hostKeyPinned:boolean; hasSavedCredentials:boolean; savedAuthMode:string|null; backupDirectory:string|null;
 };
 export type AddHostInput = {
   alias:string; hostname:string; port:number; username:string;
@@ -65,6 +65,10 @@ export async function discoverLocalSshConfigHosts():Promise<LocalSshConfigHost[]
 export async function addHost(host:AddHostInput):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   await invoke("vault_add_host",{host});
+}
+
+export async function setHostBackupDirectory(alias:string,directory:string|null):Promise<void>{
+  await invoke<void>("vault_set_backup_directory",{alias,directory});
 }
 
 export async function setHostIdentity(alias:string,identityAlias:string):Promise<void>{
