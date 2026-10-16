@@ -121,3 +121,10 @@ export type SftpEntry={name:string;isDir:boolean};
 export async function listSftpDirectory(sessionId:string,path:string):Promise<SftpEntry[]>{
   return invoke<SftpEntry[]>("ssh_session_sftp_list",{id:sessionId,path});
 }
+
+export async function startLocalForward(sessionId:string,localPort:number,targetHost:string,remotePort:number):Promise<void>{
+  return invoke("ssh_session_forward_start",{id:sessionId,localPort,targetHost,remotePort});
+}
+export async function stopLocalForward(sessionId:string,localPort:number):Promise<void>{
+  return invoke("ssh_session_forward_stop",{id:sessionId,localPort});
+}
