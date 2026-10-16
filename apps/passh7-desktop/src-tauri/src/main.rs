@@ -373,6 +373,65 @@ async fn ssh_probe_host(alias: String, sessions: State<'_, SessionStore>) -> Res
 }
 
 
+#[derive(Clone)]
+struct DiscoverSshHostKey {
+    observed: std::sync::Arc<Mutex<Option<String>>>,
+}
+impl russh::client::Handler for DiscoverSshHostKey {
+    type Error = russh::Error;
+    async fn check_server_key(&mut self, key: &russh::keys::PublicKeyOrCertificate)
+        -> Result<bool, Self::Error> {
+        // Never trust implicitly, never authenticate during discovery.
+        if key.certificate().is_none() {
+            let fingerprint = key.public_key().fingerprint(russh::keys::HashAlg::Sha256).to_string();
+            if let Ok(mut guard) = self.observed.lock() { *guard = Some(fingerprint); }
+        }
+        Ok(false)
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+struct DiscoveredHostKey { fingerprint: String }
+
+#[tauri::command]
+async fn ssh_discover_host_key(alias: String, sessions: State<'_, SessionStore>) -> Result<DiscoveredHostKey, String> {
+    let host = sessions.use_password(|password| {
+        let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
+        vault.hosts.iter().find(|h| h.alias == alias).cloned()
+            .ok_or_else(|| "Saved SSH host not found".to_owned())
+    })?;
+    if host.pinned_host_key.is_some() { return Err("This host already has a trusted fingerprint".into()); }
+    let observed = std::sync::Arc::new(Mutex::new(None));
+    let config = std::sync::Arc::new(russh::client::Config {
+        inactivity_timeout: Some(Duration::from_secs(12)), ..Default::default()
+    });
+    // connect intentionally fails when check_server_key returns false;
+    // server fingerprint is captured before any authentication is attempted.
+    let _ = tokio::time::timeout(Duration::from_secs(12),russh::client::connect(
+        config,(host.hostname.as_str(),host.port),
+        DiscoverSshHostKey {observed: observed.clone()}
+    )).await;
+    let fingerprint = observed.lock().map_err(|_| "Host fingerprint probe failed")?
+        .clone().ok_or_else(|| "Could not read SSH server host key; check host/port/network".to_owned())?;
+    passh7_core::hostkey::validate_fingerprint(&fingerprint).map_err(safe_err)?;
+    Ok(DiscoveredHostKey {fingerprint})
+}
+
+#[tauri::command]
+fn vault_pin_host_key(alias: String, fingerprint: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
+    sessions.use_password(|password| {
+        passh7_core::transaction(&vault_path()?,password,|vault| {
+            if vault.hosts.iter().find(|h| h.alias == alias)
+                .and_then(|h| h.pinned_host_key.as_ref()).is_some() {
+                return Err(HubError::InvalidInput("host key already pinned; replace requires a separate verified workflow"));
+            }
+            vault.pin_host_key(&alias,&fingerprint)?;
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
+
 struct PinnedSshClient {
     expected_pin: String,
 }
@@ -449,7 +508,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
             ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_docker_list
