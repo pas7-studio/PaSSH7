@@ -20,7 +20,7 @@ export type HostDraft = {
   hostname: string;
   port: number;
   username: string;
-  auth: "key" | "agent";
+  auth: "password" | "key" | "agent";
   identity: string;
   fingerprint: string;
 };
