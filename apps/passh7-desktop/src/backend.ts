@@ -108,3 +108,11 @@ export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey
 export async function listDockerContainers(sessionId:string):Promise<string>{
   return invoke<string>("ssh_session_docker_list",{id:sessionId});
 }
+
+export type DiscoveredHostKey = {fingerprint:string};
+export async function discoverSshHostKey(alias:string):Promise<DiscoveredHostKey>{
+  return invoke<DiscoveredHostKey>("ssh_discover_host_key",{alias});
+}
+export async function pinSshHostKey(alias:string,fingerprint:string):Promise<void>{
+  return invoke("vault_pin_host_key",{alias,fingerprint});
+}
