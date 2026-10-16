@@ -20,6 +20,7 @@ enum SessionCommand {
     Input(Vec<u8>),
     Resize(u32, u32),
     Close,
+    DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
 }
 
 #[derive(Clone, Serialize)]
@@ -52,32 +53,44 @@ impl SshSessionManager {
 }
 
 #[tauri::command]
-pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>, auth_mode: Option<String>, key_passphrase: Option<String>,
+pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>, auth_mode: Option<String>, key_passphrase: Option<String>, use_saved_credentials: Option<bool>,
     vault: State<'_, SessionStore>, manager: State<'_, SshSessionManager>, app: AppHandle
 ) -> Result<OpenedSession, String> {
     if !(20..=500).contains(&cols) || !(5..=200).contains(&rows) {
         return Err("Invalid PTY dimensions".into());
     }
     let mut account_password = account_password.map(zeroize::Zeroizing::new);
-    let key_passphrase = zeroize::Zeroizing::new(key_passphrase.unwrap_or_default());
+    let mut key_passphrase = zeroize::Zeroizing::new(key_passphrase.unwrap_or_default());
     let auth_mode = auth_mode.as_deref().unwrap_or("key");
     if !matches!(auth_mode, "key" | "password" | "key-password") {
         return Err("Unsupported SSH authentication mode".into());
     }
     let generation = manager.generation.load(Ordering::SeqCst);
-    let (host, secret) = vault.use_password(|password| {
+    let (host, secret, saved_account, saved_key_passphrase) = vault.use_password(|password| {
         let data = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         let host = data.hosts.iter().find(|h| h.alias == alias)
             .ok_or_else(|| "Host not found".to_owned())?.clone();
         let identity = data.identities.iter().find(|i| i.alias == host.identity_alias)
             .ok_or_else(|| "SSH identity missing".to_owned())?;
-        Ok((host, zeroize::Zeroizing::new(identity.private_key_pem.clone())))
+        let saved = if use_saved_credentials.unwrap_or(false) {
+            host.extensions.get("passh7_saved_auth").filter(|v| v.get("mode").and_then(|m| m.as_str()) == Some(auth_mode))
+        } else { None };
+        let saved_account = saved.and_then(|v| v.get("account_password")).and_then(|v| v.as_str()).unwrap_or_default();
+        let saved_key = saved.and_then(|v| v.get("key_passphrase")).and_then(|v| v.as_str()).unwrap_or_default();
+        Ok((host, zeroize::Zeroizing::new(identity.private_key_pem.clone()),
+            zeroize::Zeroizing::new(saved_account.to_owned()), zeroize::Zeroizing::new(saved_key.to_owned())))
     })?;
+    if account_password.as_ref().map(|v| v.is_empty()).unwrap_or(true) && !saved_account.is_empty() {
+        account_password = Some(saved_account);
+    }
+    if key_passphrase.is_empty() && !saved_key_passphrase.is_empty() {
+        key_passphrase = saved_key_passphrase;
+    }
     let pin = host.pinned_host_key.clone().ok_or("Host key is not pinned")?;
     passh7_core::hostkey::validate_fingerprint(&pin).map_err(safe_err)?;
     let key = if auth_mode != "password" {
         Some(russh::keys::decode_secret_key(&secret, if key_passphrase.is_empty() { None } else { Some(key_passphrase.as_str()) })
-            .map_err(|_| "SSH_KEY_UNLOCK: Cannot unlock the selected private key. Check the key passphrase and that the imported private key matches the chosen identity.".to_owned())?)
+            .map_err(|_| "Cannot unlock SSH private key. Enter its key passphrase, or verify the imported key.".to_owned())?)
     } else { None };
     let config = std::sync::Arc::new(russh::client::Config {
         inactivity_timeout: Some(Duration::from_secs(600)), ..Default::default()
@@ -88,40 +101,40 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
 
     if auth_mode == "password" {
         let mut password = account_password.take().filter(|p| !p.is_empty())
-            .ok_or("SSH_PASSWORD_REQUIRED: Enter the Windows account password for password-only authentication.")?;
+            .ok_or("Password is required for password-only bootstrap")?;
         let result = connection.authenticate_password(&host.username, password.to_string()).await
-            .map_err(|_| "SSH_PASSWORD_ERROR: Password authentication could not complete. The server may have closed the connection or disallowed this method.".to_owned())?;
+            .map_err(|_| "SSH password authentication failed".to_owned())?;
         zeroize::Zeroize::zeroize(&mut *password);
-        if !result.success() { return Err("SSH_PASSWORD_REJECTED: The server did not accept password-only login. Verify the username/password and whether the server allows password authentication.".into()); }
+        if !result.success() { return Err("Server rejected the account password".into()); }
     } else {
         let hash = connection.best_supported_rsa_hash().await
-            .map_err(|_| "SSH_KEY_NEGOTIATION: The server and client could not agree on the public-key authentication algorithm.".to_owned())?.flatten();
+            .map_err(|_| "SSH key negotiation failed".to_owned())?.flatten();
         let key = key.ok_or("SSH private key unavailable")?;
         let auth = connection.authenticate_publickey(&host.username,
             russh::keys::PrivateKeyWithHashAlg::new(std::sync::Arc::new(key), hash))
-            .await.map_err(|_| "SSH_AUTH_ERROR: Public-key authentication could not complete. Check network stability and server authentication logs.".to_owned())?;
+            .await.map_err(|_| "SSH authentication failed".to_owned())?;
         match auth {
             russh::client::AuthResult::Success => {}
             russh::client::AuthResult::Failure { partial_success: true, .. } if auth_mode == "key-password" => {
                 let mut password = account_password.take().filter(|p| !p.is_empty())
-                    .ok_or("SSH_SECOND_FACTOR_REQUIRED: The server accepted the public key but requires the account password. Choose SSH key + Windows password.")?;
+                    .ok_or("Server requires an account password after accepting the key")?;
                 let result = connection.authenticate_password(&host.username, password.to_string()).await
-                    .map_err(|_| "SSH_SECOND_FACTOR_ERROR: The server accepted the key, but the password step could not complete.".to_owned())?;
+                    .map_err(|_| "SSH account password authentication failed".to_owned())?;
                 zeroize::Zeroize::zeroize(&mut *password);
-                if !result.success() { return Err("SSH_SECOND_FACTOR_REJECTED: The public key was accepted, but the Windows account password was rejected.".into()); }
+                if !result.success() { return Err("SSH account password rejected".into()); }
             }
             russh::client::AuthResult::Failure { partial_success: true, .. } =>
-                return Err("SSH_PARTIAL_AUTH: The public key was accepted, but another authentication factor is required. Select SSH key + Windows password.".into()),
+                return Err("Server accepted key but requires another factor. Select Key + password".into()),
             russh::client::AuthResult::Failure { .. } =>
-                return Err("SSH_PUBLICKEY_REJECTED: The server did not accept the offered public key. Verify the selected identity, account username, authorized_keys location and server-side permissions. The client cannot determine the exact server-side reason.".into()),
+                return Err("SSH server rejected this public key".into()),
         }
     }
 
     let mut channel = connection.channel_open_session().await
-        .map_err(|_| "SSH_CHANNEL_ERROR: Authentication completed, but opening a session channel failed. Check server session limits and SSHD logs.".to_owned())?;
+        .map_err(|_| "Cannot open SSH channel".to_owned())?;
     channel.request_pty(true, "xterm-256color", cols, rows, 0, 0, &[])
-        .await.map_err(|_| "SSH_PTY_DENIED: Authentication completed, but the server denied terminal allocation. Check PermitTTY and server policies.".to_owned())?;
-    channel.request_shell(true).await.map_err(|_| "SSH_SHELL_DENIED: Authentication completed, but the server denied the interactive shell. Check the configured login shell and SSHD logs.".to_owned())?;
+        .await.map_err(|_| "SSH server denied PTY".to_owned())?;
+    channel.request_shell(true).await.map_err(|_| "SSH server denied shell".to_owned())?;
     let id = format!("ssh-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
     let (tx, mut rx) = mpsc::channel::<SessionCommand>(128);
     let (cancel_tx, mut cancelled) = tokio::sync::watch::channel(false);
@@ -158,6 +171,38 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                         },
                         Some(SessionCommand::Input(bytes)) => channel.data_bytes(bytes).await,
                         Some(SessionCommand::Resize(c, r)) => channel.window_change(c, r, 0, 0).await,
+                        Some(SessionCommand::DockerList(response)) => {
+                            // Runs on a separate session channel; command is fixed by native code,
+                            // never constructed from untrusted renderer arguments.
+                            let listed = tokio::time::timeout(Duration::from_secs(20), async {
+                                let mut cmd = connection.channel_open_session().await
+                                    .map_err(|_| "Could not open remote command channel")?;
+                                cmd.exec(true, b"docker ps -a --format \"{{json .}}\"").await
+                                    .map_err(|_| "Docker command was rejected by the SSH server")?;
+                                let mut output = Vec::new();
+                                let mut exit_status = None;
+                                while let Some(message) = cmd.wait().await {
+                                    match message {
+                                        russh::ChannelMsg::Data { data } | russh::ChannelMsg::ExtendedData { data, .. } => {
+                                            if output.len().saturating_add(data.len()) > 2 * 1024 * 1024 {
+                                                return Err("Docker response exceeds 2 MiB".to_owned());
+                                            }
+                                            output.extend_from_slice(&data);
+                                        }
+                                        russh::ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
+                                        russh::ChannelMsg::Close => break,
+                                        _ => {}
+                                    }
+                                }
+                                let result = String::from_utf8_lossy(&output).into_owned();
+                                if exit_status.unwrap_or(1) != 0 {
+                                    return Err(format!("Docker listing failed: {}", result.chars().take(500).collect::<String>()));
+                                }
+                                Ok(result)
+                            }).await.unwrap_or_else(|_| Err("Docker listing timed out after 20 seconds".to_owned()));
+                            let _ = response.send(listed);
+                            Ok(())
+                        },
                         Some(SessionCommand::Close) | None => break,
                     };
                     if result.is_err() { break; }
@@ -210,6 +255,14 @@ pub async fn ssh_session_resize(id: String, cols: u32, rows: u32,
 #[tauri::command]
 pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>) -> Result<(), String> {
     manager.sender(&id)?.send(SessionCommand::Close).await.map_err(|_| "SSH session already closed".to_owned())
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionManager>) -> Result<String, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerList(tx)).await
+        .map_err(|_| "SSH session closed".to_owned())?;
+    rx.await.map_err(|_| "Docker request was cancelled".to_owned())?
 }
 
 #[tauri::command]
