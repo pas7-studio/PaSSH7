@@ -223,10 +223,14 @@ export default function App(){
     try{
       const result=await controlDockerContainer(session.id,containerId,action);
       setDockerActionStatus({session:session.id,text:result});
-      const raw=await listDockerContainers(session.id);
-      const items=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean)
-        .map(line=>JSON.parse(line) as {ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string});
-      setDockerInventory({session:session.id,items});
+      try{
+        const raw=await listDockerContainers(session.id);
+        const items=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean)
+          .map(line=>JSON.parse(line) as {ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string});
+        setDockerInventory({session:session.id,items});
+      }catch(refreshError){
+        setDockerError("Docker "+action+" succeeded, but refreshing container state failed: "+String(refreshError));
+      }
     }catch(error){setDockerError("Docker "+action+" failed: "+String(error))}
     finally{setDockerActionBusy("")}
   };
