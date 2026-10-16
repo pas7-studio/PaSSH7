@@ -44,6 +44,8 @@ struct HostSummary {
     username: String,
     identity_alias: String,
     host_key_pinned: bool,
+    has_saved_credentials: bool,
+    saved_auth_mode: Option<String>,
 }
 fn vault_path() -> Result<PathBuf, String> {
     let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
@@ -99,7 +101,9 @@ fn vault_list_hosts(sessions: State<'_, SessionStore>) -> Result<Vec<HostSummary
         let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         Ok(vault.hosts.into_iter().map(|h| HostSummary {
             alias:h.alias,hostname:h.hostname,port:h.port,username:h.username,
-            identity_alias:h.identity_alias,host_key_pinned:h.pinned_host_key.is_some()
+            identity_alias:h.identity_alias,host_key_pinned:h.pinned_host_key.is_some(),
+            has_saved_credentials:h.extensions.contains_key("passh7_saved_auth"),
+            saved_auth_mode:h.extensions.get("passh7_saved_auth").and_then(|v| v.get("mode")).and_then(|v| v.as_str()).map(str::to_owned)
         }).collect())
     })
 }
@@ -122,6 +126,47 @@ fn vault_add_host(host: HostInput, sessions: State<'_, SessionStore>) -> Result<
         }).map_err(safe_err)
     })
 }
+// Credentials remain inside the existing Argon2id/XChaCha20 encrypted vault.
+// Neither this command nor host listing ever returns secret strings to the frontend.
+#[tauri::command]
+fn vault_save_host_credentials(alias: String, auth_mode: String, mut account_password: String,
+    mut key_passphrase: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
+    if !matches!(auth_mode.as_str(), "key" | "password" | "key-password") {
+        account_password.zeroize();
+        key_passphrase.zeroize();
+        return Err("Invalid authentication mode".into());
+    }
+    if auth_mode != "key" && account_password.is_empty() {
+        account_password.zeroize();
+        key_passphrase.zeroize();
+        return Err("Account password is required to save this authentication mode".into());
+    }
+    let result = sessions.use_password(|password| {
+        passh7_core::transaction(&vault_path()?,password,|vault| {
+            let host = vault.hosts.iter_mut().find(|h| h.alias == alias)
+                .ok_or(HubError::InvalidInput("host not found"))?;
+            host.extensions.insert("passh7_saved_auth".to_owned(),serde_json::json!({
+                "mode":auth_mode,"account_password":account_password,"key_passphrase":key_passphrase
+            }));
+            Ok(true)
+        }).map_err(safe_err)
+    });
+    account_password.zeroize();
+    key_passphrase.zeroize();
+    result
+}
+
+#[tauri::command]
+fn vault_forget_host_credentials(alias: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
+    sessions.use_password(|password| {
+        passh7_core::transaction(&vault_path()?,password,|vault| {
+            let host = vault.hosts.iter_mut().find(|h| h.alias == alias)
+                .ok_or(HubError::InvalidInput("host not found"))?;
+            Ok(host.extensions.remove("passh7_saved_auth").is_some())
+        }).map_err(safe_err)
+    })
+}
+
 #[tauri::command]
 fn vault_list_identities(sessions: State<'_, SessionStore>) -> Result<Vec<String>, String> {
     sessions.use_password(|password| {
@@ -404,10 +449,10 @@ fn main() {
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,
+            vault_list_hosts,vault_add_host,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
-            ssh_sessions::ssh_session_ready
+            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_docker_list
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");
