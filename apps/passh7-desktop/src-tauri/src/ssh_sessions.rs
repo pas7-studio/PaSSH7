@@ -77,6 +77,9 @@ impl SshSessionManager {
 
     pub fn stop_host(&self, alias: &str) {
         if let Ok(mut guard) = self.channels.lock() {
+            // Revoke in-flight SSH handshakes started before host removal.
+            // The generation is global, so other concurrent opens must retry.
+            self.generation.fetch_add(1, Ordering::SeqCst);
             guard.retain(|_, session| {
                 if session.alias == alias {
                     let _ = session.cancel.send(true);
