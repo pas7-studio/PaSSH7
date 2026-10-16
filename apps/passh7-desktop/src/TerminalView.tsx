@@ -6,7 +6,7 @@ import type {SshSessionEvent} from "./backend";
 import {readySshSession,resizeSshSession,writeSshSession} from "./backend";
 import "@xterm/xterm/css/xterm.css";
 
-type Props={id:string;active:boolean;onClosed:(id:string)=>void};
+type Props={id:string;active:boolean;onClosed:(id:string,detail?:string)=>void};
 export default function TerminalView({id,active,onClosed}:Props){
   const container=useRef<HTMLDivElement>(null);
   const fitRef=useRef<FitAddon|null>(null);
@@ -23,11 +23,21 @@ export default function TerminalView({id,active,onClosed}:Props){
     fitRef.current=fit;termRef.current=terminal;
     if(node.clientWidth>40&&node.clientHeight>40)fit.fit();
     let live=true;
-    const disposeInput=terminal.onData(data=>{void writeSshSession(id,data).catch(()=>{})});
+    let inputErrorShown=false;
+    const disposeInput=terminal.onData(data=>{
+      void writeSshSession(id,data).catch(error=>{
+        if(!live||inputErrorShown)return;
+        inputErrorShown=true;
+        terminal.writeln("\r\n[PaSSH7: terminal input failed: "+String(error)+"]");
+      });
+    });
     const decoder=new TextDecoder();
     const unlistenPromise=listen<SshSessionEvent>("passh7:ssh-session",event=>{
       if(!live||event.payload.id!==id)return;
-      if(event.payload.kind==="closed"){onClosed(id);return}
+      if(event.payload.kind==="closed"){
+        onClosed(id,event.payload.detail);
+        return;
+      }
       if(event.payload.data){
         const bytes=Uint8Array.from(atob(event.payload.data),x=>x.charCodeAt(0));
         terminal.write(decoder.decode(bytes,{stream:true}));
@@ -40,7 +50,23 @@ export default function TerminalView({id,active,onClosed}:Props){
       if(terminal.cols>=20&&terminal.rows>=5)void resizeSshSession(id,terminal.cols,terminal.rows).catch(()=>{});
     });
     resize.observe(node);
-    void unlistenPromise.then(()=>{if(live)return readySshSession(id)}).catch(()=>{});
+    // Backend buffers early PTY data until its listener has been installed.
+    // A missing Ready signal previously left the shell output buffered forever.
+    void unlistenPromise.then(async ()=>{
+      if(!live)return;
+      try { await readySshSession(id); }
+      catch(error) {
+        if(live){
+          terminal.writeln("\r\n[PaSSH7: SSH terminal initialization failed: "+String(error)+"]");
+          onClosed(id,"Terminal event handshake failed");
+        }
+      }
+    }).catch(error=>{
+      if(live){
+        terminal.writeln("\r\n[PaSSH7: event listener failed: "+String(error)+"]");
+        onClosed(id,"Could not subscribe to terminal events");
+      }
+    });
     return ()=>{
       live=false;resize.disconnect();disposeInput.dispose();
       void unlistenPromise.then(unlisten=>unlisten());
