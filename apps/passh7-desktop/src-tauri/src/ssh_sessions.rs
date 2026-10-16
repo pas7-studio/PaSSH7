@@ -191,14 +191,18 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let data = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         let host = data.hosts.iter().find(|h| h.alias == alias)
             .ok_or_else(|| "Host not found".to_owned())?.clone();
-        let identity = data.identities.iter().find(|i| i.alias == host.identity_alias)
-            .ok_or_else(|| "SSH identity missing".to_owned())?;
+        let identity = if auth_mode == "password" {
+            None
+        } else {
+            Some(data.identities.iter().find(|i| i.alias == host.identity_alias)
+                .ok_or_else(|| "SSH identity missing: configure a vault key for this host before using key authentication".to_owned())?)
+        };
         let saved = if use_saved_credentials.unwrap_or(false) {
             host.extensions.get("passh7_saved_auth").filter(|v| v.get("mode").and_then(|m| m.as_str()) == Some(auth_mode))
         } else { None };
         let saved_account = zeroize::Zeroizing::new(saved.and_then(|v| v.get("account_password")).and_then(|v| v.as_str()).unwrap_or_default().to_owned());
         let saved_key = zeroize::Zeroizing::new(saved.and_then(|v| v.get("key_passphrase")).and_then(|v| v.as_str()).unwrap_or_default().to_owned());
-        Ok((host, zeroize::Zeroizing::new(identity.private_key_pem.clone()), saved_account, saved_key))
+        Ok((host, identity.map(|key|zeroize::Zeroizing::new(key.private_key_pem.clone())), saved_account, saved_key))
     })?;
     if account_password.as_ref().map(|v| v.is_empty()).unwrap_or(true) && !saved_account.is_empty() {
         account_password = Some(saved_account);
@@ -209,7 +213,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
     let pin = host.pinned_host_key.clone().ok_or("Host key is not pinned")?;
     passh7_core::hostkey::validate_fingerprint(&pin).map_err(safe_err)?;
     let key = if auth_mode != "password" {
-        Some(russh::keys::decode_secret_key(&secret, if key_passphrase.is_empty() { None } else { Some(key_passphrase.as_str()) })
+        Some(russh::keys::decode_secret_key(secret.as_ref().ok_or("SSH identity missing for key authentication")?, if key_passphrase.is_empty() { None } else { Some(key_passphrase.as_str()) })
             .map_err(|_| "Cannot unlock SSH private key. Enter its key passphrase, or verify the imported key.".to_owned())?)
     } else { None };
     let config = std::sync::Arc::new(russh::client::Config {
