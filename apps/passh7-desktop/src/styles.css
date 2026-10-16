@@ -59,6 +59,10 @@
 .vaultHistoryMeta small{font-size:10px;color:var(--muted)}
 .vaultDiff{border:1px solid var(--border);border-radius:8px;padding:9px;display:grid;gap:7px}
 .vaultDiff p{font-size:11px;line-height:1.6}
+.jumpRouteConfig{min-width:200px;max-width:275px;display:grid;gap:5px;align-items:center}
+.jumpRouteConfig label{font-size:11px;color:var(--muted)}
+.jumpRouteConfig select{width:100%;max-width:100%;min-width:0}
+.jumpRouteConfig small{font-size:10px;color:var(--muted);line-height:1.45;overflow-wrap:anywhere}
 .vaultBackupCard{display:grid;gap:10px;margin:14px 0;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--panel2)}
 .vaultBackupCard>strong{display:flex;gap:8px;align-items:center}
 .vaultBackupCard p{margin:0;overflow-wrap:anywhere}
