@@ -130,6 +130,7 @@ struct HostSummary {
     host_key_pinned: bool,
     has_saved_credentials: bool,
     saved_auth_mode: Option<String>,
+    backup_directory: Option<String>,
 }
 fn vault_path() -> Result<PathBuf, String> {
     let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
@@ -397,7 +398,8 @@ fn vault_list_hosts(sessions: State<'_, SessionStore>) -> Result<Vec<HostSummary
             alias:h.alias,hostname:h.hostname,port:h.port,username:h.username,
             identity_alias:h.identity_alias,host_key_pinned:h.pinned_host_key.is_some(),
             has_saved_credentials:h.extensions.contains_key("passh7_saved_auth"),
-            saved_auth_mode:h.extensions.get("passh7_saved_auth").and_then(|v| v.get("mode")).and_then(|v| v.as_str()).map(str::to_owned)
+            saved_auth_mode:h.extensions.get("passh7_saved_auth").and_then(|v| v.get("mode")).and_then(|v| v.as_str()).map(str::to_owned),
+            backup_directory:h.extensions.get("passh7_backup_directory").and_then(|v|v.as_str()).map(str::to_owned)
         }).collect())
     })
 }
@@ -426,6 +428,35 @@ fn vault_set_host_identity(alias:String,identity_alias:String,sessions:State<'_,
     sessions.use_password(|password|{
         passh7_core::transaction(&vault_path()?,password,|vault|{
             vault.set_host_identity(&alias,&identity_alias)?;
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
+/// Save a non-secret remote backup directory per host inside the encrypted
+/// Vault. This does not connect, upload, schedule, or synchronize anything.
+#[tauri::command]
+fn vault_set_backup_directory(alias:String,directory:Option<String>,
+    sessions:State<'_,SessionStore>)->Result<(),String>{
+    let normalized=match directory {
+        Some(dir) if !dir.trim().is_empty()=>{
+            if dir.len()>4096 || dir.chars().any(|c|c.is_control()){
+                return Err("Remote backup directory is too long or contains control characters".into());
+            }
+            Some(dir.trim().to_owned())
+        },
+        _=>None,
+    };
+    sessions.use_password(|password|{
+        passh7_core::transaction(&vault_path()?,password,|vault|{
+            let host=vault.hosts.iter_mut().find(|h|h.alias==alias)
+                .ok_or(HubError::InvalidInput("host not found"))?;
+            match &normalized{
+                Some(folder)=>{
+                    host.extensions.insert("passh7_backup_directory".into(),
+                        serde_json::Value::String(folder.clone()));
+                },
+                None=>{host.extensions.remove("passh7_backup_directory");}
+            }
             Ok(true)
         }).map_err(safe_err)
     })
@@ -877,7 +908,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,openssh_config::ssh_discover_local_config_hosts,
-            vault_list_hosts,vault_add_host,vault_set_host_identity,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,vault_pin_host_key,
+            vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
             ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
