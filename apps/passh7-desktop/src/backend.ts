@@ -2,7 +2,7 @@ import {invoke} from "@tauri-apps/api/core";
 
 export type HostSummary = {
   alias:string; hostname:string; port:number; username:string;
-  identityAlias:string; hostKeyPinned:boolean;
+  identityAlias:string; hostKeyPinned:boolean; hasSavedCredentials:boolean; savedAuthMode:string|null;
 };
 export type AddHostInput = {
   alias:string; hostname:string; port:number; username:string;
@@ -32,13 +32,19 @@ export async function addHost(host:AddHostInput):Promise<void>{
   await invoke("vault_add_host",{host});
 }
 
+export async function saveHostCredentials(alias:string,authMode:"key"|"password"|"key-password",accountPassword:string,keyPassphrase:string):Promise<void>{
+  await invoke("vault_save_host_credentials",{alias,authMode,accountPassword,keyPassphrase});
+}
+export async function forgetHostCredentials(alias:string):Promise<void>{
+  await invoke("vault_forget_host_credentials",{alias});
+}
 export async function getIdentities():Promise<string[]>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
   return invoke<string[]>("vault_list_identities");
 }
 export async function importIdentity(alias:string,privateKeyPem:string,keyPassphrase?:string):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
-  await invoke("vault_import_identity",{alias,privateKeyPem,keyPassphrase:keyPassphrase||null});
+  await invoke("vault_import_identity",{alias,privateKeyPem,keyPassphrase:keyPassphrase||null,useSavedCredentials});
 }
 
 export async function removeHost(alias:string):Promise<void>{
@@ -73,7 +79,7 @@ export async function authenticateSshHost(alias:string):Promise<SshAuthResult>{
 
 export type OpenedSshSession = {id:string;alias:string};
 export type SshSessionEvent = {id:string;kind:"data"|"closed";data?:string;detail?:string};
-export async function openSshSession(alias:string,cols:number,rows:number,accountPassword?:string,authMode:"key"|"password"|"key-password"="key",keyPassphrase?:string):Promise<OpenedSshSession>{
+export async function openSshSession(alias:string,cols:number,rows:number,accountPassword?:string,authMode:"key"|"password"|"key-password"="key",keyPassphrase?:string,useSavedCredentials=false):Promise<OpenedSshSession>{
   return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows,accountPassword:accountPassword||null,authMode,keyPassphrase:keyPassphrase||null});
 }
 export async function writeSshSession(id:string,data:string):Promise<void>{
@@ -96,4 +102,9 @@ export async function generateEd25519(alias:string,comment:string):Promise<Gener
 
 export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey>{
   return invoke<GeneratedPublicKey>("vault_public_identity",{alias});
+}
+
+/** Remote Docker CLI JSON lines, collected through an authenticated SSH exec channel. */
+export async function listDockerContainers(sessionId:string):Promise<string>{
+  return invoke<string>("ssh_session_docker_list",{id:sessionId});
 }
