@@ -2,7 +2,7 @@ import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,inspectEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -261,6 +261,62 @@ export default function App(){
     bytes:number;totalBytes:number|null
   }|null>(null);
   const [sftpTransferResult,setSftpTransferResult]=useState<{session:string;text:string}|null>(null);
+  const [vaultBackupBusy,setVaultBackupBusy]=useState(false);
+  const [vaultBackupNotice,setVaultBackupNotice]=useState("");
+  const [vaultBackupError,setVaultBackupError]=useState("");
+  const [vaultRestorePreview,setVaultRestorePreview]=useState<VaultRestorePreview|null>(null);
+  const [vaultRestorePhrase,setVaultRestorePhrase]=useState("");
+  const saveVaultBackup=async()=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session||!vaultUnlocked){setVaultBackupError("Unlock Vault and connect to the backup destination first.");return}
+    if(vaultBackupBusy)return;
+    const folder=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
+    if(!window.confirm("Create a NEW encrypted Vault backup on "+session.alias+" in "+folder+"?\n\nThe remote SSH account can read/copy the encrypted file. Secure the destination directory and keep your master password offline. The backup is NOT an automatic two-way sync."))return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    try{
+      const result=await backupEncryptedVaultToSsh(session.id,folder);
+      setVaultBackupNotice("Encrypted snapshot verified on "+session.alias+": "+result.remotePath+" ("+result.bytes+" bytes).");
+      try{
+        const entries=await listSftpDirectory(session.id,folder);
+        setSftpEntries({session:session.id,path:folder,items:entries});
+      }catch(error){
+        setVaultBackupError("Backup succeeded, but directory refresh failed: "+String(error));
+      }
+    }catch(error){setVaultBackupError("Encrypted backup failed: "+String(error))}
+    finally{setVaultBackupBusy(false)}
+  };
+  const inspectVaultRestore=async()=>{
+    if(vaultBackupBusy)return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    setVaultRestorePhrase("");setVaultRestorePreview(null);
+    try{
+      const preview=await inspectEncryptedVaultBackup();
+      if(preview)setVaultRestorePreview(preview);
+    }catch(error){setVaultBackupError("Backup inspection failed: "+String(error))}
+    finally{setVaultBackupBusy(false)}
+  };
+  const commitVaultRestore=async()=>{
+    if(!vaultRestorePreview||vaultRestorePhrase!=="RESTORE"||vaultBackupBusy)return;
+    if(!window.confirm("FINAL CONFIRMATION: Replace the entire local PaSSH7 Vault with the selected backup?\n\nExisting hosts, saved credentials and keys will be replaced. A separate encrypted copy of your previous Vault will be saved locally before replacement; live SSH sessions will close."))return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    try{
+      await commitEncryptedVaultRestore(vaultRestorePreview.token);
+      setSshTabs([]);setActiveSsh("");setTunnels([]);
+      setSftpEntries(null);setSftpPreview(null);setDockerInventory(null);setAgentAvailability({});
+      const [saved,keys]=await Promise.all([getHosts(),getIdentities()]);
+      setHosts(saved.map(h=>({
+        id:h.alias,label:h.alias,address:h.hostname,user:h.username,
+        port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,
+        identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,
+        savedAuthMode:h.savedAuthMode
+      })));
+      setIdentities(keys);setSelected(saved[0]?.alias||"");
+      setVaultBackupNotice("Encrypted Vault restored. Previous local Vault preserved as an encrypted backup. Reconnect to your hosts.");
+      setVaultRestorePreview(null);setVaultRestorePhrase("");
+    }catch(error){setVaultBackupError("Vault restore was not completed: "+String(error))}
+    finally{setVaultBackupBusy(false)}
+  };
+
   const cancelActiveTransfer=async()=>{
     const current=sftpTransferProgress;
     if(!current||current.stage==="selecting"||current.stage==="cancelling")return;
@@ -666,7 +722,30 @@ export default function App(){
 }</span></div>)}
 {agentProbeError&&<p role="alert" className="wizardError">{agentProbeError}</p>}
 <label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Launches an installed CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
-        panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Browse remote directories, preview UTF-8 text, or transfer files through encrypted SFTP. Transfers are limited to 64 MiB per file; existing files are never silently overwritten.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button><button className="contextAction" disabled={!connected||!activeSsh||sftpTransferBusy||sftpBusy} onClick={()=>void transferSftp("upload")}>{sftpTransferBusy?"Transferring…":"Upload file to this directory"}</button>{sftpTransferProgress?.session===activeSsh&&<div className="sftpProgress" role="status">
+        panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Browse remote directories, preview UTF-8 text, or transfer files through encrypted SFTP. Transfers are limited to 64 MiB per file; existing files are never silently overwritten.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button><button className="contextAction" disabled={!connected||!activeSsh||sftpTransferBusy||sftpBusy} onClick={()=>void transferSftp("upload")}>{sftpTransferBusy?"Transferring…":"Upload file to this directory"}</button><section className="vaultBackupCard" aria-label="Encrypted Vault backups">
+<strong><LockKeyhole size={14}/> Encrypted Vault backups</strong>
+<p className="note">Create immutable, encrypted snapshots on this SSH server. Only cipher text leaves this device. Existing versions are not overwritten and the remote file is read back for verification.</p>
+<div className="vaultBackupActions">
+<button type="button" disabled={!connected||!activeSsh||!vaultUnlocked||vaultBackupBusy||sftpTransferBusy} onClick={()=>void saveVaultBackup()}>{vaultBackupBusy?"Working…":"Back up Vault to this server"}</button>
+<button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void inspectVaultRestore()}>Restore from encrypted file…</button>
+</div>
+<p className="note">To restore a remote snapshot, download its <code>passh7-vault-*.enc.json</code> file first, then choose it with Restore. You must know the same master password. This is manual versioned backup, not conflict-free multi-device sync.</p>
+{vaultBackupNotice&&<p role="status" className="note">{vaultBackupNotice}</p>}
+{vaultBackupError&&<p role="alert" className="wizardError">{vaultBackupError}</p>}
+{vaultRestorePreview&&<div className="vaultRestorePreview">
+<strong>Backup ready for recovery</strong>
+<p>{vaultRestorePreview.hosts} host(s), {vaultRestorePreview.identities} SSH identity/identities, {(vaultRestorePreview.bytes/1024).toFixed(1)} KiB.</p>
+<p className="note">Hosts: {vaultRestorePreview.hostAliases.slice(0,12).join(", ")||"None"}{vaultRestorePreview.hostAliases.length>12?" and more":""}</p>
+{vaultRestorePreview.identicalToCurrent&&<p className="note">The encrypted file is identical to your current Vault generation.</p>}
+<label>Type RESTORE to replace your local Vault
+<input aria-label="Confirm Vault restore" value={vaultRestorePhrase} onChange={e=>setVaultRestorePhrase(e.target.value)} placeholder="RESTORE"/>
+</label>
+<div className="vaultBackupActions">
+<button type="button" disabled={vaultBackupBusy} onClick={()=>{setVaultRestorePreview(null);setVaultRestorePhrase("")}}>Cancel recovery</button>
+<button type="button" disabled={vaultBackupBusy||vaultRestorePhrase!=="RESTORE"} onClick={()=>void commitVaultRestore()}>Restore selected backup</button>
+</div>
+</div>}
+</section>{sftpTransferProgress?.session===activeSsh&&<div className="sftpProgress" role="status">
   <strong>{sftpTransferProgress.direction==="upload"?"Uploading":"Downloading"} · {sftpTransferProgress.stage==="selecting"?"Choose a local file":sftpTransferProgress.stage==="cancelling"?"Cancelling…":"Transfer in progress"}</strong>
   <small>{(sftpTransferProgress.bytes/1048576).toFixed(2)} MiB{sftpTransferProgress.totalBytes!==null?" / "+(sftpTransferProgress.totalBytes/1048576).toFixed(2)+" MiB":""}</small>
   {sftpTransferProgress.totalBytes!==null&&<progress value={sftpTransferProgress.bytes} max={Math.max(1,sftpTransferProgress.totalBytes)} style={{width:"100%"}}/>}
