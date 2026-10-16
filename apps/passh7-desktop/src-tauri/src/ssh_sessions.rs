@@ -30,6 +30,7 @@ enum SessionCommand {
     Resize(u32, u32),
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerResourceList(String,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogs(String,u32,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
@@ -432,6 +433,54 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                         },
                         Some(SessionCommand::SftpFinished(transfer_id)) => {
                             transfers.remove(&transfer_id);
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerResourceList(kind,response)) => {
+                            // This is a closed native allowlist. No user shell input enters
+                            // docker exec, even when a resource name has special characters.
+                            let command=match kind.as_str(){
+                                "images"=>b"docker image ls --format \"{{json .}}\"".as_slice(),
+                                "volumes"=>b"docker volume ls --format \"{{json .}}\"".as_slice(),
+                                "networks"=>b"docker network ls --format \"{{json .}}\"".as_slice(),
+                                _=>{let _=response.send(Err("Unsupported Docker resource type".into()));continue;}
+                            };
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker resource SSH channel")?;
+                                channel.exec(true,command).await
+                                    .map_err(|_|"Remote SSH server refused Docker resource command")?;
+                                Ok::<_,&str>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker resource SSH channel timed out"));
+                            match setup{
+                                Err(error)=>{let _=response.send(Err(error.to_owned()));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move{
+                                        let result=tokio::time::timeout(Duration::from_secs(25),async {
+                                            let mut bytes=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await{
+                                                match message{
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if bytes.len().saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker resource inventory exceeds 2 MiB".to_owned());
+                                                        }
+                                                        bytes.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
+                                            }
+                                            let output=String::from_utf8_lossy(&bytes).into_owned();
+                                            if exit_status.is_some_and(|code|code!=0){
+                                                return Err(format!("Docker resource query failed: {}",output.chars().take(700).collect::<String>()));
+                                            }
+                                            Ok::<String,String>(output)
+                                        }).await.unwrap_or_else(|_|Err("Docker resource query timed out after 25 seconds".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::DockerList(response)) => {
@@ -1128,6 +1177,19 @@ pub async fn ssh_session_resize(id: String, cols: u32, rows: u32,
 #[tauri::command]
 pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>) -> Result<(), String> {
     manager.sender(&id)?.send(SessionCommand::Close).await.map_err(|_| "SSH session already closed".to_owned())
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_resources(
+    id:String,kind:String,manager:State<'_,SshSessionManager>
+)->Result<String,String>{
+    if !matches!(kind.as_str(),"images"|"volumes"|"networks"){
+        return Err("Unsupported Docker resource type".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerResourceList(kind,tx)).await
+        .map_err(|_|"SSH session closed before Docker resource query")?;
+    rx.await.map_err(|_|"Docker resource request was cancelled")?
 }
 
 #[tauri::command]
