@@ -59,7 +59,9 @@ fn safe_err(error: HubError) -> String {
         HubError::Authentication => "Wrong password or damaged vault".into(),
         HubError::UnsupportedFormat => "Unsupported vault version".into(),
         HubError::InvalidInput(reason) => reason.to_owned(),
-        _ => "Vault operation failed".into(),
+        HubError::Io(error) => format!("Vault file I/O failed ({}; Windows code {:?}). Check vault directory permissions and free disk space.", error.kind(), error.raw_os_error()),
+        HubError::Json(_) => "Vault data serialization failed".into(),
+        HubError::Kdf => "Vault encryption key derivation failed".into(),
     }
 }
 #[tauri::command]
