@@ -48,7 +48,9 @@ during this checklist. Use a throwaway identity and Docker container.
 | PORT-02 | Stop tunnel, lock Vault | Listener disappears and cannot be reached |
 | PORT-03 | Start two local forwards, reload only the WebView, then open Ports | Native forward inventory restores both active listeners; Refresh forwards matches backend; listeners still work |
 | AI-01 | Launch installed Codex/Claude/OpenCode CLI | Command goes only to selected terminal; CLI runs with SSH account permissions |
-| AI-02 | Launch an uninstalled CLI | Shell reports missing command; UI makes no false success claim |
+| AI-02 | Check an uninstalled CLI | Native version probe returns Not detected; Launch shows actionable message instead of claiming success |
+| AI-03 | Check installed Codex, Claude Code and OpenCode CLIs on Linux and Windows OpenSSH | Installed/version indicators reflect remote `--version`; each probe times out independently without blocking terminal input |
+| AI-04 | Send modified Tauri IPC with unsupported agent value | Native allowlist rejects arbitrary shell commands without starting a remote process |
 
 ## Release gate
 

@@ -120,6 +120,11 @@ export async function controlDockerContainer(sessionId:string,containerId:string
   return invoke<string>("ssh_session_docker_action",{id:sessionId,containerId,action});
 }
 
+export type RemoteAgentAvailability={installed:boolean;version:string|null};
+export async function probeRemoteAgent(sessionId:string,agent:"codex"|"claude"|"opencode"):Promise<RemoteAgentAvailability>{
+  return invoke<RemoteAgentAvailability>("ssh_session_agent_probe",{id:sessionId,agent});
+}
+
 export type DiscoveredHostKey = {fingerprint:string};
 export async function discoverSshHostKey(alias:string):Promise<DiscoveredHostKey>{
   return invoke<DiscoveredHostKey>("ssh_discover_host_key",{alias});
