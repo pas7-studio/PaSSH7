@@ -20,6 +20,7 @@ const tabs: {id:Panel;label:string; Icon:typeof Bot}[]=[
 export default function App(){
   const [selected,setSelected]=useState("dev");
   const [sshTabs,setSshTabs]=useState<{id:string;alias:string}[]>([]);
+  const [vaultUnlocked,setVaultUnlocked]=useState(false);
   // Native session events use a stable callback; its owner map stays fresh.
   const sshTabsRef=useRef(sshTabs);
   useEffect(()=>{sshTabsRef.current=sshTabs},[sshTabs]);
@@ -72,7 +73,6 @@ export default function App(){
     if(detail)setSessionNotice({alias,detail});
   },[]);
   const [hosts,setHosts]=useState<Host[]>(desktopAvailable()?[]:DEMO_HOSTS);
-  const [vaultUnlocked,setVaultUnlocked]=useState(false);
   useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setTunnels([]);setActiveSsh("");setSessionNotice(null)}},[vaultUnlocked]);
   // The native SSH session manager is authoritative. Reconcile after a remote
   // disconnect, missed Tauri close event, sleep/resume, or vault expiration.
