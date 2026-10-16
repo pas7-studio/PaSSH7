@@ -10,6 +10,7 @@ use crate::{SessionStore, PinnedSshClient, safe_err, vault_path, tokio_timeout_c
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const EVENT: &str = "passh7:ssh-session";
 const MAX_TRANSFER: u64 = 64 * 1024 * 1024;
+const SFTP_EVENT: &str = "passh7:sftp-transfer";
 
 #[derive(Default, Clone)]
 pub struct SshSessionManager {
@@ -33,8 +34,10 @@ enum SessionCommand {
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
-    SftpDownload(String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
-    SftpUpload(String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
+    SftpDownload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
+    SftpUpload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
+    SftpCancel(String, tokio::sync::oneshot::Sender<Result<(),String>>),
+    SftpFinished(String),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardOpen(tokio::net::TcpStream,String,u16),
@@ -43,6 +46,63 @@ enum SessionCommand {
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct SftpEntry { pub name: String, pub is_dir: bool }
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct SftpTransferEvent {
+    pub session_id: String,
+    pub transfer_id: String,
+    pub direction: &'static str,
+    pub stage: &'static str,
+    pub bytes: u64,
+    pub total_bytes: Option<u64>,
+}
+
+fn send_sftp_progress(app:&AppHandle,session_id:&str,transfer_id:&str,
+    direction:&'static str,stage:&'static str,bytes:u64,total_bytes:Option<u64>) {
+    let _=app.emit(SFTP_EVENT,SftpTransferEvent{
+        session_id:session_id.to_owned(),
+        transfer_id:transfer_id.to_owned(),direction,stage,bytes,total_bytes
+    });
+}
+
+/// Stream binary bytes with bounded memory and throttled IPC progress events.
+/// The task's outer select handles user cancellation, vault lock and timeout.
+async fn copy_sftp_progress<R,W>(reader:&mut R,writer:&mut W,app:&AppHandle,
+    session_id:&str,transfer_id:&str,direction:&'static str,total_bytes:Option<u64>)
+    -> Result<u64,String>
+where R:tokio::io::AsyncRead+Unpin,W:tokio::io::AsyncWrite+Unpin
+{
+    use tokio::io::{AsyncReadExt,AsyncWriteExt};
+    let mut chunk=[0u8;64*1024];
+    let mut total=0u64;
+    let mut last_report=0u64;
+    loop{
+        let n=reader.read(&mut chunk).await.map_err(|e|format!("SFTP read failed: {e}"))?;
+        if n==0{break;}
+        if total.saturating_add(n as u64)>MAX_TRANSFER{
+            return Err("Transfer exceeds 64 MiB file size limit".into());
+        }
+        writer.write_all(&chunk[..n]).await.map_err(|e|format!("SFTP write failed: {e}"))?;
+        total+=n as u64;
+        if total-last_report>=256*1024{
+            send_sftp_progress(app,session_id,transfer_id,direction,"progress",total,total_bytes);
+            last_report=total;
+        }
+    }
+    send_sftp_progress(app,session_id,transfer_id,direction,"progress",total,total_bytes);
+    Ok(total)
+}
+
+/// Atomic no-overwrite publication. A check-then-rename is unsafe because an
+/// unrelated application may create the destination after the initial check.
+/// Hard-link creation fails if the destination already exists.
+async fn publish_download_exclusive(staging:&std::path::Path,destination:&std::path::Path)->Result<(),String>{
+    tokio::fs::hard_link(staging,destination).await
+        .map_err(|e|format!("Cannot publish download without overwriting destination: {e}"))?;
+    let _=tokio::fs::remove_file(staging).await;
+    Ok(())
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -198,6 +258,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut overflowed = false;
         let mut closure_detail: Option<String> = None;
         let mut forwarders: HashMap<u16,tokio::sync::oneshot::Sender<()>> = HashMap::new();
+        let mut transfers: HashMap<String,tokio::sync::watch::Sender<bool>> = HashMap::new();
         loop {
             tokio::select! {
                 changed = cancelled.changed() => {
@@ -220,6 +281,20 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                         },
                         Some(SessionCommand::Input(bytes)) => channel.data_bytes(bytes).await,
                         Some(SessionCommand::Resize(c, r)) => channel.window_change(c, r, 0, 0).await,
+                        Some(SessionCommand::SftpCancel(transfer_id,response)) => {
+                            let result=if let Some(cancel)=transfers.get(&transfer_id){
+                                let _=cancel.send(true);
+                                Ok(())
+                            } else {
+                                Err("Transfer is no longer active".to_owned())
+                            };
+                            let _=response.send(result);
+                            Ok(())
+                        },
+                        Some(SessionCommand::SftpFinished(transfer_id)) => {
+                            transfers.remove(&transfer_id);
+                            Ok(())
+                        },
                         Some(SessionCommand::DockerList(response)) => {
                             // Runs on a separate session channel; command is fixed by native code,
                             // never constructed from untrusted renderer arguments.
@@ -577,6 +652,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
             }
         }
         for (_,stop) in forwarders.drain() { let _=stop.send(()); }
+        for (_,cancel) in transfers.drain() { let _=cancel.send(true); }
         let _ = channel.close().await;
         let _ = connection.disconnect(russh::Disconnect::ByApplication, "Session closed", "en").await;
         if let Ok(mut guard) = manager.channels.lock() { guard.remove(&cleanup_id); }
