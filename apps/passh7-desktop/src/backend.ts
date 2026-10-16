@@ -44,7 +44,7 @@ export async function getIdentities():Promise<string[]>{
 }
 export async function importIdentity(alias:string,privateKeyPem:string,keyPassphrase?:string):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
-  await invoke("vault_import_identity",{alias,privateKeyPem,keyPassphrase:keyPassphrase||null});
+  await invoke("vault_import_identity",{alias,privateKeyPem,keyPassphrase:keyPassphrase||null,useSavedCredentials});
 }
 
 export async function removeHost(alias:string):Promise<void>{
@@ -107,4 +107,12 @@ export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey
 /** Remote Docker CLI JSON lines, collected through an authenticated SSH exec channel. */
 export async function listDockerContainers(sessionId:string):Promise<string>{
   return invoke<string>("ssh_session_docker_list",{id:sessionId});
+}
+
+export type DiscoveredHostKey = {fingerprint:string};
+export async function discoverSshHostKey(alias:string):Promise<DiscoveredHostKey>{
+  return invoke<DiscoveredHostKey>("ssh_discover_host_key",{alias});
+}
+export async function pinSshHostKey(alias:string,fingerprint:string):Promise<void>{
+  return invoke("vault_pin_host_key",{alias,fingerprint});
 }
