@@ -21,12 +21,12 @@ pub struct SshSessionManager {
 struct ManagedSession {
     alias: String,
     sender: mpsc::Sender<SessionCommand>,
+    input_sender: mpsc::Sender<Vec<u8>>,
     cancel: tokio::sync::watch::Sender<bool>,
 }
 
 enum SessionCommand {
     Ready,
-    Input(Vec<u8>),
     Resize(u32, u32),
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
@@ -149,6 +149,14 @@ impl SshSessionManager {
             .get(id).map(|session| session.sender.clone()).ok_or_else(|| "SSH session no longer exists".to_owned())
     }
 
+    // PTY keystrokes have their own bounded mailbox. File, Docker and
+    // inspection commands must not queue ahead of a user's typing.
+    fn input_sender(&self,id:&str)->Result<mpsc::Sender<Vec<u8>>,String>{
+        self.channels.lock().map_err(|_|"Session manager unavailable".to_owned())?
+            .get(id).map(|session|session.input_sender.clone())
+            .ok_or_else(||"SSH session no longer exists".to_owned())
+    }
+
     pub fn active_sessions(&self) -> Result<Vec<OpenedSession>, String> {
         let guard = self.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?;
         let mut sessions: Vec<OpenedSession> = guard.iter().map(|(id, session)| OpenedSession {
@@ -217,6 +225,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
             .map_err(|_| "Cannot unlock SSH private key. Enter its key passphrase, or verify the imported key.".to_owned())?)
     } else { None };
     let config = std::sync::Arc::new(russh::client::Config {
+        // Critical for interactive SSH: the default Nagle algorithm may
+        // delay single-keystroke packets until remote acknowledgements arrive.
+        nodelay: true,
         inactivity_timeout: Some(Duration::from_secs(600)), ..Default::default()
     });
     let mut connection = tokio_timeout_connect(config,
@@ -261,6 +272,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
     channel.request_shell(true).await.map_err(|_| "SSH server denied shell".to_owned())?;
     let id = format!("ssh-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
     let (tx, mut rx) = mpsc::channel::<SessionCommand>(128);
+    let (input_tx, mut input_rx) = mpsc::channel::<Vec<u8>>(512);
     let forward_sender = tx.clone();
     let (cancel_tx, mut cancelled) = tokio::sync::watch::channel(false);
     {
@@ -268,7 +280,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         if manager.generation.load(Ordering::SeqCst) != generation {
             return Err("Vault was locked during SSH connection".into());
         }
-        sessions.insert(id.clone(), ManagedSession { alias: alias.clone(), sender: tx, cancel: cancel_tx });
+        sessions.insert(id.clone(), ManagedSession { alias: alias.clone(), sender: tx, input_sender: input_tx, cancel: cancel_tx });
     }
     let cleanup_id = id.clone();
     let manager = manager.inner().clone();
@@ -282,10 +294,25 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut transfers: HashMap<String,tokio::sync::watch::Sender<bool>> = HashMap::new();
         loop {
             tokio::select! {
+                biased;
                 changed = cancelled.changed() => {
                     if changed.is_err() || *cancelled.borrow() {
                         closure_detail = Some("SSH session terminated: vault locked or host removed".into());
                         break;
+                    }
+                }
+                input = input_rx.recv() => {
+                    match input {
+                        Some(bytes) => {
+                            if channel.data_bytes(bytes).await.is_err() {
+                                closure_detail=Some("SSH connection failed while sending terminal input".into());
+                                break;
+                            }
+                        },
+                        None => {
+                            closure_detail=Some("SSH terminal input channel closed".into());
+                            break;
+                        }
                     }
                 }
                 command = rx.recv() => {
@@ -300,7 +327,6 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
-                        Some(SessionCommand::Input(bytes)) => channel.data_bytes(bytes).await,
                         Some(SessionCommand::Resize(c, r)) => channel.window_change(c, r, 0, 0).await,
                         Some(SessionCommand::SftpCancel(transfer_id,response)) => {
                             let result=if let Some(cancel)=transfers.get(&transfer_id){
@@ -811,8 +837,8 @@ pub fn ssh_session_list(manager: State<'_, SshSessionManager>) -> Result<Vec<Ope
 #[tauri::command]
 pub async fn ssh_session_write(id: String, data: String, manager: State<'_, SshSessionManager>) -> Result<(), String> {
     if data.len() > 64 * 1024 { return Err("SSH input exceeds 64 KiB".into()); }
-    manager.sender(&id)?.send(SessionCommand::Input(data.into_bytes())).await
-        .map_err(|_| "SSH session closed".to_owned())
+    manager.input_sender(&id)?.send(data.into_bytes()).await
+        .map_err(|_|"SSH terminal input channel closed".to_owned())
 }
 
 #[tauri::command]
@@ -1119,11 +1145,13 @@ mod tests {
         let (tx_b, _) = mpsc::channel(1);
         let (cancel_b, watch_b) = tokio::sync::watch::channel(false);
         let mut guard = manager.channels.lock().unwrap();
+        let (input_a,_) = mpsc::channel(1);
+        let (input_b,_) = mpsc::channel(1);
         guard.insert("ssh-1".into(), ManagedSession {
-            alias: "host-a".into(), sender: tx_a, cancel: cancel_a
+            alias: "host-a".into(), sender: tx_a, input_sender: input_a, cancel: cancel_a
         });
         guard.insert("ssh-2".into(), ManagedSession {
-            alias: "host-b".into(), sender: tx_b, cancel: cancel_b
+            alias: "host-b".into(), sender: tx_b, input_sender: input_b, cancel: cancel_b
         });
         drop(guard);
         assert_eq!(manager.active_sessions().unwrap().len(), 2);
@@ -1139,13 +1167,14 @@ mod tests {
     fn vault_lock_cancels_sessions_even_with_full_input_queues() {
         let manager = SshSessionManager::default();
         let (tx, _rx) = mpsc::channel(1);
-        assert!(tx.try_send(SessionCommand::Input(vec![b'x'])).is_ok());
+        let (input, _input_rx) = mpsc::channel(1);
+        assert!(input.try_send(vec![b'x']).is_ok());
         let (cancel, receiver) = tokio::sync::watch::channel(false);
         manager.channels.lock().unwrap().insert("test".into(), ManagedSession {
-            alias: "primary".into(), sender: tx, cancel
+            alias: "primary".into(), sender: tx, input_sender: input, cancel
         });
         manager.stop_all();
         assert!(*receiver.borrow(), "vault lock must signal cancellation");
-        assert!(manager.sender("test").is_err(), "closed sessions must not accept input");
+        assert!(manager.input_sender("test").is_err(), "closed sessions must not accept input");
     }
 }
