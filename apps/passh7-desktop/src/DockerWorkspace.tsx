@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useState} from "react";
-import {listDockerResources} from "./backend";
+import {inspectDockerContainer,listDockerResources,type DockerDetails} from "./backend";
 import {Clipboard,Container,Download,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
 
 export type ContainerRow={ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string};
@@ -50,6 +50,23 @@ export default function DockerWorkspace(p:Props){
     (row.Names+" "+row.ID+" "+row.Image+" "+row.Status).toLowerCase().includes(search.toLowerCase())
   ),[p.items,filter,search]);
   const chosen=p.items?.find(x=>x.ID===selected)||visible[0];
+  const [inspected,setInspected]=useState<{session:string;containerId:string;data:DockerDetails}|null>(null);
+  const [inspectError,setInspectError]=useState("");
+  const [inspectBusy,setInspectBusy]=useState(false);
+  useEffect(()=>{
+    const containerId=chosen?.ID;
+    if(!p.connected||!p.session||!containerId){setInspected(null);return}
+    let mounted=true;
+    setInspectBusy(true);setInspectError("");
+    void inspectDockerContainer(p.session,containerId).then(data=>{
+      if(mounted)setInspected({session:p.session,containerId,data});
+    }).catch(error=>{
+      if(mounted){setInspected(null);setInspectError("Could not inspect container: "+String(error))}
+    }).finally(()=>{if(mounted)setInspectBusy(false)});
+    return ()=>{mounted=false};
+  },[p.connected,p.session,chosen?.ID]);
+  const details=inspected?.session===p.session&&inspected.containerId===chosen?.ID?inspected.data:null;
+
   const logLines=useMemo(()=>(p.logs?.session===p.session?p.logs.text:"").split(/\r?\n/)
     .filter(Boolean).filter(line=>line.toLowerCase().includes(logsSearch.toLowerCase()))
     .filter(line=>level==="all"||(level==="error"?/\berror\b|\bfatal\b|\bpanic\b/i.test(line):/\bwarn(ing)?\b/i.test(line)))
@@ -87,7 +104,18 @@ export default function DockerWorkspace(p:Props){
       </div></section>
       <aside className="dockerInspector"><div className="paneTitle">CONTAINER DETAILS</div>
         {chosen&&chosen.ID?<><div className="inspectorFile"><Container size={30}/><strong>{chosen.Names||chosen.ID.slice(0,12)}</strong><span className={"dockerStatus "+(isRunning(chosen)?"running":"stopped")}>{chosen.Status||chosen.State}</span></div>
-          <dl><dt>ID</dt><dd className="filePath">{chosen.ID}</dd><dt>Image</dt><dd>{chosen.Image||"Unknown"}</dd><dt>Ports</dt><dd>{chosen.Ports||"None"}</dd><dt>State</dt><dd>{chosen.State||"Unknown"}</dd><dt>Status</dt><dd>{chosen.Status||"Unknown"}</dd></dl>
+          <dl><dt>ID</dt><dd className="filePath">{chosen.ID}</dd><dt>Image</dt><dd>{chosen.Image||"Unknown"}</dd><dt>Ports</dt><dd>{chosen.Ports||"None"}</dd><dt>State</dt><dd>{chosen.State||"Unknown"}</dd><dt>Status</dt><dd>{chosen.Status||"Unknown"}</dd>
+          {details&&<><dt>Created</dt><dd>{details.created||"Unknown"}</dd>
+          <dt>Started</dt><dd>{details.startedAt||"Unknown"}</dd>
+          <dt>Restart policy</dt><dd>{details.restartPolicy||"None"}</dd></>}
+          </dl>
+          {inspectBusy&&<p className="prefInfo">Loading container metadata…</p>}
+          {inspectError&&<p className="prefInfo">{inspectError}</p>}
+          {details&&<div className="dockerDetailGroups">
+            <h4>Published ports</h4>{details.ports.length?details.ports.map(port=><code key={port}>{port}</code>):<small>No published ports</small>}
+            <h4>Mounted volumes</h4>{details.mounts.length?details.mounts.map(mount=><code key={mount}>{mount}</code>):<small>No mounted volumes</small>}
+            <h4>Networks</h4>{details.networks.length?details.networks.map(name=><code key={name}>{name}</code>):<small>No networks found</small>}
+          </div>}
           <div className="inspectorActions"><button disabled={p.logsBusy} onClick={()=>p.onLogs(chosen.ID!,chosen.Names||chosen.ID!)}><TerminalSquare size={14}/> {p.logsBusy?"Loading…":"View logs"}</button>
             {isRunning(chosen)?<><button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"restart")}><RefreshCw size={14}/> Restart</button><button className="dangerButton" disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"stop")}><Square size={14}/> Stop</button></>:<button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"start")}><Play size={14}/> Start</button>}
           </div>
