@@ -552,16 +552,16 @@ export default function App(){
   };
 
   const [sftpMutationBusy,setSftpMutationBusy]=useState(false);
-  const mutateRemoteSftp=async(operation:"mkdir"|"delete",name:string,isDirectory=false)=>{
+  const mutateRemoteSftp=async(operation:"mkdir"|"delete"|"rename",name:string,isDirectory=false,newName?:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session||sftpMutationBusy)return;
     const dir=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
     setSftpMutationBusy(true);setSftpError("");
     try{
-      await mutateSftpFile(session.id,operation,dir,name,isDirectory);
+      await mutateSftpFile(session.id,operation,dir,name,isDirectory,newName);
       const entries=await listSftpDirectory(session.id,dir);
       setSftpEntries({session:session.id,path:dir,items:entries});
-      setSftpTransferResult({session:session.id,text:(operation==="mkdir"?"Created folder ":"Deleted ")+name});
+      setSftpTransferResult({session:session.id,text:(operation==="mkdir"?"Created folder ":operation==="rename"?"Renamed ":"Deleted ")+name+(newName?" → "+newName:"")});
     }catch(error){setSftpError("Remote "+operation+" failed: "+String(error))}
     finally{setSftpMutationBusy(false)}
   };
@@ -956,6 +956,7 @@ export default function App(){
  mutationBusy={sftpMutationBusy}
  onMkdir={name=>void mutateRemoteSftp("mkdir",name)}
  onDelete={(name,isDir)=>void mutateRemoteSftp("delete",name,isDir)}
+ onRename={(name,newName,isDir)=>void mutateRemoteSftp("rename",name,isDir,newName)}
  backupPanel={<>
 <section className="vaultBackupCard" aria-label="Encrypted Vault backups">
 <strong><LockKeyhole size={14}/> Encrypted Vault backups</strong>
