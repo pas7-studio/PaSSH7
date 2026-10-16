@@ -2,7 +2,7 @@
 
 **PaSSH7** is an open-source SSH manager and future local AI agent gateway for Windows, built in Rust.
 
-> **Experimental v0.1. Not production-ready.** The encrypted vault, pinned SSH terminal, basic SFTP, Docker inventory and localhost tunnels are implemented in the desktop application, but have **not** undergone an independent security audit or full real-server Windows acceptance testing. Do not treat this as a production-ready secrets manager. An isolated, scoped MCP broker is **not** implemented.
+> **Experimental v0.2. Not production-ready.** The encrypted vault, pinned SSH terminal, basic SFTP, Docker inventory and localhost tunnels are implemented in the desktop application, but have **not** undergone an independent security audit or full real-server Windows acceptance testing. Do not treat this as a production-ready secrets manager. An isolated, scoped MCP broker is **not** implemented.
 
 ## Workspace
 
@@ -34,7 +34,7 @@ cargo run -p passh7 -- --vault test-vault.json remove-key --alias demo
 
 **Password rotation caveat:** previous encrypted Windows backups may still be decryptable using the old master password; store and dispose of backups deliberately. The operation is not yet verified under concurrent writers.
 
-**Windows status:** code now uses `ReplaceFileW` with an encrypted recovery backup, but this path is still unverified in Windows CI. Do not store valuable keys until validation, permissions hardening and recovery tests are complete.
+**Windows status:** the vault uses Windows-specific atomic replacement/recovery handling. The Windows GNU target cross-build passes CI, but that does not validate real Windows filesystem behavior or server authentication. Keep backup/recovery tests and permissions hardening on the release checklist.
 
 **CI policy:** exclusively dedicated self-hosted runners. See [runner setup](docs/self-hosted-ci.md). Automatic runs for untrusted public PRs are disabled.
 
