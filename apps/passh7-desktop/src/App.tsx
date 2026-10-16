@@ -305,7 +305,7 @@ export default function App(){
     try{
       const entries=await listSftpDirectory(session.id,folder);
       const snapshots=entries.filter(item=>!item.isDir &&
-        /^passh7-vault-[0-9]+-[0-9]+\\.enc\\.json$/.test(item.name))
+        /^passh7-vault-[0-9]+-[0-9]+\.enc\.json$/.test(item.name))
         .sort((a,b)=>(b.modifiedAt??0)-(a.modifiedAt??0) ||
           b.name.localeCompare(a.name));
       setVaultSnapshotHistory({session:session.id,directory:folder,entries:snapshots});
@@ -335,7 +335,7 @@ export default function App(){
         setVaultSnapshotHistory({
           session:session.id,directory:folder,
           entries:entries.filter(item=>!item.isDir&&
-            /^passh7-vault-[0-9]+-[0-9]+\\.enc\\.json$/.test(item.name))
+            /^passh7-vault-[0-9]+-[0-9]+\.enc\.json$/.test(item.name))
             .sort((a,b)=>(b.modifiedAt??0)-(a.modifiedAt??0) ||
               b.name.localeCompare(a.name))
         });
@@ -384,7 +384,7 @@ export default function App(){
     finally{setVaultBackupBusy(false)}
   };
   const commitVaultRestore=async()=>{
-    if(!vaultRestorePreview||vaultRestorePhrase!=="RESTORE"||vaultBackupBusy)return;
+    if(!vaultRestorePreview||vaultRestorePreview.sameContents||vaultRestorePhrase!=="RESTORE"||vaultBackupBusy)return;
     if(!window.confirm("FINAL CONFIRMATION: Replace the entire local PaSSH7 Vault with the selected backup?\n\nExisting hosts, saved credentials and keys will be replaced. A separate encrypted copy of your previous Vault will be saved locally before replacement; live SSH sessions will close."))return;
     setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
     try{
