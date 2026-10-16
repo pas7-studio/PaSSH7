@@ -533,7 +533,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 // mise and user CLI installations. Only exact allowlisted names
                                 // enter this command; no user-controlled shell text.
                                 let command=format!(
-                                    "\${{SHELL:-/bin/sh}} -lic 'command -v {binary} >/dev/null 2>&1 && {binary} --version' 2>/dev/null || {binary} --version"
+                                    "${{SHELL:-/bin/sh}} -lic 'command -v {binary} >/dev/null 2>&1 && {binary} --version' 2>/dev/null || {binary} --version"
                                 );
                                 cmd.exec(true,command.as_bytes()).await
                                     .map_err(|_|"SSH server refused AI CLI version probe".to_owned())?;
