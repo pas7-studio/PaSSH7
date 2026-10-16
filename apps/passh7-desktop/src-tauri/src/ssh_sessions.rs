@@ -22,6 +22,10 @@ enum SessionCommand {
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
+    SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
+    ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
+    ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
+    ForwardOpen(tokio::net::TcpStream,String,u16),
 }
 
 #[derive(Clone, Serialize)]
@@ -141,6 +145,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
     channel.request_shell(true).await.map_err(|_| "SSH server denied shell".to_owned())?;
     let id = format!("ssh-{}", NEXT_ID.fetch_add(1, Ordering::Relaxed));
     let (tx, mut rx) = mpsc::channel::<SessionCommand>(128);
+    let forward_sender = tx.clone();
     let (cancel_tx, mut cancelled) = tokio::sync::watch::channel(false);
     {
         let mut sessions = manager.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?;
@@ -156,6 +161,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut backlog: Vec<Vec<u8>> = Vec::new();
         let mut buffered = 0usize;
         let mut overflowed = false;
+        let mut forwarders: HashMap<u16,tokio::sync::oneshot::Sender<()>> = HashMap::new();
         loop {
             tokio::select! {
                 changed = cancelled.changed() => {
@@ -233,6 +239,84 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let _ = response.send(result);
                             Ok(())
                         },
+                        Some(SessionCommand::SftpRead(path,response)) => {
+                            let result=tokio::time::timeout(Duration::from_secs(20), async {
+                                use tokio::io::AsyncReadExt;
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|e|format!("Could not open SFTP channel: {e}"))?;
+                                channel.request_subsystem(true,"sftp").await
+                                    .map_err(|e|format!("SFTP subsystem unavailable: {e}"))?;
+                                let sftp=russh_sftp::client::SftpSession::new(channel.into_stream()).await
+                                    .map_err(|e|format!("SFTP initialization failed: {e}"))?;
+                                let mut file=sftp.open(path).await.map_err(|e|format!("Cannot open remote file: {e}"))?;
+                                const MAX:u64=262_144;
+                                let mut bytes=Vec::new();
+                                (&mut file).take(MAX+1).read_to_end(&mut bytes).await
+                                    .map_err(|e|format!("Cannot read remote file: {e}"))?;
+                                if bytes.len()>MAX as usize { return Err("File too large for preview (256 KiB limit)".to_owned()); }
+                                if bytes.contains(&0) { return Err("Binary file cannot be previewed as text".to_owned()); }
+                                String::from_utf8(bytes).map_err(|_|"Text preview requires UTF-8; use the terminal or a binary transfer tool".to_owned())
+                            }).await.unwrap_or_else(|_|Err("SFTP preview timed out after 20 seconds".to_owned()));
+                            let _=response.send(result);
+                            Ok(())
+                        },
+                        Some(SessionCommand::ForwardStart(local_port,target_host,remote_port,response)) => {
+                            if forwarders.contains_key(&local_port) {
+                                let _ = response.send(Err("Local port already forwarded by this session".into()));
+                            } else {
+                                match tokio::net::TcpListener::bind(("127.0.0.1",local_port)).await {
+                                    Ok(listener) => {
+                                        let (stop_tx,mut stop_rx) = tokio::sync::oneshot::channel::<()>();
+                                        forwarders.insert(local_port,stop_tx);
+                                        let tx = forward_sender.clone();
+                                        let mut cancel = cancelled.clone();
+                                        tauri::async_runtime::spawn(async move {
+                                            loop {
+                                                tokio::select! {
+                                                    _ = &mut stop_rx => break,
+                                                    changed = cancel.changed() => { if changed.is_err() || *cancel.borrow() { break; } },
+                                                    accepted = listener.accept() => {
+                                                        match accepted {
+                                                            Ok((socket,_peer)) => {
+                                                                if tx.send(SessionCommand::ForwardOpen(socket,target_host.clone(),remote_port)).await.is_err() { break; }
+                                                            },
+                                                            Err(_) => break,
+                                                        }
+                                                    },
+                                                }
+                                            }
+                                        });
+                                        let _ = response.send(Ok(()));
+                                    },
+                                    Err(e) => { let _ = response.send(Err(format!("Cannot bind localhost:{local_port}: {e}"))); }
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::ForwardStop(local_port,response)) => {
+                            if let Some(cancel)=forwarders.remove(&local_port){
+                                let _ = cancel.send(());
+                                let _ = response.send(Ok(()));
+                            }else{
+                                let _ = response.send(Err("No active local forwarding on this port".into()));
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::ForwardOpen(mut socket,target_host,remote_port)) => {
+                            let peer = socket.peer_addr().ok();
+                            let origin_addr=peer.map(|a|a.ip().to_string()).unwrap_or_else(||"127.0.0.1".into());
+                            let origin_port=peer.map(|a|a.port() as u32).unwrap_or_default();
+                            match connection.channel_open_direct_tcpip(target_host,remote_port as u32,origin_addr,origin_port).await {
+                                Ok(channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let mut stream=channel.into_stream();
+                                        let _ = tokio::io::copy_bidirectional(&mut socket,&mut stream).await;
+                                    });
+                                },
+                                Err(_)=>{} // The local TCP stream is dropped if forwarding is denied.
+                            }
+                            Ok(())
+                        },
                         Some(SessionCommand::Close) | None => break,
                     };
                     if result.is_err() { break; }
@@ -259,6 +343,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                 }
             }
         }
+        for (_,stop) in forwarders.drain() { let _=stop.send(()); }
         let _ = channel.close().await;
         let _ = connection.disconnect(russh::Disconnect::ByApplication, "Session closed", "en").await;
         if let Ok(mut guard) = manager.channels.lock() { guard.remove(&cleanup_id); }
@@ -302,6 +387,35 @@ pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, 
     manager.sender(&id)?.send(SessionCommand::SftpList(path,tx)).await
         .map_err(|_| "SSH connection has closed".to_owned())?;
     rx.await.map_err(|_| "SFTP listing cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_sftp_read_text(id:String,path:String,manager:State<'_,SshSessionManager>)->Result<String,String>{
+    if path.len()>4096 || path.as_bytes().contains(&0) {return Err("Invalid SFTP file path".into());}
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::SftpRead(path,tx)).await
+        .map_err(|_|"SSH connection has closed".to_owned())?;
+    rx.await.map_err(|_|"SFTP preview was cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_forward_start(id:String,local_port:u16,target_host:String,remote_port:u16,manager:State<'_,SshSessionManager>)->Result<(),String>{
+    if local_port==0 || remote_port==0 {return Err("Ports must be between 1 and 65535".into());}
+    if target_host.trim().is_empty() || target_host.len()>253 || target_host.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("Enter a valid remote host (hostname or IP)".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::ForwardStart(local_port,target_host,remote_port,tx)).await
+        .map_err(|_|"SSH connection has closed".to_owned())?;
+    rx.await.map_err(|_|"Port forwarding request cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_forward_stop(id:String,local_port:u16,manager:State<'_,SshSessionManager>)->Result<(),String>{
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::ForwardStop(local_port,tx)).await
+        .map_err(|_|"SSH connection has closed".to_owned())?;
+    rx.await.map_err(|_|"Port forwarding stop cancelled".to_owned())?
 }
 
 #[tauri::command]
