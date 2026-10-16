@@ -103,3 +103,8 @@ export async function generateEd25519(alias:string,comment:string):Promise<Gener
 export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey>{
   return invoke<GeneratedPublicKey>("vault_public_identity",{alias});
 }
+
+/** Remote Docker CLI JSON lines, collected through an authenticated SSH exec channel. */
+export async function listDockerContainers(sessionId:string):Promise<string>{
+  return invoke<string>("ssh_session_docker_list",{id:sessionId});
+}
