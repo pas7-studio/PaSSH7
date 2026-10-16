@@ -24,13 +24,22 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
     <label className="prefRow"><span><strong>{label}</strong><small>{hint}</small></span>
       <input type="checkbox" checked={Boolean(preferences[key])} onChange={e=>update(key,e.target.checked as never)}/></label>
   );
+  const resetSection=()=>{
+    const keys:(keyof AppPreferences)[]=section==="general"?["theme","density","rememberWorkspace"]:
+      section==="terminal"?["terminalFontSize","terminalScrollback"]:
+      section==="files"?["sftpShowHidden","sftpSort","confirmTransfer"]:
+      section==="docker"?["dockerTail","dockerAutoRefresh","dockerFollowLogs"]:[];
+    const next={...preferences};
+    for(const key of keys)Object.assign(next,{[key]:defaultPreferences[key]});
+    onChange(next);
+  };
   return <div className="widePage settingsPage">
     <div className="widePageTitle"><Settings2 size={25}/><div><h1>Settings</h1><p>Configure how PaSSH7 works. Preferences are saved automatically on this device.</p></div></div>
     <div className="settingsLayout">
       <nav className="settingsNav" aria-label="Settings categories">{sections.map(({id,label,hint,Icon})=>
         <button key={id} className={section===id?"selected":""} onClick={()=>setSection(id)}><Icon size={18}/><span><strong>{label}</strong><small>{hint}</small></span></button>)}</nav>
       <div className="settingsContent">
-        <div className="settingsHeading"><div><h2>{sections.find(s=>s.id===section)?.label}</h2><p>Changes apply immediately. Options not supported by the SSH backend are not presented as active controls.</p></div><button onClick={()=>onChange({...preferences,...Object.fromEntries((section==="general"?["theme","density","rememberWorkspace"]:section==="terminal"?["terminalFontSize","terminalScrollback"]:section==="files"?["sftpShowHidden","sftpSort","confirmTransfer"]:section==="docker"?["dockerTail","dockerAutoRefresh","dockerFollowLogs"]:[]).map(k=>[k,defaultPreferences[k as keyof AppPreferences]])})}>Reset section</button></div>
+        <div className="settingsHeading"><div><h2>{sections.find(s=>s.id===section)?.label}</h2><p>Changes apply immediately. Options not supported by the SSH backend are not presented as active controls.</p></div><button onClick={resetSection}>Reset section</button></div>
         {section==="general"&&<section className="settingsCard"><h3>Workspace & appearance</h3>
           {toggle("Remember workspace","Reopen the selected Files, Docker or Terminal page after restart.","rememberWorkspace")}
           <label className="prefRow"><span><strong>Theme</strong><small>Choose the app's appearance.</small></span><select value={preferences.theme} onChange={e=>update("theme",e.target.value as AppPreferences["theme"])}><option value="dark">Dark</option><option value="light">Light</option></select></label>
