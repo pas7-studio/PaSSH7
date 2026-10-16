@@ -3,7 +3,7 @@ import {Terminal} from "@xterm/xterm";
 import {FitAddon} from "@xterm/addon-fit";
 import {listen} from "@tauri-apps/api/event";
 import type {SshSessionEvent} from "./backend";
-import {readySshSession,resizeSshSession,writeSshSession} from "./backend";
+import {closeSshSession,readySshSession,resizeSshSession,writeSshSession} from "./backend";
 import "@xterm/xterm/css/xterm.css";
 
 type Props={id:string;active:boolean;onClosed:(id:string,detail?:string)=>void};
@@ -58,12 +58,14 @@ export default function TerminalView({id,active,onClosed}:Props){
       catch(error) {
         if(live){
           terminal.writeln("\r\n[PaSSH7: SSH terminal initialization failed: "+String(error)+"]");
+          void closeSshSession(id).catch(()=>{});
           onClosed(id,"Terminal event handshake failed");
         }
       }
     }).catch(error=>{
       if(live){
         terminal.writeln("\r\n[PaSSH7: event listener failed: "+String(error)+"]");
+        void closeSshSession(id).catch(()=>{});
         onClosed(id,"Could not subscribe to terminal events");
       }
     });
