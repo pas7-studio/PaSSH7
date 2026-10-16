@@ -27,6 +27,7 @@ enum SessionCommand {
     Resize(u32, u32),
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerLogs(String,tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
@@ -246,6 +247,39 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let _ = response.send(listed);
                             Ok(())
                         },
+                        Some(SessionCommand::DockerLogs(container_id,response)) => {
+                            // The native IPC command only accepts a Docker hex ID.
+                            // No shell metacharacters or arbitrary commands can be supplied.
+                            let result = tokio::time::timeout(Duration::from_secs(20), async {
+                                let mut cmd = connection.channel_open_session().await
+                                    .map_err(|_| "Could not open Docker log channel".to_owned())?;
+                                let command = format!("docker logs --tail 200 --timestamps {container_id}");
+                                cmd.exec(true, command.as_bytes()).await
+                                    .map_err(|_| "SSH server rejected Docker log request".to_owned())?;
+                                let mut output = Vec::new();
+                                let mut exit_status = None;
+                                while let Some(message) = cmd.wait().await {
+                                    match message {
+                                        russh::ChannelMsg::Data { data } | russh::ChannelMsg::ExtendedData { data, .. } => {
+                                            if output.len().saturating_add(data.len()) > 512 * 1024 {
+                                                return Err("Docker log exceeds 512 KiB. Narrow the output in the SSH terminal.".to_owned());
+                                            }
+                                            output.extend_from_slice(&data);
+                                        },
+                                        russh::ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
+                                        russh::ChannelMsg::Close => break,
+                                        _ => {}
+                                    }
+                                }
+                                let result = String::from_utf8_lossy(&output).into_owned();
+                                if exit_status.unwrap_or(1) != 0 {
+                                    return Err(format!("Docker logs failed: {}",result.chars().take(500).collect::<String>()));
+                                }
+                                Ok(result)
+                            }).await.unwrap_or_else(|_|Err("Docker logs timed out after 20 seconds".to_owned()));
+                            let _=response.send(result);
+                            Ok(())
+                        },
                         Some(SessionCommand::SftpList(path, response)) => {
                             let result = tokio::time::timeout(Duration::from_secs(20), async {
                                 let channel = connection.channel_open_session().await
@@ -425,6 +459,23 @@ pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionMa
     rx.await.map_err(|_| "Docker request was cancelled".to_owned())?
 }
 
+// Only container IDs from the verified Docker inventory may be used.
+// Names, flags and shell input are intentionally rejected.
+fn valid_docker_container_id(id: &str) -> bool {
+    (12..=64).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_hexdigit())
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_logs(id: String, container_id: String, manager: State<'_, SshSessionManager>) -> Result<String, String> {
+    if !valid_docker_container_id(&container_id) {
+        return Err("Invalid Docker container ID: use the hex ID from the inventory".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerLogs(container_id,tx)).await
+        .map_err(|_|"SSH session closed".to_owned())?;
+    rx.await.map_err(|_|"Docker logs request was cancelled".to_owned())?
+}
+
 #[tauri::command]
 pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, SshSessionManager>) -> Result<Vec<SftpEntry>, String> {
     if path.len()>4096 || path.as_bytes().contains(&0) { return Err("Invalid SFTP directory path".into()); }
@@ -472,6 +523,16 @@ pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docker_log_requests_reject_shell_injection() {
+        assert!(valid_docker_container_id("0123456789ab"));
+        assert!(valid_docker_container_id("abcdef0123456789abcdef0123456789"));
+        assert!(!valid_docker_container_id("some-container"));
+        assert!(!valid_docker_container_id("0123456789ab;cat /etc/shadow"));
+        assert!(!valid_docker_container_id("--help"));
+        assert!(!valid_docker_container_id(""));
+    }
 
     #[test]
     fn vault_lock_invalidates_inflight_connection_generation() {

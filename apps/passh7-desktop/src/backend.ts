@@ -111,6 +111,10 @@ export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey
 export async function listDockerContainers(sessionId:string):Promise<string>{
   return invoke<string>("ssh_session_docker_list",{id:sessionId});
 }
+/** Returns at most 200 timestamped lines for one container. Does not start, stop or mutate Docker. */
+export async function readDockerLogs(sessionId:string,containerId:string):Promise<string>{
+  return invoke<string>("ssh_session_docker_logs",{id:sessionId,containerId});
+}
 
 export type DiscoveredHostKey = {fingerprint:string};
 export async function discoverSshHostKey(alias:string):Promise<DiscoveredHostKey>{
