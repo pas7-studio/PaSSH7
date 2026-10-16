@@ -128,3 +128,7 @@ export async function startLocalForward(sessionId:string,localPort:number,target
 export async function stopLocalForward(sessionId:string,localPort:number):Promise<void>{
   return invoke("ssh_session_forward_stop",{id:sessionId,localPort});
 }
+
+export async function readSftpText(sessionId:string,path:string):Promise<string>{
+  return invoke<string>("ssh_session_sftp_read_text",{id:sessionId,path});
+}
