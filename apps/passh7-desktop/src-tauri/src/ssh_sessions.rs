@@ -21,7 +21,12 @@ enum SessionCommand {
     Resize(u32, u32),
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
+    SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
 }
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct SftpEntry { pub name: String, pub is_dir: bool }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -202,6 +207,32 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let _ = response.send(listed);
                             Ok(())
                         },
+                        Some(SessionCommand::SftpList(path, response)) => {
+                            let result = tokio::time::timeout(Duration::from_secs(20), async {
+                                let channel = connection.channel_open_session().await
+                                    .map_err(|e| format!("SFTP channel could not open: {e}"))?;
+                                channel.request_subsystem(true, "sftp").await
+                                    .map_err(|e| format!("SFTP subsystem refused: {e}"))?;
+                                let sftp = russh_sftp::client::SftpSession::new(channel.into_stream()).await
+                                    .map_err(|e| format!("SFTP initialization failed: {e}"))?;
+                                let entries = sftp.read_dir(path).await
+                                    .map_err(|e| format!("SFTP folder could not be read: {e}"))?;
+                                let mut result = Vec::new();
+                                for entry in entries {
+                                    if result.len() >= 2000 { break; }
+                                    let name = entry.file_name();
+                                    if name == "." || name == ".." { continue; }
+                                    result.push(SftpEntry {
+                                        name,
+                                        is_dir: entry.metadata().is_dir(),
+                                    });
+                                }
+                                result.sort_by(|a,b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+                                Ok::<_, String>(result)
+                            }).await.unwrap_or_else(|_| Err("SFTP listing timed out after 20 seconds".to_owned()));
+                            let _ = response.send(result);
+                            Ok(())
+                        },
                         Some(SessionCommand::Close) | None => break,
                     };
                     if result.is_err() { break; }
@@ -262,6 +293,15 @@ pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionMa
     manager.sender(&id)?.send(SessionCommand::DockerList(tx)).await
         .map_err(|_| "SSH session closed".to_owned())?;
     rx.await.map_err(|_| "Docker request was cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, SshSessionManager>) -> Result<Vec<SftpEntry>, String> {
+    if path.len()>4096 || path.contains('\\0') { return Err("Invalid SFTP directory path".into()); }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::SftpList(path,tx)).await
+        .map_err(|_| "SSH connection has closed".to_owned())?;
+    rx.await.map_err(|_| "SFTP listing cancelled".to_owned())?
 }
 
 #[tauri::command]
