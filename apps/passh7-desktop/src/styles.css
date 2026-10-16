@@ -74,3 +74,135 @@
 .sftpProgress{display:grid;gap:7px;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--panel2)}.sftpProgress strong{font-size:12px}.sftpProgress small{font-size:11px;color:var(--muted)}.sftpFile{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.sftpFile button:first-child{flex:1;text-align:left;min-width:120px}.sftpFile button{overflow-wrap:anywhere;white-space:normal}
 .dockerActions{display:flex;flex-wrap:wrap;gap:6px}.dockerActions button{flex:1;min-width:76px}.dockerInventory{display:grid;gap:9px;margin-top:18px}.dockerItem{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--border);border-radius:9px;background:var(--panel2);overflow-wrap:anywhere}.dockerItem strong{font-size:12px}.dockerItem small{font-size:10px;color:var(--muted)}.dockerItem span{font-size:11px;color:var(--positive)}
 @media(max-width:1100px){.context{width:280px}.sidebar{width:214px}.identity{padding:18px 14px}}
+
+
+/* PaSSH7 workspaces — file manager, Docker and settings use the entire app,
+   rather than the historic 302px Context aside. Terminal stays mounted. */
+.workspaceNav{display:grid;gap:4px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.workspaceNav button{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:11px 13px;font-size:12px;font-weight:600;color:var(--muted);border:0;border-radius:8px;background:transparent}
+.workspaceNav button:hover{background:var(--surface);color:var(--fg)}
+.workspaceNav button.active{background:var(--accentSoft);color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.workspaceFull>.main{display:none}
+.workspaceFull>.context.fullContext{display:flex!important;flex:1;width:auto;min-width:0;border:0;background:var(--bg);overflow:hidden}
+.fullContext>.contextHeader,.fullContext>.contextTabs{display:none}
+.fullContext>.contextBody{padding:0;flex:1;min-width:0;overflow:auto}
+.widePage{display:flex;flex-direction:column;gap:16px;padding:23px;min-height:100%;max-width:1880px;margin:0 auto}
+.widePageTitle{display:flex;align-items:center;gap:16px;min-height:61px}
+.widePageTitle>svg{color:var(--accent)}
+.widePageTitle h1{font-size:24px;line-height:1.2;margin:0 0 4px;letter-spacing:-.5px}
+.widePageTitle p{color:var(--muted);font-size:12px;margin:0}
+.widePageTitle>span{margin-left:auto;font-size:12px}
+.workspaceConnected{color:var(--positive)}.workspaceOffline{color:var(--muted)}
+.widePage button,.widePage input,.widePage select{border:1px solid var(--border);border-radius:7px;background:var(--panel2);color:var(--fg);padding:9px 12px;font-size:12px}
+.widePage button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:34px}
+.widePage button:hover:not(:disabled){border-color:var(--accent);color:var(--fg);background:var(--surface)}
+.widePage input:focus-visible,.widePage button:focus-visible,.widePage select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.widePage .workspacePrimary{background:#176ccf;color:white;border-color:#297ee4}
+.widePage .workspacePrimary:hover:not(:disabled){background:#277cdd}
+.filesPathBar,.filesActions,.dockerToolbar,.dockerLogToolbar{display:flex;align-items:center;gap:8px;min-width:0}
+.filesPathBar>input{min-width:110px;width:175px}
+.filesCrumbs{display:flex;gap:2px;align-items:center;flex:1;min-width:0;overflow:auto;white-space:nowrap;border:1px solid var(--border);border-radius:8px;background:var(--panel);padding:4px 6px}
+.filesCrumbs button{border:0;min-height:27px;padding:4px 9px;flex-shrink:0;background:none}
+.filesCrumbs button:not(:last-child):after{content:"›";padding-left:12px;color:var(--muted)}
+.filesToolbarSpacer{flex:1}
+.filesSearch{display:flex;align-items:center;gap:7px;padding:0 9px;background:var(--panel2);border:1px solid var(--border);border-radius:7px;min-width:155px}
+.filesSearch input{border:0;background:transparent;outline:0;padding:8px 3px;min-width:0;width:100%;color:var(--fg)}
+.filesGrid{display:grid;grid-template-columns:minmax(145px,18%) minmax(0,1fr) minmax(205px,24%);gap:12px;min-height:390px;height:min(54vh,650px)}
+.filesFolders,.filesTablePane,.filesInspector,.dockerContainersPane,.dockerInspector,.dockerLogViewer,.wideTransferQueue,.filesVaultSection>.vaultBackupCard,.settingsCard{background:var(--panel);border:1px solid var(--border);border-radius:10px;min-width:0;overflow:hidden}
+.paneTitle{display:flex;justify-content:space-between;gap:12px;color:var(--muted);letter-spacing:.7px;font-weight:750;font-size:10px;padding:13px 14px;border-bottom:1px solid var(--border);min-height:40px}
+.filesFolders{display:flex;flex-direction:column;overflow:auto}
+.filesFolders button{display:flex;justify-content:flex-start;border:0;border-radius:3px;background:transparent;padding:8px 12px;margin:1px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:30px}
+.filesFolders button.selected{color:var(--accent);background:var(--accentSoft)}
+.filesFolders p{font-size:11px;color:var(--muted);padding:10px}
+.filesTablePane{display:flex;flex-direction:column}
+.filesTableWrap,.dockerTableScroll{overflow:auto;flex:1;min-height:0}
+.workspaceTable{border-collapse:collapse;width:100%;font-size:12px;text-align:left;table-layout:auto}
+.workspaceTable th{position:sticky;top:0;background:var(--surface);padding:11px 12px;font-size:11px;color:var(--muted);font-weight:650;text-align:left;z-index:1;white-space:nowrap}
+.workspaceTable td{padding:10px 12px;border-top:1px solid var(--border);white-space:nowrap;max-width:250px;overflow:hidden;text-overflow:ellipsis}
+.workspaceTable tbody tr{cursor:pointer}
+.workspaceTable tbody tr:hover{background:var(--surface)}
+.workspaceTable tbody tr.selected{background:var(--accentSoft);color:var(--fg)}
+.fileName{display:inline-flex;align-items:center;gap:8px}
+.fileName svg{color:var(--accent)}
+.filesInspector,.dockerInspector{overflow:auto}
+.inspectorFile{padding:18px 14px;display:grid;justify-items:start;gap:6px;border-bottom:1px solid var(--border)}
+.inspectorFile svg{color:var(--accent)}
+.inspectorFile strong{font-size:14px;overflow-wrap:anywhere}
+.inspectorFile small{color:var(--muted)}
+.filesInspector dl,.dockerInspector dl,.diagnosticList{display:grid;grid-template-columns:minmax(85px,1fr) minmax(0,1.6fr);gap:10px 7px;padding:15px;margin:0;font-size:11px}
+.filesInspector dt,.dockerInspector dt,.diagnosticList dt{color:var(--muted)}
+.filesInspector dd,.dockerInspector dd,.diagnosticList dd{margin:0;overflow-wrap:anywhere}
+.filePath{word-break:break-all}
+.inspectorActions{padding:0 14px 14px;display:flex;flex-wrap:wrap;gap:7px}
+.fileCodePreview{border-top:1px solid var(--border);padding:13px;min-width:0}
+.fileCodePreview strong{font-size:10px;color:var(--muted)}
+.fileCodePreview pre{font-size:11px;line-height:1.5;max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}
+.fileCodePreview p{font-size:11px;color:var(--muted);line-height:1.6}
+.workspaceEmpty{padding:24px;color:var(--muted);font-size:12px;line-height:1.6;text-align:center}
+.workspaceError{padding:12px;border:1px solid #a74242;color:#f59b9b;border-radius:8px;font-size:12px;background:#361a2080}
+.workspaceNotice{padding:9px 12px;font-size:12px;color:var(--positive)}
+.wideTransferQueue{padding:13px;display:grid;gap:9px}
+.transferRow{display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px}
+.transferRow progress{width:min(350px,40vw);height:8px;accent-color:var(--accent)}
+.wideTransferQueue p{margin:0;color:var(--positive);font-size:11px}
+.filesVaultSection .vaultBackupCard{padding:18px;display:grid;gap:12px}
+.filesVaultSection .vaultBackupActions{display:flex;flex-wrap:wrap;gap:9px}
+.filesVaultSection .vaultBackupTarget{flex:1;min-width:230px}
+.filesVaultSection .vaultHistoryList{max-height:210px}
+.dockerMetrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.dockerMetrics>div{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:15px;display:grid;gap:9px}
+.dockerMetrics small{font-size:11px;color:var(--muted)}
+.dockerMetrics strong{font-size:24px}
+.textGood{color:var(--positive)}
+.dockerWorkspaceGrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,26%);gap:12px;min-height:320px;height:min(45vh,540px)}
+.dockerContainersPane{display:flex;flex-direction:column}
+.dockerToolbar{padding:12px;flex-wrap:wrap}
+.dockerToolbar .filesSearch{flex:1}
+.dockerContainerName{display:flex;align-items:center;gap:8px}
+.dockerStatus{display:inline-block;border-radius:8px;padding:4px 8px;font-size:11px;white-space:nowrap}
+.dockerStatus.running{color:#55dba4;background:#13553c60}
+.dockerStatus.stopped{color:#f39494;background:#6e202c60}
+.dangerButton{color:#f39494!important;border-color:#a83b4b!important}
+.dockerInspector .prefInfo{padding:0 14px}
+.dockerLogViewer{display:flex;flex-direction:column;min-height:230px;height:min(34vh,400px)}
+.dockerLogToolbar{padding:10px 12px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.dockerLogToolbar strong{display:flex;align-items:center;gap:7px;font-size:12px}
+.dockerLogToolbar>span{font-size:11px;color:var(--muted)}
+.dockerLogToolbar .filesSearch{flex:1}
+.compactToggle{display:flex;align-items:center;gap:5px;font-size:11px}
+.compactToggle input{width:14px;height:14px}
+.dockerLogsBody{flex:1;overflow:auto;background:#0d1420;padding:10px;font:11px/1.6 "Cascadia Code",Consolas,monospace}
+.dockerLogLine{display:flex;gap:14px;white-space:pre}
+.dockerLogLine>span{font-variant-numeric:tabular-nums;color:#526883;text-align:right;width:38px;flex:none}
+.dockerLogLine code{color:#c7d5e8;white-space:inherit}
+.dockerLogsBody.wrapped .dockerLogLine{white-space:pre-wrap;overflow-wrap:anywhere}
+.dockerLogsBody .logError{color:#ff8585}
+.dockerLogsBody .logWarn{color:#f6bf69}
+.logsLoading{color:#87aff6;font-size:11px}
+.dockerLogFooter{padding:7px 12px;display:flex;gap:20px;justify-content:flex-end;border-top:1px solid var(--border);color:var(--muted);font-size:10px}
+.settingsLayout{display:grid;grid-template-columns:minmax(180px,210px) minmax(0,1fr) minmax(170px,220px);gap:14px;align-items:start}
+.settingsNav{display:grid;gap:4px}
+.settingsNav button{display:flex;text-align:left;justify-content:flex-start;gap:10px;padding:12px;min-width:0}
+.settingsNav button.selected{color:var(--accent);background:var(--accentSoft)}
+.settingsNav button>span{display:grid;gap:4px;min-width:0}
+.settingsNav strong{font-size:12px}
+.settingsNav small{font-size:10px;color:var(--muted)}
+.settingsContent{display:grid;gap:12px;min-width:0}
+.settingsHeading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.settingsHeading h2{margin:0 0 5px;font-size:18px}
+.settingsHeading p{margin:0;color:var(--muted);font-size:11px;line-height:1.5}
+.settingsHeading button{flex:none}
+.settingsCard{padding:17px;display:grid;gap:12px}
+.settingsCard h3{margin:0;font-size:13px;display:flex;align-items:center;gap:7px}
+.settingsCard p{margin:0;font-size:12px;line-height:1.7}
+.prefRow{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:11px 0;border-top:1px solid var(--border)}
+.prefRow>span{display:grid;gap:6px}
+.prefRow strong{font-size:12px}
+.prefRow small,.prefInfo{font-size:11px!important;color:var(--muted);line-height:1.6}
+.prefRow select,.prefRow input[type=number]{max-width:145px}
+.prefRow input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+.settingsActions{display:flex;flex-wrap:wrap;gap:9px}
+.settingsHelp{display:grid;gap:12px}
+@media(max-width:1100px){.settingsLayout{grid-template-columns:170px minmax(0,1fr)}.settingsHelp{grid-column:2;display:flex}.settingsHelp>.settingsCard{flex:1}.filesGrid{grid-template-columns:150px minmax(0,1fr)}.filesInspector{grid-column:1/-1;height:230px}.filesGrid{height:auto}.filesTablePane{height:400px}}
+@media(max-width:800px){.workspaceFull>.context.fullContext{display:flex!important}.widePage{padding:14px}.workspaceNav button{font-size:11px}.filesGrid,.dockerWorkspaceGrid,.settingsLayout{display:flex;flex-direction:column;height:auto}.filesFolders{max-height:180px}.filesTablePane{height:340px}.filesInspector,.dockerInspector{height:auto;max-height:300px}.dockerMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.settingsHelp{display:grid}.filesPathBar{flex-wrap:wrap}.filesCrumbs{min-width:100%}}
+.shell.compact .workspaceTable td{padding:6px 9px}.shell.compact .workspaceTable th{padding:8px 9px}
