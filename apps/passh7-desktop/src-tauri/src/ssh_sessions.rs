@@ -49,7 +49,7 @@ enum SessionCommand {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct SftpEntry { pub name: String, pub is_dir: bool }
+pub struct SftpEntry { pub name: String, pub is_dir: bool, pub size_bytes: Option<u64>, pub modified_at: Option<u64> }
 
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
@@ -662,7 +662,13 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 if result.len()>=2000 {break;}
                                                 let name=entry.file_name();
                                                 if name=="." || name==".." {continue;}
-                                                result.push(SftpEntry{name,is_dir:entry.metadata().is_dir()});
+                                                let attrs=entry.metadata();
+                                                let is_dir=attrs.is_dir();
+                                                let size_bytes=if is_dir{None}else{Some(attrs.len())};
+                                                let modified_at=attrs.modified().ok()
+                                                    .and_then(|date|date.duration_since(std::time::UNIX_EPOCH).ok())
+                                                    .map(|duration|duration.as_secs());
+                                                result.push(SftpEntry{name,is_dir,size_bytes,modified_at});
                                             }
                                             result.sort_by(|a,b|b.is_dir.cmp(&a.is_dir)
                                                 .then_with(||a.name.to_lowercase().cmp(&b.name.to_lowercase())));
