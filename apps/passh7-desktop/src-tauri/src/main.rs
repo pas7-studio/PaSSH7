@@ -137,7 +137,8 @@ async fn vault_restore_inspect(
             .map_err(|e|format!("Cannot inspect current Vault generation: {e}"))?;
         let _=passh7_core::decrypt(&current,password).map_err(safe_err)?;
         let names=candidate.hosts.iter().map(|h|h.alias.clone()).collect::<Vec<_>>();
-        Ok((candidate,current,names,candidate.identities.len()))
+        let key_count=candidate.identities.len();
+        Ok((candidate,current,names,key_count))
     })?;
     let token=format!("restore-{}-{}",std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
