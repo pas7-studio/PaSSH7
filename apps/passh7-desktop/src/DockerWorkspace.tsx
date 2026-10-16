@@ -1,4 +1,5 @@
-import {useMemo,useState} from "react";
+import {useEffect,useMemo,useState} from "react";
+import {listDockerResources} from "./backend";
 import {Clipboard,Container,Download,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
 
 export type ContainerRow={ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string};
@@ -14,6 +15,30 @@ export default function DockerWorkspace(p:Props){
   const [search,setSearch]=useState("");
   const [selected,setSelected]=useState("");
   const [filter,setFilter]=useState<"all"|"running"|"stopped">("all");
+  const [section,setSection]=useState<"containers"|"images"|"volumes"|"networks">("containers");
+  const [resourceQuery,setResourceQuery]=useState("");
+  const [resources,setResources]=useState<{session:string;section:"images"|"volumes"|"networks";items:Record<string,string>[]} |null>(null);
+  const [resourceError,setResourceError]=useState("");
+  const [resourceLoading,setResourceLoading]=useState(false);
+  const refreshResources=async(next:"images"|"volumes"|"networks")=>{
+    if(!p.connected||!p.session)return;
+    setResourceLoading(true);setResourceError("");
+    try{
+      const items=await listDockerResources(p.session,next);
+      setResources({session:p.session,section:next,items});
+    }catch(error){setResourceError("Cannot load Docker "+next+": "+String(error))}
+    finally{setResourceLoading(false)}
+  };
+  useEffect(()=>{
+    if(section==="containers"||!p.connected||!p.session)return;
+    void refreshResources(section);
+  },[section,p.connected,p.session]);
+  const resourceColumns:Record<"images"|"volumes"|"networks",string[]>={
+    images:["Repository","Tag","ID","Size","CreatedSince"],
+    volumes:["Name","Driver","Scope"],
+    networks:["Name","ID","Driver","Scope"]
+  };
+
   const [logsSearch,setLogsSearch]=useState("");
   const [wrap,setWrap]=useState(false);
   const [level,setLevel]=useState<"all"|"error"|"warn">("all");
@@ -38,7 +63,12 @@ export default function DockerWorkspace(p:Props){
       <div><small>Stopped / other</small><strong>{p.items?stopped:"—"}</strong></div>
       <div><small>Images in use</small><strong>{p.items?images:"—"}</strong></div>
     </div>
-    <div className="dockerWorkspaceGrid"><section className="dockerContainersPane">
+    <div className="dockerResourceTabs" role="tablist" aria-label="Docker resources">
+      {(["containers","images","volumes","networks"] as const).map(name=>
+      <button type="button" role="tab" aria-selected={section===name} className={section===name?"selected":""} key={name}
+        onClick={()=>setSection(name)}>{name[0].toUpperCase()+name.slice(1)}</button>)}
+    </div>
+    {section==="containers"?<div className="dockerWorkspaceGrid"><section className="dockerContainersPane">
       <div className="dockerToolbar"><div className="filesSearch"><Search size={15}/><input placeholder="Search containers…" value={search} onChange={e=>setSearch(e.target.value)} aria-label="Search containers"/></div>
         <select aria-label="Container state filter" value={filter} onChange={e=>setFilter(e.target.value as typeof filter)}><option value="all">All containers</option><option value="running">Running</option><option value="stopped">Stopped / other</option></select>
         <button onClick={p.onRefresh} disabled={!p.connected||p.loading}><RefreshCw size={15}/>{p.loading?" Loading…":" Refresh"}</button>
@@ -65,7 +95,20 @@ export default function DockerWorkspace(p:Props){
         </>:<div className="workspaceEmpty">Select a container to inspect its details.</div>}
       </aside>
     </div>
-    <section className="dockerLogViewer"><div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
+    : <section className="dockerResourcePane">
+      <div className="dockerToolbar"><strong>{section[0].toUpperCase()+section.slice(1)}</strong>
+        <label className="filesSearch"><Search size={15}/><input value={resourceQuery} onChange={e=>setResourceQuery(e.target.value)} placeholder={"Search "+section} aria-label={"Search "+section}/></label>
+        <button disabled={resourceLoading||!p.connected} onClick={()=>void refreshResources(section)}><RefreshCw size={15}/>{resourceLoading?" Loading…":" Refresh"}</button>
+      </div>
+      {resourceError&&<div className="workspaceError">{resourceError}</div>}
+      <div className="dockerTableScroll"><table className="workspaceTable"><thead><tr>{resourceColumns[section].map(col=><th key={col}>{col}</th>)}</tr></thead><tbody>
+        {(resources?.session===p.session&&resources.section===section?resources.items:[]).filter(row=>Object.values(row).join(" ").toLowerCase().includes(resourceQuery.toLowerCase()))
+          .map((row,index)=><tr key={row.ID||row.Name||index}>{resourceColumns[section].map(col=><td title={row[col]||""} key={col}>{row[col]||"—"}</td>)}</tr>)}
+      </tbody></table></div>
+      {!resourceLoading&&resources?.session===p.session&&resources.section===section&&!resources.items.length&&<div className="workspaceEmpty">No {section} found on this host.</div>}
+      {!p.connected&&<div className="workspaceEmpty">Connect to this SSH host to inspect Docker {section}.</div>}
+    </section>}
+    {section==="containers"&&<section className="dockerLogViewer"><div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
       <span>{p.logs?.session===p.session?p.logs.containerName:"Select a container"}</span>
       <label className="filesSearch"><Search size={14}/><input value={logsSearch} onChange={e=>setLogsSearch(e.target.value)} placeholder="Find in logs" aria-label="Search Docker logs"/></label>
       <select value={level} onChange={e=>setLevel(e.target.value as typeof level)} aria-label="Log severity"><option value="all">All levels</option><option value="warn">Warnings</option><option value="error">Errors</option></select>
@@ -84,6 +127,6 @@ export default function DockerWorkspace(p:Props){
         {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}
       </>:<div className="workspaceEmpty">Select a container and click View logs. Log output is fetched through a dedicated SSH exec channel.</div>}
     </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines</span><span>{p.follow?"Polling every 4 s":"Manual refresh"}</span></div>
-    </section>
+    </section>}
   </div>;
 }
