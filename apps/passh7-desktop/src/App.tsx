@@ -352,7 +352,7 @@ export default function App(){
     const list=available.map(t=>t.alias+" → "+t.directory).join("\n");
     if(!window.confirm("Create NEW encrypted, separately verified Vault snapshots on these "+available.length+" connected server(s)?\n\n"+list+
       (missing.length?"\n\nDisconnected configured targets (not uploaded): "+missing.join(", "):"")+
-      "\n\nNo existing backups will be overwritten. This is one-way replication, not automatic sync."))return;
+      "\n\nRemote server administrators can copy the ciphertext and attempt offline password guesses. Use only trusted servers and a strong Vault master password. Existing backups will not be overwritten. This is one-way replication, not automatic sync."))return;
     setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
     const success:string[]=[];const failure:string[]=[];
     for(const target of available){
