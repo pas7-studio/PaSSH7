@@ -2,7 +2,7 @@ import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -305,11 +305,40 @@ export default function App(){
   };
   const [agent,setAgent]=useState<AgentKind>("codex");
   const [agentStatus,setAgentStatus]=useState("");
+  const [agentProbeBusy,setAgentProbeBusy]=useState(false);
+  const [agentProbeError,setAgentProbeError]=useState("");
+  const [agentAvailability,setAgentAvailability]=useState<Partial<Record<AgentKind,{
+    session:string;installed:boolean;version:string|null
+  }>>>({});
+  const checkRemoteAgents=async()=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session){setAgentProbeError("Connect to this host before checking installed tools.");return}
+    if(agentProbeBusy)return;
+    setAgentProbeBusy(true);setAgentProbeError("");
+    const checks=await Promise.allSettled(AGENTS.map(a=>probeRemoteAgent(session.id,a.kind)));
+    const discovered:Partial<Record<AgentKind,{session:string;installed:boolean;version:string|null}>>={};
+    const failures:string[]=[];
+    checks.forEach((check,index)=>{
+      const kind=AGENTS[index].kind;
+      if(check.status==="fulfilled"){
+        discovered[kind]={session:session.id,...check.value};
+      }else{
+        failures.push(AGENTS[index].name+": "+String(check.reason));
+      }
+    });
+    setAgentAvailability(prev=>({...prev,...discovered}));
+    if(failures.length)setAgentProbeError(failures.join("; "));
+    setAgentProbeBusy(false);
+  };
   const launchRemoteAgent=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentStatus("Connect to this host first.");return}
     const cli:Record<AgentKind,string>={codex:"codex",claude:"claude",opencode:"opencode"};
     const name=AGENTS.find(a=>a.kind===agent)?.name||agent;
+    if(agentAvailability[agent]?.session===session.id&&!agentAvailability[agent]?.installed){
+      setAgentStatus(name+" was not detected in the remote non-interactive shell PATH. Install/configure it on "+session.alias+" or check the SSH terminal PATH.");
+      return;
+    }
     if(!window.confirm("Run "+name+" on "+session.alias+" in the existing SSH terminal? This CLI runs with your full SSH account privileges, NOT in a PaSSH7 sandbox. It must already be installed and configured on the remote host."))return;
     try{
       await writeSshSession(session.id,cli[agent]+"\r");
@@ -559,7 +588,17 @@ export default function App(){
         <footer><span className="footerBrand"><span className="statusDot" style={{background:connected?"#22c55e":undefined}}/> {connected?"SSH connected":desktopAvailable()?"No active SSH session":"Offline preview"}</span><span>{active.label} · {activeConnections} on host · {sshTabs.length} total</span><span>{buildInfo?.publisher ?? "PAS7 Studio"} · {buildInfo?.target ?? "Loading build info"}</span></footer>
       </main>
       <aside className="context"><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
-        {panel==="agent"?<><div className="contextTitle"><Bot size={18}/><h3>AI Agent</h3></div><p className="muted">Launch Codex, Claude Code or OpenCode in the SSH terminal. These tools run with your remote account permissions.</p><label className="fieldLabel">Agent</label><select value={agent} onChange={e=>setAgent(e.target.value as AgentKind)} aria-label="Select AI agent">{AGENTS.map(a=><option key={a.kind} value={a.kind}>{a.name}</option>)}</select><label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Launches an installed CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
+        {panel==="agent"?<><div className="contextTitle"><Bot size={18}/><h3>AI Agent</h3></div><p className="muted">Launch Codex, Claude Code or OpenCode in the SSH terminal. These tools run with your remote account permissions.</p><label className="fieldLabel">Agent</label><select value={agent} onChange={e=>setAgent(e.target.value as AgentKind)} aria-label="Select AI agent">{AGENTS.map(a=><option key={a.kind} value={a.kind}>{a.name}</option>)}</select><label className="fieldLabel">Remote CLI availability</label>
+<button type="button" className="contextAction" disabled={!connected||agentProbeBusy} onClick={()=>void checkRemoteAgents()}>{agentProbeBusy?"Checking remote CLI tools…":"Check installed agents"}</button>
+{AGENTS.map(a=><div className="agentAvailability" key={a.kind}><strong>{a.name}</strong><span>{
+  agentAvailability[a.kind]?.session===activeSsh
+    ? agentAvailability[a.kind]?.installed
+      ? ("Installed"+(agentAvailability[a.kind]?.version?" · "+agentAvailability[a.kind]?.version:""))
+      : "Not detected"
+    : "Not checked"
+}</span></div>)}
+{agentProbeError&&<p role="alert" className="wizardError">{agentProbeError}</p>}
+<label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Launches an installed CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
         panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Browse remote directories, preview UTF-8 text, or transfer files through encrypted SFTP. Transfers are limited to 64 MiB per file; existing files are never silently overwritten.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button><button className="contextAction" disabled={!connected||!activeSsh||sftpTransferBusy||sftpBusy} onClick={()=>void transferSftp("upload")}>{sftpTransferBusy?"Transferring…":"Upload file to this directory"}</button>{sftpTransferProgress?.session===activeSsh&&<div className="sftpProgress" role="status">
   <strong>{sftpTransferProgress.direction==="upload"?"Uploading":"Downloading"} · {sftpTransferProgress.stage==="selecting"?"Choose a local file":sftpTransferProgress.stage==="cancelling"?"Cancelling…":"Transfer in progress"}</strong>
   <small>{(sftpTransferProgress.bytes/1048576).toFixed(2)} MiB{sftpTransferProgress.totalBytes!==null?" / "+(sftpTransferProgress.totalBytes/1048576).toFixed(2)+" MiB":""}</small>
