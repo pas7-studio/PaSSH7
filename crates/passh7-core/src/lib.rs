@@ -279,17 +279,20 @@ fn replace_vault_file(temp: &Path, destination: &Path) -> Result<(), HubError> {
 #[cfg(windows)]
 fn replace_vault_file(temp: &Path, destination: &Path) -> Result<(), HubError> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
     fn wide(path: &Path) -> Vec<u16> {
         path.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
     }
-    if !destination.exists() {
-        fs::rename(temp, destination)?;
-        return Ok(());
-    }
+    // Both files are created in the same directory/volume. An encrypted and
+    // verified backup was written by save() before this replacement.
     let result = unsafe {
-        ReplaceFileW(wide(destination).as_ptr(), wide(temp).as_ptr(),
-                     std::ptr::null(), 0, std::ptr::null(), std::ptr::null())
+        MoveFileExW(
+            wide(temp).as_ptr(),
+            wide(destination).as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
     };
     if result == 0 { return Err(HubError::Io(std::io::Error::last_os_error())); }
     Ok(())
