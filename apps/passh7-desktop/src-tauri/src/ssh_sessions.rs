@@ -30,6 +30,7 @@ enum SessionCommand {
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogs(String,tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpDownload(String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
@@ -282,6 +283,49 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 Ok(result)
                             }).await.unwrap_or_else(|_|Err("Docker logs timed out after 20 seconds".to_owned()));
                             let _=response.send(result);
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerAction(action,container_id,response)) => {
+                            // A separate exec channel avoids freezing the interactive PTY
+                            // during slow container restarts. All arguments are native allowlisted.
+                            let cmd=connection.channel_open_session().await
+                                .map_err(|_|"Could not open Docker control channel");
+                            match cmd {
+                                Err(message) => {let _=response.send(Err(message.to_owned()));},
+                                Ok(mut cmd) => {
+                                    let full=format!("docker container {action} {container_id}");
+                                    match cmd.exec(true,full.as_bytes()).await {
+                                        Err(_) => {let _=response.send(Err("SSH server refused Docker action".into()));},
+                                        Ok(()) => {
+                                            tauri::async_runtime::spawn(async move {
+                                                let output=tokio::time::timeout(Duration::from_secs(45),async {
+                                                    let mut bytes=Vec::new();
+                                                    let mut exit_status=None;
+                                                    while let Some(msg)=cmd.wait().await {
+                                                        match msg {
+                                                            russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                                if bytes.len().saturating_add(data.len())>256*1024 {
+                                                                    return Err("Docker response exceeds 256 KiB".into());
+                                                                }
+                                                                bytes.extend_from_slice(&data);
+                                                            },
+                                                            russh::ChannelMsg::ExitStatus{exit_status:code} => exit_status=Some(code),
+                                                            russh::ChannelMsg::Close => break,
+                                                            _=>{}
+                                                        }
+                                                    }
+                                                    let message=String::from_utf8_lossy(&bytes).trim().to_owned();
+                                                    if exit_status.unwrap_or(1)!=0 {
+                                                        return Err(format!("Docker {action} failed: {}",message.chars().take(600).collect::<String>()));
+                                                    }
+                                                    Ok::<String,String>(format!("Docker {action} completed for {container_id}: {message}"))
+                                                }).await.unwrap_or_else(|_|Err("Docker action timed out after 45 seconds".into()));
+                                                let _=response.send(output);
+                                            });
+                                        }
+                                    }
+                                }
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::SftpList(path, response)) => {
@@ -591,6 +635,22 @@ pub async fn ssh_session_docker_logs(id: String, container_id: String, manager: 
     rx.await.map_err(|_|"Docker logs request was cancelled".to_owned())?
 }
 
+fn valid_docker_action(action:&str)->bool{
+    matches!(action,"start"|"stop"|"restart")
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_action(
+    id:String,container_id:String,action:String,manager:State<'_,SshSessionManager>
+)->Result<String,String>{
+    if !valid_docker_container_id(&container_id){return Err("Invalid container ID".into());}
+    if !valid_docker_action(&action){return Err("Unsupported Docker action".into());}
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerAction(action,container_id,tx)).await
+        .map_err(|_|"SSH session closed before Docker action")?;
+    rx.await.map_err(|_|"Docker action interrupted")?
+}
+
 #[tauri::command]
 pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, SshSessionManager>) -> Result<Vec<SftpEntry>, String> {
     if path.len()>4096 || path.as_bytes().contains(&0) { return Err("Invalid SFTP directory path".into()); }
@@ -708,6 +768,13 @@ pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docker_control_actions_are_allowlisted(){
+        for action in ["start","stop","restart"]{assert!(valid_docker_action(action));}
+        for action in ["rm","exec","--help","start;id",""]{assert!(!valid_docker_action(action));}
+        assert!(!valid_docker_container_id("deadbeef0123; reboot"));
+    }
 
     #[test]
     fn docker_log_requests_reject_shell_injection() {
