@@ -107,6 +107,18 @@ impl Vault {
         self.hosts.push(host);
         Ok(())
     }
+    /// Attach an existing encrypted vault key to a password-bootstrap host.
+    /// This does not change sshd_config or install the public key remotely.
+    pub fn set_host_identity(&mut self, alias:&str, identity_alias:&str)->Result<(),HubError>{
+        if identity_alias.trim().is_empty() ||
+            !self.identities.iter().any(|i|i.alias==identity_alias){
+            return Err(HubError::InvalidInput("unknown identity alias"));
+        }
+        let host=self.hosts.iter_mut().find(|h|h.alias==alias)
+            .ok_or(HubError::InvalidInput("host alias not found"))?;
+        host.identity_alias=identity_alias.to_owned();
+        Ok(())
+    }
     /// Explicitly pin an already verified host fingerprint (never discover blindly).
     pub fn pin_host_key(&mut self, alias: &str, pin: &str) -> Result<(), HubError> {
         hostkey::validate_fingerprint(pin)?;
@@ -351,6 +363,26 @@ mod tests {
         assert_eq!(roundtrip.hosts.len(),1);
         assert!(roundtrip.hosts[0].identity_alias.is_empty());
         assert_eq!(roundtrip.hosts[0].username,"Administrator");
+    }
+
+    #[test]
+    fn password_host_can_attach_existing_key_for_later_key_authentication(){
+        let mut vault=Vault::default();
+        vault.add_host(HostProfile{
+            alias:"lab".into(),hostname:"lab.example".into(),port:22,
+            username:"ubuntu".into(),identity_alias:String::new(),
+            pinned_host_key:None,extensions:Default::default()
+        }).unwrap();
+        assert!(matches!(vault.set_host_identity("lab","missing"),
+            Err(HubError::InvalidInput("unknown identity alias"))));
+        vault.add_identity(Identity{
+            alias:"lab-key".into(),private_key_pem:"--- private key test ---".into(),
+            extensions:Default::default()
+        }).unwrap();
+        vault.set_host_identity("lab","lab-key").unwrap();
+        assert_eq!(vault.hosts[0].identity_alias,"lab-key");
+        assert!(matches!(vault.remove_identity("lab-key"),
+            Err(HubError::InvalidInput("identity is still used by a host"))));
     }
 
     #[test]
