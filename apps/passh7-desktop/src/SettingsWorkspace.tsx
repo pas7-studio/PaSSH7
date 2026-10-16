@@ -1,6 +1,6 @@
-import {useState} from "react";
+import {useRef,useState} from "react";
 import {Activity, Bot, Container, FolderClosed, LockKeyhole, Monitor, Settings2, ShieldCheck, TerminalSquare} from "lucide-react";
-import {type AppPreferences,defaultPreferences} from "./preferences";
+import {type AppPreferences,defaultPreferences,validatePreferences} from "./preferences";
 import type {BuildInfo} from "./backend";
 
 type Section="general"|"terminal"|"files"|"docker"|"security"|"network"|"agents"|"diagnostics";
@@ -18,28 +18,53 @@ type Props={preferences:AppPreferences;onChange:(p:AppPreferences)=>void;
   buildInfo:BuildInfo|null;vaultUnlocked:boolean;onLock:()=>void;onExport:()=>void;onRestore:()=>void};
 export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultUnlocked,onLock,onExport,onRestore}:Props){
   const [section,setSection]=useState<Section>("general");
+  const [importError,setImportError]=useState("");
+  const inputRef=useRef<HTMLInputElement>(null);
+  const exportSettings=()=>{
+    const blob=new Blob([JSON.stringify({format:"passh7-preferences",version:1,preferences},null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download="passh7-preferences.json";a.click();
+    window.setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+  const importSettings=async(file:File|undefined)=>{
+    if(!file)return;
+    if(file.size>16*1024){setImportError("Settings file exceeds 16 KiB.");return;}
+    try{
+      const json=JSON.parse(await file.text()) as unknown;
+      if(!json||typeof json!=="object"||Array.isArray(json)||
+         (json as Record<string,unknown>).format!=="passh7-preferences"||
+         (json as Record<string,unknown>).version!==1){
+        throw new Error("Not a supported PaSSH7 settings export.");
+      }
+      const imported=validatePreferences((json as Record<string,unknown>).preferences);
+      if(window.confirm("Replace local non-secret interface preferences with the imported settings? Vault credentials, SSH keys and host profiles are not affected.")){
+        onChange(imported);setImportError("");
+      }
+    }catch(error){setImportError("Cannot import settings: "+String(error))}
+    finally{if(inputRef.current)inputRef.current.value="";}
+  };
+
   const update=<K extends keyof AppPreferences>(key:K,value:AppPreferences[K])=>
     onChange({...preferences,[key]:value});
   const toggle=(label:string,hint:string,key:keyof AppPreferences)=>(
     <label className="prefRow"><span><strong>{label}</strong><small>{hint}</small></span>
       <input type="checkbox" checked={Boolean(preferences[key])} onChange={e=>update(key,e.target.checked as never)}/></label>
   );
-  const resetSection=()=>{
-    const keys:(keyof AppPreferences)[]=section==="general"?["theme","density","rememberWorkspace"]:
-      section==="terminal"?["terminalFontSize","terminalScrollback"]:
-      section==="files"?["sftpShowHidden","sftpSort","confirmTransfer"]:
-      section==="docker"?["dockerTail","dockerAutoRefresh","dockerFollowLogs"]:[];
-    const next={...preferences};
-    for(const key of keys)Object.assign(next,{[key]:defaultPreferences[key]});
-    onChange(next);
-  };
   return <div className="widePage settingsPage">
     <div className="widePageTitle"><Settings2 size={25}/><div><h1>Settings</h1><p>Configure how PaSSH7 works. Preferences are saved automatically on this device.</p></div></div>
+    <div className="settingsImportBar">
+      <button onClick={exportSettings}>Export UI settings…</button>
+      <button onClick={()=>inputRef.current?.click()}>Import UI settings…</button>
+      <button onClick={()=>{if(window.confirm("Reset all interface preferences? This will NOT delete your encrypted Vault or remote server backups."))onChange({...defaultPreferences})}}>Reset all preferences</button>
+      <input hidden ref={inputRef} type="file" accept=".json,application/json" aria-label="Import PaSSH7 preferences JSON" onChange={e=>void importSettings(e.target.files?.[0])}/>
+      {importError&&<p className="workspaceError" role="alert">{importError}</p>}
+    </div>
     <div className="settingsLayout">
       <nav className="settingsNav" aria-label="Settings categories">{sections.map(({id,label,hint,Icon})=>
         <button key={id} className={section===id?"selected":""} onClick={()=>setSection(id)}><Icon size={18}/><span><strong>{label}</strong><small>{hint}</small></span></button>)}</nav>
       <div className="settingsContent">
-        <div className="settingsHeading"><div><h2>{sections.find(s=>s.id===section)?.label}</h2><p>Changes apply immediately. Options not supported by the SSH backend are not presented as active controls.</p></div><button onClick={resetSection}>Reset section</button></div>
+        <div className="settingsHeading"><div><h2>{sections.find(s=>s.id===section)?.label}</h2><p>Changes apply immediately. Options not supported by the SSH backend are not presented as active controls.</p></div><button onClick={()=>onChange({...preferences,...Object.fromEntries((section==="general"?["theme","density","rememberWorkspace"]:section==="terminal"?["terminalFontSize","terminalScrollback"]:section==="files"?["sftpShowHidden","sftpSort","confirmTransfer"]:section==="docker"?["dockerTail","dockerAutoRefresh","dockerFollowLogs"]:[]).map(k=>[k,defaultPreferences[k as keyof AppPreferences]])})}>Reset section</button></div>
         {section==="general"&&<section className="settingsCard"><h3>Workspace & appearance</h3>
           {toggle("Remember workspace","Reopen the selected Files, Docker or Terminal page after restart.","rememberWorkspace")}
           <label className="prefRow"><span><strong>Theme</strong><small>Choose the app's appearance.</small></span><select value={preferences.theme} onChange={e=>update("theme",e.target.value as AppPreferences["theme"])}><option value="dark">Dark</option><option value="light">Light</option></select></label>
