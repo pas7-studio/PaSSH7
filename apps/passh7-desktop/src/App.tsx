@@ -322,7 +322,7 @@ export default function App(){
     if(!vaultUnlocked||backupTargetsBusy||!selected)return;
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(save&&!session){setVaultBackupError("Connect to this host before saving its remote backup directory.");return}
-    const folder=sftpEntries?.session===session?.id?sftpEntries.path:sftpPath;
+    const folder=sftpEntries&&sftpEntries.session===session?.id?sftpEntries.path:sftpPath;
     if(save&&!folder.trim()){setVaultBackupError("Select a nonempty remote backup directory.");return}
     setBackupTargetsBusy(true);setVaultBackupError("");setVaultBackupNotice("");
     try{
