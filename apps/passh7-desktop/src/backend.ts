@@ -34,6 +34,9 @@ export async function exportEncryptedVaultLocally():Promise<string|null>{
 export async function backupEncryptedVaultToSsh(sessionId:string,directory:string):Promise<VaultBackupResult>{
   return invoke<VaultBackupResult>("ssh_session_vault_backup",{id:sessionId,directory});
 }
+export async function inspectRemoteEncryptedVaultBackup(sessionId:string,path:string):Promise<VaultRestorePreview>{
+  return invoke<VaultRestorePreview>("vault_restore_inspect_remote",{id:sessionId,path});
+}
 export async function inspectEncryptedVaultBackup():Promise<VaultRestorePreview|null>{
   return invoke<VaultRestorePreview|null>("vault_restore_inspect");
 }
