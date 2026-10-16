@@ -1,7 +1,7 @@
 import {useCallback} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -76,6 +76,19 @@ export default function App(){
   const [error,setError]=useState("");
   const [query,setQuery]=useState("");
   const [panel,setPanel]=useState<Panel>("agent");
+  const [dockerInventory,setDockerInventory]=useState<{session:string;items:Array<{ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string}>}|null>(null);
+  const [dockerBusy,setDockerBusy]=useState(false);
+  const [dockerError,setDockerError]=useState("");
+  const refreshDocker=async()=>{
+    if(!activeSsh)return;
+    const id=activeSsh;setDockerBusy(true);setDockerError("");
+    try{
+      const raw=await listDockerContainers(id);
+      const items=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>JSON.parse(line) as {ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string});
+      setDockerInventory({session:id,items});
+    }catch(e){setDockerError(String(e))}
+    finally{setDockerBusy(false)}
+  };
   const confirmRemove=async()=>{
     if(!deleteTarget || !desktopAvailable() || !vaultUnlocked)return;
     try{
@@ -196,7 +209,7 @@ export default function App(){
       <aside className="context"><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
         {panel==="agent"?<><div className="contextTitle"><Bot size={18}/><h3>AI Agent</h3></div><p className="muted">Use Codex, Claude Code or OpenCode with scoped access to the active SSH host.</p><label className="fieldLabel">Agent</label><select value={agent} onChange={e=>setAgent(e.target.value as AgentKind)} aria-label="Select AI agent">{AGENTS.map(a=><option key={a.kind} value={a.kind}>{a.name}</option>)}</select><label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Read-only by default</strong><small>No active grants</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled>Connect {AGENTS.find(a=>a.kind===agent)?.name}</button><p className="note">Integration preview only. MCP broker not installed; context is not sent. No SSH keys or secrets are shared.</p></>:
         panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Files</h3></div><p className="muted">Browse or edit remote files after a verified SSH connection.</p><div className="placeholder"><FileText size={23}/>{connected?"SSH terminal connected. SFTP file browsing is not implemented yet.":"Connect to the host first. SFTP file browsing is not implemented yet."}</div></>:
-        panel==="docker"?<><div className="contextTitle"><Container size={18}/><h3>Docker</h3></div><p className="muted">Docker tools appear only when the remote account has explicit access.</p><div className="placeholder"><Container size={23}/>{connected?"Docker works via SSH terminal; the integrated Docker dashboard is not implemented yet.":"Connect first to inspect Docker in the terminal. Dashboard not implemented yet."}</div></>:
+        panel==="docker"?<><div className="contextTitle"><Container size={18}/><h3>Docker containers</h3></div><p className="muted">Runs <code>docker ps -a</code> on the connected host using your SSH account. Read-only inventory.</p><button className="contextAction" disabled={!activeSsh||dockerBusy} onClick={()=>void refreshDocker()}>{dockerBusy?"Loading containers…":"Refresh containers"}</button>{dockerError&&<p className="wizardError" role="alert">{dockerError}</p>}{dockerInventory?.session===activeSsh?<div className="dockerInventory"><p className="muted">{dockerInventory.items.length} container(s)</p>{dockerInventory.items.map((item,index)=><div key={item.ID||index} className="dockerItem"><strong>{item.Names||item.ID||"Unnamed"}</strong><small>{item.Image||"Unknown image"}</small><span>{item.Status||item.State||"Unknown status"}</span>{item.Ports&&<small>{item.Ports}</small>}</div>)}</div>:<div className="placeholder"><Container size={23}/>{connected?"Click Refresh containers to fetch the real inventory.":"Connect to the server to inspect Docker."}</div>}</>:
         <><div className="contextTitle"><Activity size={18}/><h3>Port forwarding</h3></div><p className="muted">Create local, remote or dynamic SSH tunnels when connected.</p><div className="placeholder"><Activity size={23}/>{connected?"SSH connected. Port forwarding is not implemented yet.":"No SSH session. Port forwarding is not implemented yet."}</div></>}
       </div></aside>
     </div>
