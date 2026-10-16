@@ -35,6 +35,8 @@ during this checklist. Use a throwaway identity and Docker container.
 | SFTP-05 | Upload/download to existing filename | No silent overwrite; meaningful error |
 | SFTP-06 | Cancel file dialog, use file larger than 64 MiB, revoke remote write permission | Cancel is non-error; size and permissions have actionable errors |
 | SFTP-07 | Upload while typing in terminal; then lock Vault mid-transfer | Terminal stays responsive; transfer cancels on lock, partial cleanup best effort |
+| SFTP-08 | Transfer a 10–30 MiB binary file and click Cancel during upload/download | Live byte count advances, upload percentage is correct, only targeted transfer stops while terminal stays usable |
+| SFTP-09 | Select an existing local destination (or race a second writer creating it before completion) | Existing local bytes remain unchanged; download publish fails instead of clobbering |
 | DOCKER-01 | Refresh containers; inspect logs | Real `docker ps -a` inventory; logs capped at 200 lines and 512 KiB |
 | DOCKER-02 | Start/stop/restart throwaway container | Per-operation confirmation, expected state shown after refresh |
 | DOCKER-03 | Reject action confirmation; use SSH user lacking Docker permission | No action when cancelled; explicit permission error when rejected |
