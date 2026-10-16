@@ -44,7 +44,7 @@ export async function getIdentities():Promise<string[]>{
 }
 export async function importIdentity(alias:string,privateKeyPem:string,keyPassphrase?:string):Promise<void>{
   if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
-  await invoke("vault_import_identity",{alias,privateKeyPem,keyPassphrase:keyPassphrase||null,useSavedCredentials});
+  await invoke("vault_import_identity",{alias,privateKeyPem,keyPassphrase:keyPassphrase||null});
 }
 
 export async function removeHost(alias:string):Promise<void>{
