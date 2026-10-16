@@ -115,6 +115,10 @@ export async function listDockerContainers(sessionId:string):Promise<string>{
 export async function readDockerLogs(sessionId:string,containerId:string):Promise<string>{
   return invoke<string>("ssh_session_docker_logs",{id:sessionId,containerId});
 }
+/** Explicitly confirmed container state operation. Container ID and action are native validated. */
+export async function controlDockerContainer(sessionId:string,containerId:string,action:"start"|"stop"|"restart"):Promise<string>{
+  return invoke<string>("ssh_session_docker_action",{id:sessionId,containerId,action});
+}
 
 export type DiscoveredHostKey = {fingerprint:string};
 export async function discoverSshHostKey(alias:string):Promise<DiscoveredHostKey>{
