@@ -314,6 +314,9 @@ export default function App(){
       setVaultHistoryError("Cannot list remote Vault backup history: "+String(error));
     }finally{setVaultHistoryBusy(false)}
   };
+  const [vaultBackupBusy,setVaultBackupBusy]=useState(false);
+  const [vaultBackupNotice,setVaultBackupNotice]=useState("");
+  const [vaultBackupError,setVaultBackupError]=useState("");
   const [backupTargetsBusy,setBackupTargetsBusy]=useState(false);
   const saveBackupTarget=async(save:boolean)=>{
     if(!vaultUnlocked||backupTargetsBusy||!selected)return;
@@ -366,9 +369,6 @@ export default function App(){
       (missing.length?"Not connected: "+missing.join(", ")+".":""));
     setVaultBackupBusy(false);
   };
-  const [vaultBackupBusy,setVaultBackupBusy]=useState(false);
-  const [vaultBackupNotice,setVaultBackupNotice]=useState("");
-  const [vaultBackupError,setVaultBackupError]=useState("");
   const [vaultRestorePreview,setVaultRestorePreview]=useState<VaultRestorePreview|null>(null);
   const [vaultRestorePhrase,setVaultRestorePhrase]=useState("");
   const saveVaultBackup=async()=>{
