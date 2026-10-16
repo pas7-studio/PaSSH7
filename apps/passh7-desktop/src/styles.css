@@ -211,3 +211,10 @@
 @media(max-width:1100px){.settingsLayout{grid-template-columns:170px minmax(0,1fr)}.settingsHelp{grid-column:2;display:flex}.settingsHelp>.settingsCard{flex:1}.filesGrid{grid-template-columns:150px minmax(0,1fr)}.filesInspector{grid-column:1/-1;height:230px}.filesGrid{height:auto}.filesTablePane{height:400px}}
 @media(max-width:800px){.workspaceFull>.context.fullContext{display:flex!important}.widePage{padding:14px}.workspaceNav button{font-size:11px}.filesGrid,.dockerWorkspaceGrid,.settingsLayout{display:flex;flex-direction:column;height:auto}.filesFolders{max-height:180px}.filesTablePane{height:340px}.filesInspector,.dockerInspector{height:auto;max-height:300px}.dockerMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.settingsHelp{display:grid}.filesPathBar{flex-wrap:wrap}.filesCrumbs{min-width:100%}}
 .shell.compact .workspaceTable td{padding:6px 9px}.shell.compact .workspaceTable th{padding:8px 9px}
+
+.dockerResourceTabs{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding-bottom:12px;flex-wrap:wrap}
+.dockerResourceTabs button{min-width:90px}
+.dockerResourceTabs button.selected{background:var(--accentSoft);color:var(--accent);border-color:var(--accent)}
+.dockerResourcePane{background:var(--panel);border:1px solid var(--border);border-radius:10px;min-height:340px;display:flex;flex-direction:column;overflow:hidden}
+.dockerResourcePane .dockerToolbar>strong{font-size:13px}
+.dockerResourcePane .dockerTableScroll{max-height:560px;overflow:auto}
