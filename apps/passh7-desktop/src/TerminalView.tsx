@@ -4,6 +4,7 @@ import {FitAddon} from "@xterm/addon-fit";
 import {subscribeSshSession} from "./sshEventBus";
 import {closeSshSession,readySshSession,resizeSshSession,writeSshSession} from "./backend";
 import "@xterm/xterm/css/xterm.css";
+import {loadPreferences,type AppPreferences} from "./preferences";
 
 type Props={id:string;active:boolean;onClosed:(id:string,detail?:string)=>void};
 
@@ -70,13 +71,23 @@ export default function TerminalView({id,active,onClosed}:Props){
   useEffect(()=>{
     const node=container.current;
     if(!node)return;
+    const preferences=loadPreferences();
     const terminal=new Terminal({
-      cursorBlink:true,convertEol:false,scrollback:5000,
+      cursorBlink:true,convertEol:false,scrollback:preferences.terminalScrollback,
       fontFamily:"Cascadia Code, Consolas, monospace",
-      fontSize:13,theme:{background:"#0e1420",foreground:"#e5ecf6"}
+      fontSize:preferences.terminalFontSize,theme:{background:"#0e1420",foreground:"#e5ecf6"}
     });
     const fit=new FitAddon();terminal.loadAddon(fit);terminal.open(node);
     fitRef.current=fit;termRef.current=terminal;
+    const onPreferences=(event:Event)=>{
+      const p=(event as CustomEvent<AppPreferences>).detail;
+      if(!p)return;
+      terminal.options.fontSize=p.terminalFontSize;
+      terminal.options.scrollback=p.terminalScrollback;
+      if(node.clientWidth>40&&node.clientHeight>40)fit.fit();
+    };
+    window.addEventListener("passh7:preferences",onPreferences);
+
     if(node.clientWidth>40&&node.clientHeight>40)fit.fit();
     let live=true;
     const input=createInputSender(id,terminal,()=>live);
@@ -156,6 +167,7 @@ export default function TerminalView({id,active,onClosed}:Props){
       }
     });
     return ()=>{
+      window.removeEventListener("passh7:preferences",onPreferences);
       input.dispose();
       live=false;
       flushOutput();
