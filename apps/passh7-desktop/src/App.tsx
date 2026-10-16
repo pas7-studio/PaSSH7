@@ -606,10 +606,8 @@ export default function App(){
     if(!session){setAgentStatus("Connect to this host first.");return}
     const cli:Record<AgentKind,string>={codex:"codex",claude:"claude",opencode:"opencode"};
     const name=AGENTS.find(a=>a.kind===agent)?.name||agent;
-    if(agentAvailability[agent]?.session===session.id&&!agentAvailability[agent]?.installed){
-      setAgentStatus(name+" was not detected in the remote non-interactive shell PATH. Install/configure it on "+session.alias+" or check the SSH terminal PATH.");
-      return;
-    }
+    // Exec probes can miss binaries loaded by custom interactive shell startup.
+    // Never block an explicit user-triggered interactive launch on a probe.
     if(!window.confirm("Run "+name+" on "+session.alias+" in the existing SSH terminal? This CLI runs with your full SSH account privileges, NOT in a PaSSH7 sandbox. It must already be installed and configured on the remote host."))return;
     try{
       await writeSshSession(session.id,cli[agent]+"\r");
@@ -865,11 +863,11 @@ export default function App(){
   agentAvailability[a.kind]?.session===activeSsh
     ? agentAvailability[a.kind]?.installed
       ? ("Installed"+(agentAvailability[a.kind]?.version?" · "+agentAvailability[a.kind]?.version:""))
-      : "Not detected"
+      : "Not found by probe · launch may still work"
     : "Not checked"
 }</span></div>)}
 {agentProbeError&&<p role="alert" className="wizardError">{agentProbeError}</p>}
-<label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Launches an installed CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
+<label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Availability checks run on the selected **remote** SSH host, not this PC. A negative result may mean different login/interactive PATH settings. You can still launch the CLI in the existing terminal. Launches the CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
         panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Browse remote directories, preview UTF-8 text, or transfer files through encrypted SFTP. Transfers are limited to 64 MiB per file; existing files are never silently overwritten.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button>{sftpEntries?.session===activeSsh&&<><div className="sftpBreadcrumbs" aria-label="Remote path">{sftpBreadcrumbs(sftpEntries.path).map((crumb,index)=><button type="button" key={index} disabled={sftpBusy} onClick={()=>void browseSftp(crumb.path)} title={crumb.path}>{crumb.label}</button>)}</div><div className="sftpControls"><input aria-label="Filter remote files" placeholder="Filter files / folders…" value={sftpFilter} onChange={e=>setSftpFilter(e.target.value)}/><select aria-label="Sort remote files" value={sftpOrder} onChange={e=>setSftpOrder(e.target.value as "folders"|"name"|"size"|"modified")}><option value="folders">Folders first</option><option value="name">By name</option><option value="size">Largest first</option><option value="modified">Newest first</option></select></div></>}<button className="contextAction" disabled={!connected||!activeSsh||sftpTransferBusy||sftpBusy} onClick={()=>void transferSftp("upload")}>{sftpTransferBusy?"Transferring…":"Upload file to this directory"}</button><section className="vaultBackupCard" aria-label="Encrypted Vault backups">
 <strong><LockKeyhole size={14}/> Encrypted Vault backups</strong>
 <p className="note">Create versioned, encrypted snapshots on this SSH server without overwriting earlier copies. Only cipher text leaves this device. Existing versions are not overwritten and the remote file is read back for verification.</p>
