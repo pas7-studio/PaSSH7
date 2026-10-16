@@ -2,12 +2,12 @@ import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
 type Panel = "files" | "docker" | "agent" | "ports";
-type Host = {id:string; label:string; address:string; user:string; port:number; group:string; fingerprint:boolean;identityAlias?:string;hasSavedCredentials?:boolean;savedAuthMode?:string|null};
+type Host = {id:string; label:string; address:string; user:string; port:number; group:string; fingerprint:boolean;identityAlias?:string;hasSavedCredentials?:boolean;savedAuthMode?:string|null;backupDirectory?:string|null};
 const DEMO_HOSTS:Host[] = [
   {id:"dev",label:"Development",address:"dev.example.invalid",user:"ubuntu",port:22,group:"Development",fingerprint:true},
   {id:"staging",label:"Staging",address:"staging.example.invalid",user:"deploy",port:22,group:"Development",fingerprint:false},
@@ -172,7 +172,7 @@ export default function App(){
   },[vaultUnlocked]);
   useEffect(()=>{if(desktopAvailable()){void vaultExists().then(setVaultPresent).catch(()=>setVaultPresent(false))}},[]);
   const lockVault=async()=>{await lockNativeVault();setVaultPassword("");setVaultUnlocked(false);setHosts([]);setIdentities([])};
-  const unlockVault=async()=>{try{if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}await unlockNativeVault(vaultPassword);setVaultPassword("");const saved=await getHosts();setIdentities(await getIdentities());setHosts(saved.map((h,i)=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode})));setSelected(saved[0]?.alias||"");setVaultUnlocked(true);setVaultDialog(false);setError("")}catch(e){setError(String(e))}};
+  const unlockVault=async()=>{try{if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}await unlockNativeVault(vaultPassword);setVaultPassword("");const saved=await getHosts();setIdentities(await getIdentities());setHosts(saved.map((h,i)=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory})));setSelected(saved[0]?.alias||"");setVaultUnlocked(true);setVaultDialog(false);setError("")}catch(e){setError(String(e))}};
   // A WebView refresh can remount React without terminating the Rust process.
   // Recover ONLY an already-unlocked native vault and already-open sessions;
   // never auto-unlock persisted vault data or request secret material.
@@ -191,7 +191,7 @@ export default function App(){
         setHosts(saved.map(h=>({
           id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
           group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,
-          hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode
+          hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory
         })));
         setIdentities(identities);
         sshTabsRef.current=sessions;
@@ -250,7 +250,7 @@ export default function App(){
       setHosts(saved.map(h=>({
         id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
         group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,
-        hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode
+        hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory
       })));
       if(imported.length)setSelected(imported[0]);
     }catch(error){failures.push("Vault host list refresh: "+String(error))}
@@ -317,6 +317,58 @@ export default function App(){
   const [vaultBackupBusy,setVaultBackupBusy]=useState(false);
   const [vaultBackupNotice,setVaultBackupNotice]=useState("");
   const [vaultBackupError,setVaultBackupError]=useState("");
+  const [backupTargetsBusy,setBackupTargetsBusy]=useState(false);
+  const saveBackupTarget=async(save:boolean)=>{
+    if(!vaultUnlocked||backupTargetsBusy||!selected)return;
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(save&&!session){setVaultBackupError("Connect to this host before saving its remote backup directory.");return}
+    const folder=sftpEntries?.session===session?.id?sftpEntries.path:sftpPath;
+    if(save&&!folder.trim()){setVaultBackupError("Select a nonempty remote backup directory.");return}
+    setBackupTargetsBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    try{
+      await setHostBackupDirectory(selected,save?folder:null);
+      setHosts(previous=>previous.map(host=>host.id===selected
+        ? {...host,backupDirectory:save?folder:null}:host));
+      setVaultBackupNotice(save
+        ?"Saved "+selected+" backup directory: "+folder+". The directory must exist and be private."
+        :"Removed "+selected+" from the saved backup destinations.");
+    }catch(error){setVaultBackupError("Could not update backup destination: "+String(error))}
+    finally{setBackupTargetsBusy(false)}
+  };
+  const backupAllConnected=async()=>{
+    if(!vaultUnlocked||vaultBackupBusy)return;
+    // One session per unique host. Disconnected targets are not silently
+    // omitted: surface them before requesting any uploads.
+    const targetHosts=hosts.filter(h=>!!h.backupDirectory);
+    const connected=targetHosts.map(host=>({
+      alias:host.id,directory:host.backupDirectory!,
+      session:sshTabs.find(tab=>tab.alias===host.id)
+    }));
+    const available=connected.filter(t=>t.session);
+    if(!available.length){
+      setVaultBackupError("No configured backup destination has an active SSH session.");return;
+    }
+    const missing=connected.filter(t=>!t.session).map(t=>t.alias);
+    const list=available.map(t=>t.alias+" → "+t.directory).join("\n");
+    if(!window.confirm("Create NEW encrypted, separately verified Vault snapshots on these "+available.length+" connected server(s)?\n\n"+list+
+      (missing.length?"\n\nDisconnected configured targets (not uploaded): "+missing.join(", "):"")+
+      "\n\nRemote server administrators can copy the ciphertext and attempt offline password guesses. Use only trusted servers and a strong Vault master password. Existing backups will not be overwritten. This is one-way replication, not automatic sync."))return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    const success:string[]=[];const failure:string[]=[];
+    for(const target of available){
+      setVaultBackupNotice("Backing up encrypted Vault to "+target.alias+" ("+(success.length+failure.length+1)+"/"+available.length+")…");
+      try{
+        const done=await backupEncryptedVaultToSsh(target.session!.id,target.directory);
+        success.push(target.alias+": "+done.remotePath);
+      }catch(error){failure.push(target.alias+": "+String(error))}
+    }
+    setVaultBackupNotice(success.length+" of "+available.length+" connected destinations verified. "+
+      (success.length?"Saved: "+success.join(" | "):"No successful backups."));
+    if(missing.length||failure.length)setVaultBackupError(
+      (failure.length?"Failed: "+failure.join(" | ")+". ":"")+
+      (missing.length?"Not connected: "+missing.join(", ")+".":""));
+    setVaultBackupBusy(false);
+  };
   const [vaultRestorePreview,setVaultRestorePreview]=useState<VaultRestorePreview|null>(null);
   const [vaultRestorePhrase,setVaultRestorePhrase]=useState("");
   const saveVaultBackup=async()=>{
@@ -396,7 +448,7 @@ export default function App(){
         id:h.alias,label:h.alias,address:h.hostname,user:h.username,
         port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,
         identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,
-        savedAuthMode:h.savedAuthMode
+        savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory
       })));
       setIdentities(keys);setSelected(saved[0]?.alias||"");
       setVaultBackupNotice("Encrypted Vault restored. Previous local Vault preserved as an encrypted backup. Reconnect to your hosts.");
@@ -623,7 +675,7 @@ export default function App(){
         setSshTabs(t=>t.filter(session=>session.alias!==deleteTarget.alias));
         setTunnels(t=>t.filter(tunnel=>!sshTabs.some(session=>session.alias===deleteTarget.alias&&session.id===tunnel.session)));
         const saved=await getHosts();
-        setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode})));
+        setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory})));
         setSelected(current=>current===deleteTarget.alias?(saved[0]?.alias||""):current);
       } else {
         await removeIdentity(deleteTarget.alias);
@@ -677,7 +729,7 @@ export default function App(){
         try{
           await saveHostCredentials(selected,loginMode,accountPassword||"",loginKeyPassphrase,useSavedCredentials);
           const saved=await getHosts();
-          setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode})));
+          setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory})));
         }catch(e){setCredentialWarning("Connected, but could not save credentials: "+String(e))}
       }
     }catch(e){setProbeError(String(e))}
@@ -814,7 +866,17 @@ export default function App(){
 <strong><LockKeyhole size={14}/> Encrypted Vault backups</strong>
 <p className="note">Create versioned, encrypted snapshots on this SSH server without overwriting earlier copies. Only cipher text leaves this device. Existing versions are not overwritten and the remote file is read back for verification.</p>
 <div className="vaultBackupActions">
-<button type="button" disabled={!connected||!activeSsh||!vaultUnlocked||vaultBackupBusy||sftpTransferBusy} onClick={()=>void saveVaultBackup()}>{vaultBackupBusy?"Working…":"Back up Vault to this server"}</button>
+<button type="button" disabled={!connected||!activeSsh||!vaultUnlocked||vaultBackupBusy||sftpTransferBusy} onClick={()=>void saveVaultBackup()}>{vaultBackupBusy?"Working…":"Back up Vault to this server"}</button><div className="vaultBackupTarget">
+<p className="note">Saved backup destination for {selected||"this host"}: <strong>{hosts.find(h=>h.id===selected)?.backupDirectory||"Not configured"}</strong></p>
+<div className="vaultBackupActions">
+<button type="button" disabled={!connected||!vaultUnlocked||backupTargetsBusy||vaultBackupBusy} onClick={()=>void saveBackupTarget(true)}>Use current folder as backup target</button>
+<button type="button" disabled={!hosts.find(h=>h.id===selected)?.backupDirectory||backupTargetsBusy||vaultBackupBusy} onClick={()=>void saveBackupTarget(false)}>Remove target</button>
+</div>
+<p className="note">Saved destinations are encrypted in your local Vault. Each server must have an existing private directory writable by your SSH account.</p>
+<button type="button" disabled={!vaultUnlocked||vaultBackupBusy||backupTargetsBusy||!hosts.some(h=>h.backupDirectory&&sshTabs.some(t=>t.alias===h.id))} onClick={()=>void backupAllConnected()}>
+{vaultBackupBusy?"Backing up…":"Back up to all connected targets"}
+</button>
+</div>
 <button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void exportVaultBackup()}>Export local backup…</button><button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void inspectVaultRestore()}>Restore from encrypted file…</button>
 </div>
 <div className="vaultHistory">
@@ -872,7 +934,7 @@ export default function App(){
     {deleteTarget&&<div className="overlay" onMouseDown={()=>{setDeleteTarget(null);setError("")}}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm vault removal" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}<button aria-label="Close" onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button></div><p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted vault? This cannot be undone. Removing a host keeps its SSH key; removing a key used by a host is blocked.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<div className="wizardActions"><button onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button><button className="primary" onClick={()=>void confirmRemove()}>Confirm removal</button></div></div></div>}
     {vaultDialog&&<div className="overlay" onMouseDown={()=>setVaultDialog(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Unlock encrypted vault" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><LockKeyhole size={18}/> {vaultPresent?"Unlock vault":"Create vault"}<button aria-label="Close" onClick={()=>setVaultDialog(false)}><X size={17}/></button></div><p>Master password stays in this application session only. Lock the vault when finished.</p><form onSubmit={async e=>{e.preventDefault();await unlockVault()}} className="wizardFields"><label>Master password<input autoFocus type="password" autoComplete="off" value={vaultPassword} onChange={e=>setVaultPassword(e.target.value)} minLength={12} required/></label>{error&&<p role="alert" className="wizardError">{error}</p>}<button className="primary" type="submit">{vaultPresent?"Unlock":"Create encrypted vault"}</button></form></div></div>}
     {accessOpen&&<div className="overlay" onMouseDown={()=>setAccessOpen(false)}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Windows SSH Access Manager" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Windows Access Manager<button aria-label="Close" onClick={()=>setAccessOpen(false)}><X size={17}/></button></div><div className="wizardFields"><p className="note">Commands run under the connected Windows account. Administrator operations require the appropriate Windows permissions. Output appears in the SSH terminal.</p><button onClick={()=>void runWindowsAccessAction("users")}>List Windows local users</button><button onClick={()=>void runWindowsAccessAction("keys")}>Show administrator authorized SSH keys</button><label>Public SSH key (for add / revoke)<textarea rows={4} value={accessPublicKey} onChange={e=>setAccessPublicKey(e.target.value)} placeholder="ssh-ed25519 AAAA… colleague-device"/></label><button onClick={()=>void runWindowsAccessAction("add")}>Add public key to administrator access</button><button onClick={()=>void runWindowsAccessAction("remove")}>Revoke exact public key (with backup)</button><p className="note">Before removing a key, verify an alternative login. This tool never changes sshd_config or grants Windows administrator membership.</p>{error&&<p className="wizardError" role="alert">{error}</p>}</div></div></div>}
-    {tofuCandidate&&<div className="overlay" onMouseDown={()=>{if(!tofuBusy)setTofuCandidate(null)}}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Trust SSH server key" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Verify first SSH connection<button type="button" aria-label="Cancel" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}><X size={17}/></button></div><p>The server at <strong>{active.address}:{active.port}</strong> presented this host-key fingerprint. Verify it independently with the server administrator before trusting it.</p><pre className="preview" style={{userSelect:"text",overflowWrap:"anywhere"}}>{tofuCandidate.fingerprint}</pre><p className="note">No password or private key has been sent. If the key differs from the trusted fingerprint, cancel. Once saved, a changed fingerprint blocks future connections.</p>{tofuError&&<p role="alert" className="wizardError">{tofuError}</p>}<div className="wizardActions"><button type="button" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}>Cancel</button><button type="button" className="primary" disabled={tofuBusy} onClick={async()=>{setTofuBusy(true);setTofuError("");try{await pinSshHostKey(tofuCandidate.alias,tofuCandidate.fingerprint);const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode})));setTofuCandidate(null);setLoginPassword("");setLoginKeyPassphrase("");setLoginMode(active.identityAlias?"key-password":"password");setHostIdentityChoice("");setUseSavedCredentials(false);setRememberCredentials(false);setLoginOpen(true)}catch(e){setTofuError(String(e))}finally{setTofuBusy(false)}}}>Trust &amp; Continue</button></div></div></div>}
+    {tofuCandidate&&<div className="overlay" onMouseDown={()=>{if(!tofuBusy)setTofuCandidate(null)}}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Trust SSH server key" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Verify first SSH connection<button type="button" aria-label="Cancel" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}><X size={17}/></button></div><p>The server at <strong>{active.address}:{active.port}</strong> presented this host-key fingerprint. Verify it independently with the server administrator before trusting it.</p><pre className="preview" style={{userSelect:"text",overflowWrap:"anywhere"}}>{tofuCandidate.fingerprint}</pre><p className="note">No password or private key has been sent. If the key differs from the trusted fingerprint, cancel. Once saved, a changed fingerprint blocks future connections.</p>{tofuError&&<p role="alert" className="wizardError">{tofuError}</p>}<div className="wizardActions"><button type="button" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}>Cancel</button><button type="button" className="primary" disabled={tofuBusy} onClick={async()=>{setTofuBusy(true);setTofuError("");try{await pinSshHostKey(tofuCandidate.alias,tofuCandidate.fingerprint);const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory})));setTofuCandidate(null);setLoginPassword("");setLoginKeyPassphrase("");setLoginMode(active.identityAlias?"key-password":"password");setHostIdentityChoice("");setUseSavedCredentials(false);setRememberCredentials(false);setLoginOpen(true)}catch(e){setTofuError(String(e))}finally{setTofuBusy(false)}}}>Trust &amp; Continue</button></div></div></div>}
     {loginOpen&&<div className="overlay" onMouseDown={closeLogin}><form className="modal wizard" role="dialog" aria-modal="true" aria-label="Connect via SSH" onMouseDown={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();void connectInteractive(loginPassword)}}><div className="modalTitle"><KeyRound size={18}/> Connect to {active.label}<button type="button" aria-label="Close" disabled={sshBusy} onClick={closeLogin}><X size={17}/></button></div><div className="wizardFields"><p className="note">PaSSH7 verifies the pinned host key before authentication. Your SSH private key remains in the encrypted vault.</p>{!active.identityAlias&&identities.length>0&&<div className="permission" style={{display:"grid",gap:8}}>
 <strong>Optional: link a saved SSH key to this host</strong>
 <small>You can sign in with a password now. Later, after installing the matching public key on the server, link an existing vault identity to use SSH key authentication.</small>

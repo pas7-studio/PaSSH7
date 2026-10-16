@@ -39,6 +39,10 @@ during this checklist. Use a throwaway identity and Docker container.
 | SSH-10 | Keep two native SSH sessions active and reload the WebView without exiting the app | If native Vault remains unlocked, saved hosts and session tabs reappear; PTY input still works |
 | SSH-11 | Close remote shell unexpectedly, then press Reconnect | Notice identifies the closed host; saved credentials initiate explicit Quick Connect, otherwise manual login dialog opens |
 | SSH-12 | Fully exit desktop app and relaunch | Vault remains locked and secrets are never automatically unlocked; user must enter master password |
+| VAULT-M1 | Save private backup folders on two different hosts, lock and re-unlock Vault | Per-host destination paths remain persisted only in the encrypted Vault; no credentials transmitted |
+| VAULT-M2 | Connect two configured SSH hosts and choose **Back up to all connected targets** | One new independently verified versioned encrypted snapshot appears on each server; no existing backup overwritten |
+| VAULT-M3 | Keep one configured host disconnected and make another reject SFTP writes | Batch reports successes, disconnected targets and failures individually; successful copies remain usable; SSH terminals stay responsive |
+| VAULT-M4 | Remove a backup destination, then click batch backup | Removed host is not a target; existing remote backup files remain untouched |
 | VAULT-00 | Browse an SSH backup directory with multiple versions; click Refresh versions | Versioned snapshots are listed newest first with size/date and unverified state; unrelated JSON files are ignored |
 | VAULT-00A | Inspect versioned backups with additions/removals/changes to hosts, identities and saved passwords | Native compare reports only record aliases and change categories, never secret values. Identical decrypted contents are recognized even if ciphertext nonces differ |
 | VAULT-00B | Select a snapshot whose decrypted Vault matches current local data | Review shows no content changes; Replace action stays disabled |
