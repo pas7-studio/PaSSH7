@@ -1,5 +1,5 @@
 use std::{collections::HashMap, path::PathBuf, sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex}, time::Duration};
-use serde::Serialize;
+use serde::{Deserialize,Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::mpsc;
@@ -54,6 +54,50 @@ pub struct SftpEntry { pub name: String, pub is_dir: bool, pub size_bytes: Optio
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct VaultBackupResult { pub remote_path: String, pub bytes: usize, pub verified: bool }
+
+#[derive(Clone,Deserialize)]
+#[serde(rename_all="camelCase")]
+pub struct VaultBatchTarget {
+    pub id:String,
+    pub alias:String,
+    pub directory:String,
+}
+
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct VaultBatchOutcome {
+    pub alias:String,
+    pub remote_path:Option<String>,
+    pub error:Option<String>,
+}
+
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct VaultBatchProgress {
+    pub alias:String,
+    pub index:usize,
+    pub total:usize,
+    pub stage:&'static str,
+}
+
+fn validate_vault_batch_targets(targets:&[VaultBatchTarget])->Result<(),String>{
+    if targets.is_empty()||targets.len()>32{
+        return Err("Select 1–32 connected SSH backup destinations".into());
+    }
+    let mut visited=std::collections::HashSet::new();
+    for target in targets{
+        if target.alias.trim().is_empty()||target.alias.len()>128 ||
+            target.alias.chars().any(|c|c.is_control()) ||
+            !valid_sftp_path(&target.directory) ||
+            target.directory.chars().any(|c|c.is_control()) {
+            return Err("Invalid Vault backup destination or host label".into());
+        }
+        if !visited.insert(target.id.as_str()){
+            return Err("Duplicate SSH session in the Vault backup batch".into());
+        }
+    }
+    Ok(())
+}
 
 fn snapshot_remote_name()->String{
     let secs=std::time::SystemTime::now()
@@ -1065,13 +1109,10 @@ pub async fn read_vault_snapshot_for_restore(
 }
 
 #[tauri::command]
-pub async fn ssh_session_vault_backup(
-    id:String,directory:String,vault:State<'_,SessionStore>,manager:State<'_,SshSessionManager>
-)->Result<VaultBackupResult,String>{
-    if !valid_sftp_path(&directory){return Err("Invalid remote backup directory".into());}
-    // All reads/decryption verification remain in native Rust. Never return
-    // a secret or even an encrypted Vault buffer to the WebView.
-    let encrypted=vault.use_password(|password|{
+fn read_verified_encrypted_vault(vault:&SessionStore)->Result<Vec<u8>,String>{
+    // Exactly one local encrypted Vault generation per batch. The master
+    // password and plaintext stay native; never send them to remote hosts.
+    vault.use_password(|password|{
         let source=vault_path()?;
         let metadata=std::fs::metadata(&source)
             .map_err(|e|format!("Cannot inspect encrypted Vault: {e}"))?;
@@ -1081,12 +1122,56 @@ pub async fn ssh_session_vault_backup(
         let bytes=std::fs::read(&source).map_err(|e|format!("Cannot read encrypted Vault: {e}"))?;
         let _verified=passh7_core::decrypt(&bytes,password).map_err(safe_err)?;
         Ok(bytes)
-    })?;
+    })
+}
+
+#[tauri::command]
+pub async fn ssh_session_vault_backup(
+    id:String,directory:String,vault:State<'_,SessionStore>,manager:State<'_,SshSessionManager>
+)->Result<VaultBackupResult,String>{
+    if !valid_sftp_path(&directory){return Err("Invalid remote backup directory".into());}
+    let encrypted=read_verified_encrypted_vault(&vault)?;
     let (tx,rx)=tokio::sync::oneshot::channel();
     manager.sender(&id)?.send(SessionCommand::VaultBackup(directory,encrypted,tx)).await
         .map_err(|_|"SSH connection closed before Vault backup")?;
     rx.await.map_err(|_|"Encrypted Vault backup interrupted")?
 }
+
+#[tauri::command]
+pub async fn ssh_session_vault_backup_batch(
+    targets:Vec<VaultBatchTarget>,vault:State<'_,SessionStore>,
+    manager:State<'_,SshSessionManager>,app:AppHandle
+)->Result<Vec<VaultBatchOutcome>,String>{
+    validate_vault_batch_targets(&targets)?;
+    let encrypted=read_verified_encrypted_vault(&vault)?;
+    let mut outcomes=Vec::with_capacity(targets.len());
+    let total=targets.len();
+    for (index,target) in targets.into_iter().enumerate(){
+        let _=app.emit("passh7:vault-batch",VaultBatchProgress{
+            alias:target.alias.clone(),index:index+1,total,stage:"started"
+        });
+        let result=async{
+            let sender=manager.sender(&target.id)?;
+            let (tx,rx)=tokio::sync::oneshot::channel();
+            sender.send(SessionCommand::VaultBackup(
+                target.directory.clone(),encrypted.clone(),tx
+            )).await.map_err(|_|"SSH connection closed before Vault backup".to_owned())?;
+            rx.await.map_err(|_|"Vault backup response cancelled".to_owned())?
+        }.await;
+        let (remote_path,error)=match result{
+            Ok(receipt) if receipt.verified=>(Some(receipt.remote_path),None),
+            Ok(_)=>(None,Some("Remote ciphertext could not be verified".into())),
+            Err(error)=>(None,Some(error)),
+        };
+        let stage=if error.is_some(){"failed"}else{"verified"};
+        let _=app.emit("passh7:vault-batch",VaultBatchProgress{
+            alias:target.alias.clone(),index:index+1,total,stage
+        });
+        outcomes.push(VaultBatchOutcome{alias:target.alias,remote_path,error});
+    }
+    Ok(outcomes)
+}
+
 
 #[tauri::command]
 pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, SshSessionManager>) -> Result<Vec<SftpEntry>, String> {
@@ -1177,6 +1262,23 @@ pub async fn ssh_session_sftp_cancel(id:String,transfer_id:String,
     manager.sender(&id)?.send(SessionCommand::SftpCancel(transfer_id,tx)).await
         .map_err(|_|"SSH session closed")?;
     rx.await.map_err(|_|"SFTP cancellation request interrupted".to_owned())?
+}
+
+#[cfg(test)]
+mod vault_batch_tests{
+    use super::*;
+    fn target(alias:&str,id:&str)->VaultBatchTarget{
+        VaultBatchTarget{id:id.into(),alias:alias.into(),directory:"/srv/backup".into()}
+    }
+    #[test]
+    fn rejects_empty_duplicate_and_untrusted_batch_fields(){
+        assert!(validate_vault_batch_targets(&[]).is_err());
+        assert!(validate_vault_batch_targets(&[target("a","s1"),target("b","s1")]).is_err());
+        let mut invalid=target("x","s1");
+        invalid.directory="bad\npath".into();
+        assert!(validate_vault_batch_targets(&[invalid]).is_err());
+        assert!(validate_vault_batch_targets(&[target("a","s1"),target("b","s2")]).is_ok());
+    }
 }
 
 #[cfg(test)]

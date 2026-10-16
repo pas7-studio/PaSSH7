@@ -2,7 +2,7 @@ import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -322,7 +322,7 @@ export default function App(){
     if(!vaultUnlocked||backupTargetsBusy||!selected)return;
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(save&&!session){setVaultBackupError("Connect to this host before saving its remote backup directory.");return}
-    const folder=sftpEntries?.session===session?.id?sftpEntries.path:sftpPath;
+    const folder=sftpEntries&&sftpEntries.session===session?.id?sftpEntries.path:sftpPath;
     if(save&&!folder.trim()){setVaultBackupError("Select a nonempty remote backup directory.");return}
     setBackupTargetsBusy(true);setVaultBackupError("");setVaultBackupNotice("");
     try{
@@ -337,8 +337,6 @@ export default function App(){
   };
   const backupAllConnected=async()=>{
     if(!vaultUnlocked||vaultBackupBusy)return;
-    // One session per unique host. Disconnected targets are not silently
-    // omitted: surface them before requesting any uploads.
     const targetHosts=hosts.filter(h=>!!h.backupDirectory);
     const connected=targetHosts.map(host=>({
       alias:host.id,directory:host.backupDirectory!,
@@ -350,24 +348,34 @@ export default function App(){
     }
     const missing=connected.filter(t=>!t.session).map(t=>t.alias);
     const list=available.map(t=>t.alias+" → "+t.directory).join("\n");
-    if(!window.confirm("Create NEW encrypted, separately verified Vault snapshots on these "+available.length+" connected server(s)?\n\n"+list+
-      (missing.length?"\n\nDisconnected configured targets (not uploaded): "+missing.join(", "):"")+
-      "\n\nRemote server administrators can copy the ciphertext and attempt offline password guesses. Use only trusted servers and a strong Vault master password. Existing backups will not be overwritten. This is one-way replication, not automatic sync."))return;
+    if(!window.confirm("Create one encrypted Vault snapshot and replicate that SAME generation to these "+available.length+" connected server(s)?\n\n"+list+
+      (missing.length?"\n\nDisconnected configured targets (skipped): "+missing.join(", "):"")+
+      "\n\nRemote administrators can copy encrypted backups for offline password guessing. Use only trusted servers and a strong master password. This is one-way backup replication, NOT conflict-free sync."))return;
     setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
-    const success:string[]=[];const failure:string[]=[];
-    for(const target of available){
-      setVaultBackupNotice("Backing up encrypted Vault to "+target.alias+" ("+(success.length+failure.length+1)+"/"+available.length+")…");
-      try{
-        const done=await backupEncryptedVaultToSsh(target.session!.id,target.directory);
-        success.push(target.alias+": "+done.remotePath);
-      }catch(error){failure.push(target.alias+": "+String(error))}
+    let unsubscribe:(()=>void)|null=null;
+    try{
+      unsubscribe=await listen<VaultBackupBatchProgress>("passh7:vault-batch",event=>{
+        const status=event.payload;
+        setVaultBackupNotice("Vault replica "+status.index+"/"+status.total+": "+status.alias+" · "+status.stage);
+      });
+      // Native Rust reads and validates ciphertext ONCE before the first SFTP
+      // upload, even if another Vault write occurs during the batch.
+      const outcomes=await backupEncryptedVaultBatch(available.map(t=>({
+        id:t.session!.id,alias:t.alias,directory:t.directory
+      })));
+      const success=outcomes.filter(o=>o.remotePath&&!o.error);
+      const failure=outcomes.filter(o=>o.error);
+      setVaultBackupNotice(success.length+" of "+available.length+" destinations have a verified copy of the SAME encrypted generation. "+
+        (success.length?"Saved: "+success.map(o=>o.alias+": "+o.remotePath).join(" | "):"No successful backups."));
+      if(missing.length||failure.length)setVaultBackupError(
+        (failure.length?"Failed: "+failure.map(o=>o.alias+": "+o.error).join(" | ")+". ":"")+
+        (missing.length?"Disconnected: "+missing.join(", ")+".":""));
+    }catch(error){
+      setVaultBackupError("Encrypted multi-server backup failed: "+String(error)+". Check remote history before retrying to avoid redundant copies.");
+    }finally{
+      unsubscribe?.();
+      setVaultBackupBusy(false);
     }
-    setVaultBackupNotice(success.length+" of "+available.length+" connected destinations verified. "+
-      (success.length?"Saved: "+success.join(" | "):"No successful backups."));
-    if(missing.length||failure.length)setVaultBackupError(
-      (failure.length?"Failed: "+failure.join(" | ")+". ":"")+
-      (missing.length?"Not connected: "+missing.join(", ")+".":""));
-    setVaultBackupBusy(false);
   };
   const [vaultRestorePreview,setVaultRestorePreview]=useState<VaultRestorePreview|null>(null);
   const [vaultRestorePhrase,setVaultRestorePhrase]=useState("");
