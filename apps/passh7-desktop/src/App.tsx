@@ -2,7 +2,7 @@ import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,inspectEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -301,6 +301,15 @@ export default function App(){
         setVaultBackupError("Backup succeeded, but directory refresh failed: "+String(error));
       }
     }catch(error){setVaultBackupError("Encrypted backup failed: "+String(error))}
+    finally{setVaultBackupBusy(false)}
+  };
+  const exportVaultBackup=async()=>{
+    if(vaultBackupBusy)return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    try{
+      const result=await exportEncryptedVaultLocally();
+      if(result)setVaultBackupNotice(result+". Store it offline in a safe place.");
+    }catch(error){setVaultBackupError("Encrypted Vault export failed: "+String(error))}
     finally{setVaultBackupBusy(false)}
   };
   const inspectVaultRestore=async()=>{
@@ -745,7 +754,7 @@ export default function App(){
 <p className="note">Create immutable, encrypted snapshots on this SSH server. Only cipher text leaves this device. Existing versions are not overwritten and the remote file is read back for verification.</p>
 <div className="vaultBackupActions">
 <button type="button" disabled={!connected||!activeSsh||!vaultUnlocked||vaultBackupBusy||sftpTransferBusy} onClick={()=>void saveVaultBackup()}>{vaultBackupBusy?"Working…":"Back up Vault to this server"}</button>
-<button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void inspectVaultRestore()}>Restore from encrypted file…</button>
+<button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void exportVaultBackup()}>Export local backup…</button><button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void inspectVaultRestore()}>Restore from encrypted file…</button>
 </div>
 <p className="note">To restore a remote snapshot, download its <code>passh7-vault-*.enc.json</code> file first, then choose it with Restore. You must know the same master password. This is manual versioned backup, not conflict-free multi-device sync.</p>
 {vaultBackupNotice&&<p role="status" className="note">{vaultBackupNotice}</p>}
