@@ -28,6 +28,7 @@ during this checklist. Use a throwaway identity and Docker container.
 | SSH-06 | Open 10+ terminals across two hosts; switch rapidly | Correct host status and selected terminal; input never goes to another host |
 | SSH-07 | Abruptly stop remote sshd / disconnect VPN | Disconnected status and reason after reconnect/poll; stale tunnels cleaned |
 | SSH-08 | Remove a saved host with active SSH and forward | Only that host's sessions and tunnels close |
+| SSH-09 | Browse a slow SFTP directory and load Docker inventory/logs while running interactive commands | Terminal input and output stay responsive; slow inspections time out independently |
 | SFTP-01 | Browse multiple folders, parent directory, read UTF-8 file | Correct entries and preview; unrelated session not used |
 | SFTP-02 | Preview a binary file | Helpful UTF-8/binary error, no corruption |
 | SFTP-03 | Upload test binary file via native file picker | New file present on remote host; matching SHA-256 checksum |
