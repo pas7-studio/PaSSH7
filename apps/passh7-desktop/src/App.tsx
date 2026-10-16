@@ -291,6 +291,29 @@ export default function App(){
     bytes:number;totalBytes:number|null
   }|null>(null);
   const [sftpTransferResult,setSftpTransferResult]=useState<{session:string;text:string}|null>(null);
+  const [vaultSnapshotHistory,setVaultSnapshotHistory]=useState<{
+    session:string;directory:string;entries:SftpEntry[]
+  }|null>(null);
+  const [vaultHistoryBusy,setVaultHistoryBusy]=useState(false);
+  const [vaultHistoryError,setVaultHistoryError]=useState("");
+  const refreshVaultHistory=async()=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session){setVaultHistoryError("Connect to the backup destination first.");return}
+    if(vaultHistoryBusy)return;
+    setVaultHistoryBusy(true);setVaultHistoryError("");
+    const folder=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
+    try{
+      const entries=await listSftpDirectory(session.id,folder);
+      const snapshots=entries.filter(item=>!item.isDir &&
+        /^passh7-vault-[0-9]+-[0-9]+\\.enc\\.json$/.test(item.name))
+        .sort((a,b)=>(b.modifiedAt??0)-(a.modifiedAt??0) ||
+          b.name.localeCompare(a.name));
+      setVaultSnapshotHistory({session:session.id,directory:folder,entries:snapshots});
+    }catch(error){
+      setVaultSnapshotHistory(null);
+      setVaultHistoryError("Cannot list remote Vault backup history: "+String(error));
+    }finally{setVaultHistoryBusy(false)}
+  };
   const [vaultBackupBusy,setVaultBackupBusy]=useState(false);
   const [vaultBackupNotice,setVaultBackupNotice]=useState("");
   const [vaultBackupError,setVaultBackupError]=useState("");
@@ -306,6 +329,19 @@ export default function App(){
     try{
       const result=await backupEncryptedVaultToSsh(session.id,folder);
       setVaultBackupNotice("Encrypted snapshot verified on "+session.alias+": "+result.remotePath+" ("+result.bytes+" bytes).");
+      // Refresh the backup history independently of the normal file browser.
+      try{
+        const entries=await listSftpDirectory(session.id,folder);
+        setVaultSnapshotHistory({
+          session:session.id,directory:folder,
+          entries:entries.filter(item=>!item.isDir&&
+            /^passh7-vault-[0-9]+-[0-9]+\\.enc\\.json$/.test(item.name))
+            .sort((a,b)=>(b.modifiedAt??0)-(a.modifiedAt??0) ||
+              b.name.localeCompare(a.name))
+        });
+      }catch(historyError){
+        setVaultHistoryError("Backup succeeded, but history refresh failed: "+String(historyError));
+      }
       try{
         const entries=await listSftpDirectory(session.id,folder);
         setSftpEntries({session:session.id,path:folder,items:entries});
@@ -781,20 +817,45 @@ export default function App(){
 <button type="button" disabled={!connected||!activeSsh||!vaultUnlocked||vaultBackupBusy||sftpTransferBusy} onClick={()=>void saveVaultBackup()}>{vaultBackupBusy?"Working…":"Back up Vault to this server"}</button>
 <button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void exportVaultBackup()}>Export local backup…</button><button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void inspectVaultRestore()}>Restore from encrypted file…</button>
 </div>
+<div className="vaultHistory">
+<div className="vaultHistoryHeading">
+  <strong>Backup history</strong>
+  <button type="button" disabled={!connected||vaultHistoryBusy||vaultBackupBusy} onClick={()=>void refreshVaultHistory()}>{vaultHistoryBusy?"Scanning…":"Refresh versions"}</button>
+</div>
+{vaultSnapshotHistory?.session===activeSsh&&<p className="note">{vaultSnapshotHistory.entries.length} snapshot(s) in {vaultSnapshotHistory.directory}. Versions are unverified until inspected.</p>}
+{vaultSnapshotHistory?.session===activeSsh&&vaultSnapshotHistory.entries.length===0&&<p className="note">No versioned PaSSH7 backups in this directory.</p>}
+{vaultSnapshotHistory?.session===activeSsh&&<div className="vaultHistoryList">{vaultSnapshotHistory.entries.slice(0,100).map(item=><div className="vaultHistoryItem" key={item.name}>
+  <div className="vaultHistoryMeta"><strong>{item.name}</strong><small>{formatSftpSize(item.sizeBytes)}{item.modifiedAt!==null?" · "+new Date(item.modifiedAt*1000).toLocaleString():""} · Not yet authenticated</small></div>
+  <button type="button" disabled={!vaultUnlocked||vaultBackupBusy||vaultHistoryBusy} onClick={()=>void inspectRemoteVaultRestore(vaultSnapshotHistory.directory+"/"+item.name)}>Compare &amp; review</button>
+</div>)}</div>}
+{vaultHistoryError&&<p className="wizardError" role="alert">{vaultHistoryError}</p>}
+</div>
 <p className="note">For direct recovery, click <strong>Review Vault backup</strong> beside a remote <code>passh7-vault-*.enc.json</code> file. You can also download it and restore later from a local file. You must know the same master password. This is manual versioned backup, not conflict-free multi-device sync.</p>
 {vaultBackupNotice&&<p role="status" className="note">{vaultBackupNotice}</p>}
 {vaultBackupError&&<p role="alert" className="wizardError">{vaultBackupError}</p>}
 {vaultRestorePreview&&<div className="vaultRestorePreview">
 <strong>Backup ready for recovery</strong>
 <p>{vaultRestorePreview.hosts} host(s), {vaultRestorePreview.identities} SSH identity/identities, {(vaultRestorePreview.bytes/1024).toFixed(1)} KiB.</p>
-<p className="note">Hosts: {vaultRestorePreview.hostAliases.slice(0,12).join(", ")||"None"}{vaultRestorePreview.hostAliases.length>12?" and more":""}</p>
-{vaultRestorePreview.identicalToCurrent&&<p className="note">The encrypted file is identical to your current Vault generation.</p>}
+<p className="note">Hosts: {vaultRestorePreview.hostAliases.slice(0,12).join(", ")||"None"}{vaultRestorePreview.hostAliases.length>12?" and more":""}</p><div className="vaultDiff" aria-label="Vault version comparison">
+<strong>{vaultRestorePreview.sameContents?"No content differences detected":"Differences from your current Vault"}</strong>
+{!vaultRestorePreview.sameContents&&<p className="note">These are records from the selected backup compared with your current Vault. No credentials or key contents are displayed. This is a full-Vault replacement, not a merge.</p>}
+{([
+  ["Only in backup — hosts",vaultRestorePreview.difference.backupOnlyHosts],
+  ["Only locally — hosts (would be lost)",vaultRestorePreview.difference.localOnlyHosts],
+  ["Changed hosts",vaultRestorePreview.difference.changedHosts],
+  ["Only in backup — SSH identities",vaultRestorePreview.difference.backupOnlyIdentities],
+  ["Only locally — SSH identities (would be lost)",vaultRestorePreview.difference.localOnlyIdentities],
+  ["Changed SSH identities",vaultRestorePreview.difference.changedIdentities]
+] as [string,string[]][]).filter(([,names])=>names.length>0).map(([heading,names])=><p className="note" key={heading}><strong>{heading}:</strong> {names.slice(0,18).join(", ")}{names.length>18?" (and "+(names.length-18)+" more)":""}</p>)}
+{vaultRestorePreview.difference.otherMetadataChanged&&<p className="note">Other Vault settings/metadata differ.</p>}
+</div>
+{vaultRestorePreview.sameContents&&<p className="note">This backup contains the same hosts, identities and metadata as your active Vault. No restore is necessary.</p>}
 <label>Type RESTORE to replace your local Vault
 <input aria-label="Confirm Vault restore" value={vaultRestorePhrase} onChange={e=>setVaultRestorePhrase(e.target.value)} placeholder="RESTORE"/>
 </label>
 <div className="vaultBackupActions">
 <button type="button" disabled={vaultBackupBusy} onClick={()=>{setVaultRestorePreview(null);setVaultRestorePhrase("")}}>Cancel recovery</button>
-<button type="button" disabled={vaultBackupBusy||vaultRestorePhrase!=="RESTORE"} onClick={()=>void commitVaultRestore()}>Restore selected backup</button>
+<button type="button" disabled={vaultBackupBusy||vaultRestorePhrase!=="RESTORE"||vaultRestorePreview.sameContents} onClick={()=>void commitVaultRestore()}>Restore selected backup</button>
 </div>
 </div>}
 </section>{sftpTransferProgress?.session===activeSsh&&<div className="sftpProgress" role="status">
