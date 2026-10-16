@@ -2,7 +2,7 @@ import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -44,6 +44,25 @@ export default function App(){
     setActiveSsh(matching?.id??"");
   },[sshTabs,activeSsh,selected]);
   const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
+  // The backend owns active TCP listeners. Recover them after WebView reload
+  // and when a previously existing native terminal session becomes visible.
+  useEffect(()=>{
+    if(!vaultUnlocked||!desktopAvailable()||sshTabs.length===0)return;
+    let live=true;
+    const ids=new Set(sshTabs.map(s=>s.id));
+    void Promise.all(sshTabs.map(async session=>{
+      try{
+        const items=await listLocalForwards(session.id);
+        return items.map(item=>({session:session.id,...item}));
+      }catch{return [] as {session:string;localPort:number;targetHost:string;remotePort:number}[]}
+    })).then(groups=>{
+      if(!live)return;
+      setTunnels(previous=>[
+        ...previous.filter(t=>!ids.has(t.session)),...groups.flat()
+      ]);
+    });
+    return()=>{live=false};
+  },[vaultUnlocked,sshTabs]);
   const [sessionNotice,setSessionNotice]=useState<{alias:string;detail:string}|null>(null);
   const onSessionClosed=useCallback((id:string,detail?:string)=>{
     const alias=sshTabsRef.current.find(t=>t.id===id)?.alias||"";
