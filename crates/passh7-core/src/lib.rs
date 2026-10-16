@@ -92,19 +92,31 @@ impl Vault {
 
     pub fn add_host(&mut self, host: HostProfile) -> Result<(), HubError> {
         if host.alias.trim().is_empty() || host.hostname.trim().is_empty()
-            || host.username.trim().is_empty() || host.identity_alias.trim().is_empty() || host.port == 0 {
+            || host.username.trim().is_empty() || host.port == 0 {
             return Err(HubError::InvalidInput("missing host field or invalid port"));
         }
         if self.hosts.iter().any(|h| h.alias == host.alias) {
             return Err(HubError::InvalidInput("host alias already exists"));
         }
-        if !self.identities.iter().any(|i| i.alias == host.identity_alias) {
+        if !host.identity_alias.is_empty() && !self.identities.iter().any(|i| i.alias == host.identity_alias) {
             return Err(HubError::InvalidInput("unknown identity alias"));
         }
         if let Some(pin) = &host.pinned_host_key {
             hostkey::validate_fingerprint(pin)?;
         }
         self.hosts.push(host);
+        Ok(())
+    }
+    /// Attach an existing encrypted vault key to a password-bootstrap host.
+    /// This does not change sshd_config or install the public key remotely.
+    pub fn set_host_identity(&mut self, alias:&str, identity_alias:&str)->Result<(),HubError>{
+        if identity_alias.trim().is_empty() ||
+            !self.identities.iter().any(|i|i.alias==identity_alias){
+            return Err(HubError::InvalidInput("unknown identity alias"));
+        }
+        let host=self.hosts.iter_mut().find(|h|h.alias==alias)
+            .ok_or(HubError::InvalidInput("host alias not found"))?;
+        host.identity_alias=identity_alias.to_owned();
         Ok(())
     }
     /// Explicitly pin an already verified host fingerprint (never discover blindly).
@@ -337,6 +349,53 @@ fn save(path: &Path, vault: &Vault, password: &str, prior_password: &str) -> Res
 mod tests {
     use super::*;
     fn password() -> &'static str { "long-example-master-password" }
+    #[test]
+    fn password_only_host_needs_no_ssh_identity_and_survives_roundtrip() {
+        let mut vault=Vault::default();
+        vault.add_host(HostProfile {
+            alias:"windows-bootstrap".into(),hostname:"192.168.0.9".into(),
+            port:22,username:"Administrator".into(),identity_alias:String::new(),
+            pinned_host_key:None,extensions:Default::default()
+        }).unwrap();
+        assert!(vault.identities.is_empty());
+        let data=encrypt(&vault,password()).unwrap();
+        let roundtrip=decrypt(&data,password()).unwrap();
+        assert_eq!(roundtrip.hosts.len(),1);
+        assert!(roundtrip.hosts[0].identity_alias.is_empty());
+        assert_eq!(roundtrip.hosts[0].username,"Administrator");
+    }
+
+    #[test]
+    fn password_host_can_attach_existing_key_for_later_key_authentication(){
+        let mut vault=Vault::default();
+        vault.add_host(HostProfile{
+            alias:"lab".into(),hostname:"lab.example".into(),port:22,
+            username:"ubuntu".into(),identity_alias:String::new(),
+            pinned_host_key:None,extensions:Default::default()
+        }).unwrap();
+        assert!(matches!(vault.set_host_identity("lab","missing"),
+            Err(HubError::InvalidInput("unknown identity alias"))));
+        vault.add_identity(Identity{
+            alias:"lab-key".into(),private_key_pem:"--- private key test ---".into(),
+            extensions:Default::default()
+        }).unwrap();
+        vault.set_host_identity("lab","lab-key").unwrap();
+        assert_eq!(vault.hosts[0].identity_alias,"lab-key");
+        assert!(matches!(vault.remove_identity("lab-key"),
+            Err(HubError::InvalidInput("identity is still used by a host"))));
+    }
+
+    #[test]
+    fn nonexistent_ssh_identity_still_rejected_when_selected() {
+        let mut vault=Vault::default();
+        let result=vault.add_host(HostProfile{
+            alias:"bad".into(),hostname:"test.example".into(),port:22,
+            username:"ubuntu".into(),identity_alias:"missing".into(),
+            pinned_host_key:None,extensions:Default::default()
+        });
+        assert!(matches!(result,Err(HubError::InvalidInput("unknown identity alias"))));
+    }
+
     #[test]
     fn roundtrip_wrong_password_and_tamper() {
         let mut v = Vault::default();

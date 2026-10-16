@@ -126,6 +126,16 @@ fn vault_add_host(host: HostInput, sessions: State<'_, SessionStore>) -> Result<
         }).map_err(safe_err)
     })
 }
+#[tauri::command]
+fn vault_set_host_identity(alias:String,identity_alias:String,sessions:State<'_,SessionStore>)
+    ->Result<(),String>{
+    sessions.use_password(|password|{
+        passh7_core::transaction(&vault_path()?,password,|vault|{
+            vault.set_host_identity(&alias,&identity_alias)?;
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
 // Credentials remain inside the existing Argon2id/XChaCha20 encrypted vault.
 // Neither this command nor host listing ever returns secret strings to the frontend.
 // When an authenticated login reused saved fields, leave any unedited fields intact
@@ -572,7 +582,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,
-            vault_list_hosts,vault_add_host,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,vault_pin_host_key,
+            vault_list_hosts,vault_add_host,vault_set_host_identity,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
             ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list

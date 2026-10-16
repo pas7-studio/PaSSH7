@@ -32,6 +32,10 @@ export async function addHost(host:AddHostInput):Promise<void>{
   await invoke("vault_add_host",{host});
 }
 
+export async function setHostIdentity(alias:string,identityAlias:string):Promise<void>{
+  await invoke("vault_set_host_identity",{alias,identityAlias});
+}
+
 export async function saveHostCredentials(alias:string,authMode:"key"|"password"|"key-password",accountPassword:string,keyPassphrase:string,preserveExisting=false):Promise<void>{
   await invoke("vault_save_host_credentials",{alias,authMode,accountPassword,keyPassphrase,preserveExisting});
 }
