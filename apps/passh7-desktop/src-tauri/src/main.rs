@@ -131,6 +131,7 @@ struct HostSummary {
     has_saved_credentials: bool,
     saved_auth_mode: Option<String>,
     backup_directory: Option<String>,
+    jump_alias: Option<String>,
 }
 fn vault_path() -> Result<PathBuf, String> {
     let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
@@ -399,7 +400,8 @@ fn vault_list_hosts(sessions: State<'_, SessionStore>) -> Result<Vec<HostSummary
             identity_alias:h.identity_alias,host_key_pinned:h.pinned_host_key.is_some(),
             has_saved_credentials:h.extensions.contains_key("passh7_saved_auth"),
             saved_auth_mode:h.extensions.get("passh7_saved_auth").and_then(|v| v.get("mode")).and_then(|v| v.as_str()).map(str::to_owned),
-            backup_directory:h.extensions.get("passh7_backup_directory").and_then(|v|v.as_str()).map(str::to_owned)
+            backup_directory:h.extensions.get("passh7_backup_directory").and_then(|v|v.as_str()).map(str::to_owned),
+            jump_alias:h.extensions.get("passh7_jump_alias").and_then(|v|v.as_str()).map(str::to_owned)
         }).collect())
     })
 }
@@ -432,6 +434,70 @@ fn vault_set_host_identity(alias:String,identity_alias:String,sessions:State<'_,
         }).map_err(safe_err)
     })
 }
+/// One-hop per-host routing. Gateway uses the same authenticated, pinned SSH
+/// session already connected by the user; target uses its own independently
+/// validated host-key pin and local Vault credentials over nested SSH.
+fn validate_jump_host(vault:&passh7_core::Vault,alias:&str,gateway:Option<&str>)->Result<(),HubError>{
+    let target=vault.hosts.iter().find(|h|h.alias==alias)
+        .ok_or(HubError::InvalidInput("Target host not found"))?;
+    let Some(gateway)=gateway else{return Ok(())};
+    if gateway==alias{return Err(HubError::InvalidInput("A host cannot jump through itself"));}
+    let hop=vault.hosts.iter().find(|h|h.alias==gateway)
+        .ok_or(HubError::InvalidInput("Jump gateway must be a saved host"))?;
+    if hop.pinned_host_key.is_none(){
+        return Err(HubError::InvalidInput("Jump gateway SSH host key must be pinned first"));
+    }
+    if hop.extensions.get("passh7_jump_alias").and_then(|v|v.as_str()).is_some_and(|s|!s.is_empty()){
+        return Err(HubError::InvalidInput("Only one SSH jump hop is supported; select a directly accessible gateway"));
+    }
+    if target.hostname.trim().is_empty(){
+        return Err(HubError::InvalidInput("Private target hostname is missing"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn vault_set_jump_host(alias:String,jump_alias:Option<String>,
+    sessions:State<'_,SessionStore>)->Result<(),String>{
+    let route=jump_alias.filter(|alias|!alias.trim().is_empty());
+    sessions.use_password(|password|{
+        passh7_core::transaction(&vault_path()?,password,|vault|{
+            validate_jump_host(vault,&alias,route.as_deref())?;
+            let target=vault.hosts.iter_mut().find(|h|h.alias==alias)
+                .ok_or(HubError::InvalidInput("Target host not found"))?;
+            if let Some(ref gateway)=route{
+                target.extensions.insert("passh7_jump_alias".into(),
+                    serde_json::Value::String(gateway.clone()));
+            }else{target.extensions.remove("passh7_jump_alias");}
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
+
+#[cfg(test)]
+mod jump_route_tests{
+    use super::*;
+    use passh7_core::{Vault,HostProfile};
+    fn host(alias:&str,pinned:bool)->HostProfile{
+        HostProfile{alias:alias.into(),hostname:"192.168.1.12".into(),
+            username:"ubuntu".into(),port:22,identity_alias:String::new(),
+            pinned_host_key:if pinned{Some("SHA256:example".into())}else{None},
+            extensions:Default::default()}
+    }
+    #[test]
+    fn one_hop_requires_existing_pinned_direct_gateway(){
+        let mut vault=Vault::default();
+        vault.hosts.push(host("gateway",true));
+        vault.hosts.push(host("private",false));
+        assert!(validate_jump_host(&vault,"private",Some("gateway")).is_ok());
+        assert!(validate_jump_host(&vault,"gateway",Some("gateway")).is_err());
+        assert!(validate_jump_host(&vault,"private",Some("missing")).is_err());
+        vault.hosts[0].extensions.insert("passh7_jump_alias".into(),
+            serde_json::Value::String("other".into()));
+        assert!(validate_jump_host(&vault,"private",Some("gateway")).is_err());
+    }
+}
+
 fn validated_backup_directory(directory:Option<String>)->Result<Option<String>,String>{
     match directory {
         Some(dir) if !dir.trim().is_empty()=>{
@@ -695,6 +761,10 @@ fn vault_public_identity(alias: String, sessions: State<'_, SessionStore>) -> Re
 fn vault_remove_host(alias: String, sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<(), String> {
     sessions.use_password(|password| {
         passh7_core::transaction(&vault_path()?, password, |vault| {
+            if vault.hosts.iter().any(|host|host.extensions.get("passh7_jump_alias")
+                .and_then(|v|v.as_str())==Some(alias.as_str())){
+                return Err(HubError::InvalidInput("Gateway is used by private SSH hosts; remove those routes before deleting it"));
+            }
             vault.remove_host(&alias)?;
             Ok(true)
         }).map_err(safe_err)
@@ -843,6 +913,37 @@ async fn ssh_discover_host_key(alias: String, sessions: State<'_, SessionStore>)
 }
 
 #[tauri::command]
+async fn ssh_discover_host_key_via(alias:String,sessions:State<'_,SessionStore>,
+    manager:State<'_,SshSessionManager>)->Result<DiscoveredHostKey,String>{
+    let (host,gateway)=sessions.use_password(|password|{
+        let vault=passh7_core::load(&vault_path()?,password).map_err(safe_err)?;
+        let host=vault.hosts.iter().find(|h|h.alias==alias)
+            .ok_or("Private target host not found")?.clone();
+        if host.pinned_host_key.is_some(){return Err("Target already has a pinned host key".into());}
+        let gateway=host.extensions.get("passh7_jump_alias")
+            .and_then(|v|v.as_str()).ok_or("Configure a jump gateway first")?.to_owned();
+        validate_jump_host(&vault,&alias,Some(&gateway)).map_err(safe_err)?;
+        Ok((host,gateway))
+    })?;
+    let stream=manager.jump_stream(&gateway,&host.hostname,host.port).await?;
+    let observed=std::sync::Arc::new(Mutex::new(None));
+    let config=std::sync::Arc::new(russh::client::Config{
+        nodelay:true,inactivity_timeout:Some(Duration::from_secs(12)),
+        ..Default::default()
+    });
+    // The discovery handler records the target's key and *rejects* login.
+    // Never assume the gateway's own key authenticates the internal target.
+    let _=tokio::time::timeout(Duration::from_secs(15),
+        russh::client::connect_stream(config,stream,
+            DiscoverSshHostKey{observed:observed.clone()})
+    ).await;
+    let fingerprint=observed.lock().map_err(|_|"SSH target fingerprint unavailable")?
+        .clone().ok_or("Could not observe target SSH host key through the gateway")?;
+    passh7_core::hostkey::validate_fingerprint(&fingerprint).map_err(safe_err)?;
+    Ok(DiscoveredHostKey{fingerprint})
+}
+
+#[tauri::command]
 fn vault_pin_host_key(alias: String, fingerprint: String, sessions: State<'_, SessionStore>) -> Result<(), String> {
     sessions.use_password(|password| {
         passh7_core::transaction(&vault_path()?,password,|vault| {
@@ -934,7 +1035,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,openssh_config::ssh_discover_local_config_hosts,
-            vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,vault_pin_host_key,
+            vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
             ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
