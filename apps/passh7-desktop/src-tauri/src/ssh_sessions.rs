@@ -32,6 +32,7 @@ enum SessionCommand {
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogs(String,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
+    AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpDownload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
@@ -54,6 +55,13 @@ pub struct ActiveLocalForward {
     pub local_port:u16,
     pub target_host:String,
     pub remote_port:u16,
+}
+
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct AgentAvailability {
+    pub installed:bool,
+    pub version:Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -424,6 +432,53 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             });
                                         }
                                     }
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::AgentProbe(binary,response)) => {
+                            // Binary is an exact native allowlist value, not a user command.
+                            // Probe only --version; do not start an interactive AI session.
+                            let channel=tokio::time::timeout(Duration::from_secs(8),async {
+                                let mut cmd=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open remote AI detection channel".to_owned())?;
+                                let command=format!("{binary} --version");
+                                cmd.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"SSH server refused AI CLI version probe".to_owned())?;
+                                Ok::<_,String>(cmd)
+                            }).await.unwrap_or_else(|_|Err("AI CLI channel setup timed out".into()));
+                            match channel {
+                                Err(reason)=>{let _=response.send(Err(reason));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(12),async {
+                                            let mut output=Vec::new();
+                                            let mut exit_code=None;
+                                            while let Some(message)=channel.wait().await {
+                                                match message {
+                                                    russh::ChannelMsg::Data{data} |
+                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if output.len().saturating_add(data.len())>8192 {
+                                                            return Err("AI CLI version response exceeds 8 KiB".into());
+                                                        }
+                                                        output.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_code=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
+                                            }
+                                            let installed=exit_code==Some(0);
+                                            let version=if installed {
+                                                String::from_utf8_lossy(&output).lines()
+                                                    .map(str::trim).find(|line|!line.is_empty())
+                                                    .map(|line|line.chars().filter(|c|!c.is_control())
+                                                        .take(120).collect::<String>())
+                                            }else{None};
+                                            Ok::<AgentAvailability,String>(AgentAvailability{installed,version})
+                                        }).await.unwrap_or_else(|_|Err("AI CLI version probe timed out after 12 seconds".into()));
+                                        let _=response.send(result);
+                                    });
                                 }
                             }
                             Ok(())
@@ -810,6 +865,26 @@ pub async fn ssh_session_docker_action(
     rx.await.map_err(|_|"Docker action interrupted")?
 }
 
+fn allowed_agent_binary(kind:&str)->Option<&'static str>{
+    match kind{
+        "codex"=>Some("codex"),
+        "claude"=>Some("claude"),
+        "opencode"=>Some("opencode"),
+        _=>None
+    }
+}
+
+#[tauri::command]
+pub async fn ssh_session_agent_probe(id:String,agent:String,
+    manager:State<'_,SshSessionManager>)->Result<AgentAvailability,String>{
+    let binary=allowed_agent_binary(&agent)
+        .ok_or("Unsupported AI CLI agent")?.to_owned();
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::AgentProbe(binary,tx)).await
+        .map_err(|_|"SSH session closed during AI CLI detection")?;
+    rx.await.map_err(|_|"AI CLI probe response cancelled".to_owned())?
+}
+
 #[tauri::command]
 pub async fn ssh_session_sftp_list(id: String, path: String, manager: State<'_, SshSessionManager>) -> Result<Vec<SftpEntry>, String> {
     if path.len()>4096 || path.as_bytes().contains(&0) { return Err("Invalid SFTP directory path".into()); }
@@ -996,6 +1071,16 @@ pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_probe_rejects_arbitrary_shell_commands(){
+        assert_eq!(allowed_agent_binary("codex"),Some("codex"));
+        assert_eq!(allowed_agent_binary("claude"),Some("claude"));
+        assert_eq!(allowed_agent_binary("opencode"),Some("opencode"));
+        for injection in ["codex;reboot","../../../bin/bash","cmd.exe","", "codex --yolo"]{
+            assert_eq!(allowed_agent_binary(injection),None);
+        }
+    }
 
     #[test]
     fn docker_control_actions_are_allowlisted(){
