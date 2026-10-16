@@ -403,51 +403,76 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
-                        Some(SessionCommand::SftpList(path, response)) => {
-                            let result = tokio::time::timeout(Duration::from_secs(20), async {
-                                let channel = connection.channel_open_session().await
-                                    .map_err(|e| format!("SFTP channel could not open: {e}"))?;
-                                channel.request_subsystem(true, "sftp").await
-                                    .map_err(|e| format!("SFTP subsystem refused: {e}"))?;
-                                let sftp = russh_sftp::client::SftpSession::new(channel.into_stream()).await
-                                    .map_err(|e| format!("SFTP initialization failed: {e}"))?;
-                                let entries = sftp.read_dir(path).await
-                                    .map_err(|e| format!("SFTP folder could not be read: {e}"))?;
-                                let mut result = Vec::new();
-                                for entry in entries {
-                                    if result.len() >= 2000 { break; }
-                                    let name = entry.file_name();
-                                    if name == "." || name == ".." { continue; }
-                                    result.push(SftpEntry {
-                                        name,
-                                        is_dir: entry.metadata().is_dir(),
-                                    });
-                                }
-                                result.sort_by(|a,b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-                                Ok::<_, String>(result)
-                            }).await.unwrap_or_else(|_| Err("SFTP listing timed out after 20 seconds".to_owned()));
-                            let _ = response.send(result);
-                            Ok(())
-                        },
-                        Some(SessionCommand::SftpRead(path,response)) => {
-                            let result=tokio::time::timeout(Duration::from_secs(20), async {
-                                use tokio::io::AsyncReadExt;
+                        Some(SessionCommand::SftpList(path,response)) => {
+                            // Only the SSH subsystem negotiation needs the connection handle.
+                            // Directory scanning and sorting happen outside the PTY loop.
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
                                 let channel=connection.channel_open_session().await
                                     .map_err(|e|format!("Could not open SFTP channel: {e}"))?;
                                 channel.request_subsystem(true,"sftp").await
+                                    .map_err(|e|format!("SFTP subsystem refused: {e}"))?;
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP channel setup timed out".into()));
+                            match opened {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|e|format!("SFTP initialization failed: {e}"))?;
+                                            let entries=sftp.read_dir(path).await
+                                                .map_err(|e|format!("SFTP folder could not be read: {e}"))?;
+                                            let mut result=Vec::new();
+                                            for entry in entries {
+                                                if result.len()>=2000 {break;}
+                                                let name=entry.file_name();
+                                                if name=="." || name==".." {continue;}
+                                                result.push(SftpEntry{name,is_dir:entry.metadata().is_dir()});
+                                            }
+                                            result.sort_by(|a,b|b.is_dir.cmp(&a.is_dir)
+                                                .then_with(||a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+                                            Ok::<Vec<SftpEntry>,String>(result)
+                                        }).await.unwrap_or_else(|_|Err("SFTP directory listing timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::SftpRead(path,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|e|format!("Could not open SFTP preview channel: {e}"))?;
+                                channel.request_subsystem(true,"sftp").await
                                     .map_err(|e|format!("SFTP subsystem unavailable: {e}"))?;
-                                let sftp=russh_sftp::client::SftpSession::new(channel.into_stream()).await
-                                    .map_err(|e|format!("SFTP initialization failed: {e}"))?;
-                                let mut file=sftp.open(path).await.map_err(|e|format!("Cannot open remote file: {e}"))?;
-                                const MAX:u64=262_144;
-                                let mut bytes=Vec::new();
-                                (&mut file).take(MAX+1).read_to_end(&mut bytes).await
-                                    .map_err(|e|format!("Cannot read remote file: {e}"))?;
-                                if bytes.len()>MAX as usize { return Err("File too large for preview (256 KiB limit)".to_owned()); }
-                                if bytes.contains(&0) { return Err("Binary file cannot be previewed as text".to_owned()); }
-                                String::from_utf8(bytes).map_err(|_|"Text preview requires UTF-8; use the terminal or a binary transfer tool".to_owned())
-                            }).await.unwrap_or_else(|_|Err("SFTP preview timed out after 20 seconds".to_owned()));
-                            let _=response.send(result);
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP preview channel setup timed out".into()));
+                            match opened {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        use tokio::io::AsyncReadExt;
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|e|format!("SFTP initialization failed: {e}"))?;
+                                            let mut file=sftp.open(path).await
+                                                .map_err(|e|format!("Cannot open remote file: {e}"))?;
+                                            const MAX:u64=262_144;
+                                            let mut bytes=Vec::new();
+                                            (&mut file).take(MAX+1).read_to_end(&mut bytes).await
+                                                .map_err(|e|format!("Cannot read remote file: {e}"))?;
+                                            if bytes.len()>MAX as usize {
+                                                return Err("File too large for preview (256 KiB limit)".into());
+                                            }
+                                            if bytes.contains(&0){
+                                                return Err("Binary file cannot be previewed as text".into());
+                                            }
+                                            String::from_utf8(bytes).map_err(|_|"Text preview requires UTF-8; download binary or non-UTF-8 files instead".into())
+                                        }).await.unwrap_or_else(|_|Err("SFTP text preview timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::SftpDownload(transfer_id,path,destination,response)) => {
