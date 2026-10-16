@@ -30,6 +30,8 @@ enum SessionCommand {
     Resize(u32, u32),
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerResourceList(String,tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerInspect(String,tokio::sync::oneshot::Sender<Result<DockerDetails,String>>),
     DockerLogs(String,u32,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
@@ -47,6 +49,54 @@ enum SessionCommand {
     ForwardList(tokio::sync::oneshot::Sender<Vec<ActiveLocalForward>>),
     ForwardOpen(tokio::net::TcpStream,String,u16),
     JumpOpen(String,u16,tokio::sync::oneshot::Sender<Result<russh::ChannelStream<russh::client::Msg>,String>>),
+}
+
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct DockerDetails{
+    pub id:String,
+    pub name:String,
+    pub image:String,
+    pub status:String,
+    pub created:String,
+    pub started_at:String,
+    pub restart_policy:String,
+    pub ports:Vec<String>,
+    pub mounts:Vec<String>,
+    pub networks:Vec<String>,
+}
+
+/// docker inspect JSON can include registry auth, environment secrets and
+/// mounts. Only a strict nonsecret allowlist leaves native Rust.
+fn sanitized_docker_details(bytes:&[u8])->Result<DockerDetails,String>{
+    let value:serde_json::Value=serde_json::from_slice(bytes)
+        .map_err(|_|"Invalid remote docker inspect JSON")?;
+    let field=|v:&serde_json::Value,key:&str|v.get(key).and_then(|x|x.as_str()).unwrap_or("").to_owned();
+    let ports=value.pointer("/NetworkSettings/Ports").and_then(|v|v.as_object())
+        .map(|mapping|mapping.iter().take(40).flat_map(|(container,entries)|{
+            entries.as_array().map(|list|list.iter().take(6).map(|entry|{
+                format!("{} → {}:{}",entry.get("HostIp").and_then(|x|x.as_str()).unwrap_or("*"),
+                    entry.get("HostPort").and_then(|x|x.as_str()).unwrap_or("—"),container)
+            }).collect::<Vec<_>>()).unwrap_or_else(||vec![container.clone()])
+        }).collect::<Vec<_>>()).unwrap_or_default();
+    let mounts=value.get("Mounts").and_then(|v|v.as_array()).map(|xs|xs.iter().take(32)
+        .map(|entry|format!("{} → {} ({})",
+          entry.get("Source").and_then(|v|v.as_str()).unwrap_or("unknown"),
+          entry.get("Destination").and_then(|v|v.as_str()).unwrap_or("unknown"),
+          if entry.get("RW").and_then(|v|v.as_bool())==Some(true){"rw"}else{"ro"}))
+        .collect()).unwrap_or_default();
+    let networks=value.pointer("/NetworkSettings/Networks").and_then(|v|v.as_object())
+        .map(|map|map.keys().take(32).cloned().collect()).unwrap_or_default();
+    Ok(DockerDetails{
+        id:field(&value,"Id"),
+        name:field(&value,"Name").trim_start_matches('/').to_owned(),
+        image:field(value.get("Config").unwrap_or(&serde_json::Value::Null),"Image"),
+        status:field(value.get("State").unwrap_or(&serde_json::Value::Null),"Status"),
+        created:field(&value,"Created"),
+        started_at:field(value.get("State").unwrap_or(&serde_json::Value::Null),"StartedAt"),
+        restart_policy:field(value.pointer("/HostConfig/RestartPolicy").unwrap_or(&serde_json::Value::Null),"Name"),
+        ports,mounts,networks
+    })
 }
 
 #[derive(Clone, Serialize)]
@@ -432,6 +482,94 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                         },
                         Some(SessionCommand::SftpFinished(transfer_id)) => {
                             transfers.remove(&transfer_id);
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerInspect(container_id,response)) => {
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker inspect SSH channel")?;
+                                let command=format!("docker inspect --format '{{{{json .}}}}' {container_id}");
+                                channel.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"Remote SSH server refused Docker inspect")?;
+                                Ok::<_,&str>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker inspect SSH channel timed out"));
+                            match setup{
+                                Err(error)=>{let _=response.send(Err(error.into()));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move{
+                                        let result=tokio::time::timeout(Duration::from_secs(25),async {
+                                            let mut bytes=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await{
+                                                match message{
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if bytes.len().saturating_add(data.len())>1024*1024{
+                                                            return Err("Docker inspect payload exceeds 1 MiB".to_owned());
+                                                        }
+                                                        bytes.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
+                                            }
+                                            if exit_status.is_some_and(|code|code!=0){
+                                                return Err("Docker inspect command failed; verify container and remote Docker access".into());
+                                            }
+                                            sanitized_docker_details(&bytes)
+                                        }).await.unwrap_or_else(|_|Err("Docker inspect timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerResourceList(kind,response)) => {
+                            // This is a closed native allowlist. No user shell input enters
+                            // docker exec, even when a resource name has special characters.
+                            let command=match kind.as_str(){
+                                "images"=>b"docker image ls --format \"{{json .}}\"".as_slice(),
+                                "volumes"=>b"docker volume ls --format \"{{json .}}\"".as_slice(),
+                                "networks"=>b"docker network ls --format \"{{json .}}\"".as_slice(),
+                                _=>{let _=response.send(Err("Unsupported Docker resource type".into()));continue;}
+                            };
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker resource SSH channel")?;
+                                channel.exec(true,command).await
+                                    .map_err(|_|"Remote SSH server refused Docker resource command")?;
+                                Ok::<_,&str>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker resource SSH channel timed out"));
+                            match setup{
+                                Err(error)=>{let _=response.send(Err(error.to_owned()));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move{
+                                        let result=tokio::time::timeout(Duration::from_secs(25),async {
+                                            let mut bytes=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await{
+                                                match message{
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if bytes.len().saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker resource inventory exceeds 2 MiB".to_owned());
+                                                        }
+                                                        bytes.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
+                                            }
+                                            let output=String::from_utf8_lossy(&bytes).into_owned();
+                                            if exit_status.is_some_and(|code|code!=0){
+                                                return Err(format!("Docker resource query failed: {}",output.chars().take(700).collect::<String>()));
+                                            }
+                                            Ok::<String,String>(output)
+                                        }).await.unwrap_or_else(|_|Err("Docker resource query timed out after 25 seconds".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::DockerList(response)) => {
@@ -1131,6 +1269,30 @@ pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>
 }
 
 #[tauri::command]
+pub async fn ssh_session_docker_inspect(
+    id:String,container_id:String,manager:State<'_,SshSessionManager>
+)->Result<DockerDetails,String>{
+    if !valid_docker_container_id(&container_id){return Err("Invalid Docker container ID".into());}
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerInspect(container_id,tx)).await
+        .map_err(|_|"SSH session closed before Docker inspect")?;
+    rx.await.map_err(|_|"Docker inspect interrupted")?
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_resources(
+    id:String,kind:String,manager:State<'_,SshSessionManager>
+)->Result<String,String>{
+    if !matches!(kind.as_str(),"images"|"volumes"|"networks"){
+        return Err("Unsupported Docker resource type".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerResourceList(kind,tx)).await
+        .map_err(|_|"SSH session closed before Docker resource query")?;
+    rx.await.map_err(|_|"Docker resource request was cancelled")?
+}
+
+#[tauri::command]
 pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionManager>) -> Result<String, String> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     manager.sender(&id)?.send(SessionCommand::DockerList(tx)).await
@@ -1526,6 +1688,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn docker_inspect_redacts_environment_and_command_args(){
+        let raw=br#"{"Id":"0123456789ab","Name":"/redis","Config":{"Image":"redis:7","Env":["SECRET_TOKEN=do-not-show"],"Cmd":["--password=do-not-show"]},"State":{"Status":"running","StartedAt":"2026-01-01T12:00:00Z"},"Created":"2025-12-01","HostConfig":{"RestartPolicy":{"Name":"unless-stopped"}},"Mounts":[{"Source":"/srv/redis","Destination":"/data","RW":true}],"NetworkSettings":{"Ports":{"6379/tcp":[{"HostIp":"127.0.0.1","HostPort":"6379"}]},"Networks":{"backend":{}}}}"#;
+        let out=sanitized_docker_details(raw).unwrap();
+        let encoded=serde_json::to_string(&out).unwrap();
+        assert_eq!(out.name,"redis");
+        assert_eq!(out.restart_policy,"unless-stopped");
+        assert!(!encoded.contains("SECRET_TOKEN"));
+        assert!(!encoded.contains("do-not-show"));
+        assert!(out.networks.contains(&"backend".to_owned()));
+    }
     #[test]
     fn docker_control_actions_are_allowlisted(){
         for action in ["start","stop","restart"]{assert!(valid_docker_action(action));}
