@@ -450,6 +450,11 @@ fn validate_jump_host(vault:&passh7_core::Vault,alias:&str,gateway:Option<&str>)
     if hop.extensions.get("passh7_jump_alias").and_then(|v|v.as_str()).is_some_and(|s|!s.is_empty()){
         return Err(HubError::InvalidInput("Only one SSH jump hop is supported; select a directly accessible gateway"));
     }
+    if vault.hosts.iter().any(|other|other.extensions.get("passh7_jump_alias")
+        .and_then(|v|v.as_str())==Some(alias)){
+        return Err(HubError::InvalidInput(
+            "This host already acts as a gateway; remove dependent routes before routing it through another gateway"));
+    }
     if target.hostname.trim().is_empty(){
         return Err(HubError::InvalidInput("Private target hostname is missing"));
     }
@@ -495,6 +500,10 @@ mod jump_route_tests{
         vault.hosts[0].extensions.insert("passh7_jump_alias".into(),
             serde_json::Value::String("other".into()));
         assert!(validate_jump_host(&vault,"private",Some("gateway")).is_err());
+        vault.hosts[0].extensions.clear();
+        vault.hosts[1].extensions.insert("passh7_jump_alias".into(),
+            serde_json::Value::String("gateway".into()));
+        assert!(validate_jump_host(&vault,"gateway",Some("private")).is_err());
     }
 }
 
