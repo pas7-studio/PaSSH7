@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod ssh_sessions;
+
 mod openssh_config;
 use std::{io::{BufReader, Read}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
@@ -9,6 +10,26 @@ use ssh_sessions::SshSessionManager;
 use passh7_core::{HostProfile, HubError, Identity};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+#[derive(Default)]
+struct PendingVaultRestore(Mutex<Option<BackupCandidate>>);
+
+struct BackupCandidate {
+    token:String,
+    encrypted:Vec<u8>,
+    baseline:Vec<u8>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+struct VaultRestorePreview {
+    token:String,
+    hosts:usize,
+    identities:usize,
+    host_aliases:Vec<String>,
+    bytes:usize,
+    identical_to_current:bool,
+}
 
 #[derive(Default)]
 struct SessionStore(Mutex<Option<UnlockedSession>>);
@@ -89,6 +110,120 @@ fn vault_unlock(mut master_password: String, sessions: State<'_, SessionStore>) 
 }
 #[tauri::command]
 fn vault_lock(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<(), String> { ssh.stop_all(); sessions.lock() }
+
+/// Export ciphertext only; no private key, password or decrypted JSON
+/// crosses the IPC boundary. Refuse to replace existing local backups.
+#[tauri::command]
+async fn vault_export_encrypted_backup(
+    app:tauri::AppHandle,sessions:State<'_,SessionStore>
+)->Result<Option<String>,String>{
+    use tauri_plugin_dialog::DialogExt;
+    use std::io::Write;
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    let stamp=std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    app.dialog().file().set_file_name(format!("passh7-vault-{stamp}.enc.json"))
+        .save_file(move|selected|{let _=tx.send(selected);});
+    let chosen=rx.await.map_err(|_|"Vault backup save dialog failed")?;
+    let Some(chosen)=chosen else{return Ok(None)};
+    let target=chosen.into_path().map_err(|_|"Select a local filesystem path")?;
+    let data=sessions.use_password(|password|{
+        let path=vault_path()?;
+        let meta=std::fs::metadata(&path)
+            .map_err(|e|format!("Cannot inspect encrypted Vault: {e}"))?;
+        if !meta.is_file() || meta.len()>16*1024*1024{
+            return Err("Encrypted Vault is not a regular file below 16 MiB".into());
+        }
+        let data=std::fs::read(path).map_err(|e|format!("Cannot read encrypted Vault: {e}"))?;
+        let _=passh7_core::decrypt(&data,password).map_err(safe_err)?;
+        Ok(data)
+    })?;
+    let mut created=false;
+    let result=(||->Result<(),String>{
+        let mut file=std::fs::OpenOptions::new().create_new(true).write(true)
+            .open(&target).map_err(|e|format!("Cannot create new backup file (it may already exist): {e}"))?;
+        created=true;
+        file.write_all(&data).map_err(|e|format!("Cannot write encrypted backup: {e}"))?;
+        file.sync_all().map_err(|e|format!("Cannot sync encrypted backup: {e}"))?;
+        drop(file);
+        let readback=std::fs::read(&target).map_err(|e|format!("Cannot verify exported backup: {e}"))?;
+        if readback!=data{return Err("Exported encrypted bytes did not match the Vault".into());}
+        Ok(())
+    })();
+    if result.is_err() && created{let _=std::fs::remove_file(&target);}
+    result?;
+    Ok(Some(format!("Encrypted Vault exported and verified ({} bytes)",data.len())))
+}
+
+/// User chooses a local encrypted backup; Rust validates the full
+/// Argon2id/XChaCha20-Poly1305 payload using the unlocked master password.
+/// JS gets only counts and a short-lived single-use token, never credentials.
+#[tauri::command]
+async fn vault_restore_inspect(
+    app:tauri::AppHandle,sessions:State<'_,SessionStore>,
+    pending:State<'_,PendingVaultRestore>
+)->Result<Option<VaultRestorePreview>,String>{
+    use tauri_plugin_dialog::DialogExt;
+    {
+        let mut slot=pending.0.lock().map_err(|_|"Restore preview unavailable")?;
+        *slot=None;
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    app.dialog().file().pick_file(move |selected|{let _=tx.send(selected);});
+    let chosen=rx.await.map_err(|_|"Backup file selection failed")?;
+    let Some(chosen)=chosen else{return Ok(None)};
+    let path=chosen.into_path().map_err(|_|"Choose a local encrypted backup file")?;
+    let bytes=std::fs::read(&path).map_err(|e|format!("Cannot read selected backup: {e}"))?;
+    if bytes.len()>16*1024*1024 {return Err("Encrypted backup exceeds 16 MiB".into());}
+    let (candidate,current,host_aliases,identities)=sessions.use_password(|password|{
+        let candidate=passh7_core::decrypt(&bytes,password).map_err(safe_err)?;
+        let current=std::fs::read(vault_path()?)
+            .map_err(|e|format!("Cannot inspect current Vault generation: {e}"))?;
+        let _=passh7_core::decrypt(&current,password).map_err(safe_err)?;
+        let names=candidate.hosts.iter().map(|h|h.alias.clone()).collect::<Vec<_>>();
+        let key_count=candidate.identities.len();
+        Ok((candidate,current,names,key_count))
+    })?;
+    let token=format!("restore-{}-{}",std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default().as_nanos());
+    let preview=VaultRestorePreview{
+        token:token.clone(),hosts:candidate.hosts.len(),identities,
+        host_aliases,bytes:bytes.len(),identical_to_current:bytes==current,
+    };
+    let mut slot=pending.0.lock().map_err(|_|"Restore preview unavailable")?;
+    *slot=Some(BackupCandidate{token,encrypted:bytes,baseline:current});
+    Ok(Some(preview))
+}
+
+/// This is a destructive, explicit whole-vault restore. The core transaction
+/// creates and verifies an independent encrypted backup of the current Vault
+/// before committing the replacement; concurrent generation changes abort.
+#[tauri::command]
+fn vault_restore_commit(
+    token:String,sessions:State<'_,SessionStore>,
+    pending:State<'_,PendingVaultRestore>,ssh:State<'_,SshSessionManager>
+)->Result<(),String>{
+    let backup=pending.0.lock().map_err(|_|"Restore state unavailable")?
+        .take().ok_or("Choose and preview an encrypted backup first")?;
+    if token!=backup.token {return Err("Backup confirmation expired; select the backup again".into());}
+    sessions.use_password(|password|{
+        let restored=passh7_core::decrypt(&backup.encrypted,password).map_err(safe_err)?;
+        let path=vault_path()?;
+        passh7_core::transaction(&path,password,|current|{
+            // transaction() acquires the vault writer lock before this check.
+            let latest=std::fs::read(&path).map_err(passh7_core::HubError::Io)?;
+            if latest!=backup.baseline {
+                return Err(passh7_core::HubError::InvalidInput(
+                    "Vault changed since backup preview; inspect it again"));
+            }
+            *current=restored;
+            Ok(true)
+        }).map_err(safe_err)
+    })?;
+    ssh.stop_all(); // All sessions may reference replaced credentials.
+    Ok(())
+}
 
 #[tauri::command]
 fn vault_status(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool, String> {
@@ -580,13 +715,14 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionStore::default())
+        .manage(PendingVaultRestore::default())
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_commit,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_set_host_identity,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
-            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
+            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");

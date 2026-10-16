@@ -2,7 +2,7 @@ import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,backupEncryptedVaultToSsh,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -13,6 +13,14 @@ const DEMO_HOSTS:Host[] = [
   {id:"staging",label:"Staging",address:"staging.example.invalid",user:"deploy",port:22,group:"Development",fingerprint:false},
   {id:"prod",label:"Production",address:"prod.example.invalid",user:"ops",port:22,group:"Production",fingerprint:true}
 ];
+function sftpBreadcrumbs(path:string):{label:string;path:string}[]{
+  const absolute=path.startsWith("/");
+  const pieces=path.split("/").filter(part=>part&&part!==".");
+  const root=absolute?"/":".";
+  return [{label:root,path:root},...pieces.map((piece,index)=>({
+    label:piece,path:(absolute?"/":"")+pieces.slice(0,index+1).join("/")
+  }))];
+}
 const tabs: {id:Panel;label:string; Icon:typeof Bot}[]=[
   {id:"files",label:"Files",Icon:FolderClosed},{id:"docker",label:"Docker",Icon:Container},
   {id:"ports",label:"Ports",Icon:Activity},{id:"agent",label:"AI Agent",Icon:Bot}
@@ -251,6 +259,16 @@ export default function App(){
   const [sftpPath,setSftpPath]=useState(".");
   const [sftpEntries,setSftpEntries]=useState<{session:string;path:string;items:SftpEntry[]}|null>(null);
   const [sftpBusy,setSftpBusy]=useState(false);
+  const [sftpFilter,setSftpFilter]=useState("");
+  const [sftpOrder,setSftpOrder]=useState<"folders"|"name">("folders");
+  const visibleSftpEntries=useMemo(()=>{
+    const needle=sftpFilter.toLocaleLowerCase().trim();
+    const rows=(sftpEntries?.items??[]).filter(item=>!needle||item.name.toLocaleLowerCase().includes(needle));
+    return [...rows].sort((a,b)=>{
+      if(sftpOrder==="folders"&&a.isDir!==b.isDir)return a.isDir?-1:1;
+      return a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:"base"});
+    });
+  },[sftpEntries,sftpFilter,sftpOrder]);
   const [sftpError,setSftpError]=useState("");
   const [sftpPreview,setSftpPreview]=useState<{session:string;path:string;body:string}|null>(null);
   const [sftpPreviewBusy,setSftpPreviewBusy]=useState(false);
@@ -261,6 +279,71 @@ export default function App(){
     bytes:number;totalBytes:number|null
   }|null>(null);
   const [sftpTransferResult,setSftpTransferResult]=useState<{session:string;text:string}|null>(null);
+  const [vaultBackupBusy,setVaultBackupBusy]=useState(false);
+  const [vaultBackupNotice,setVaultBackupNotice]=useState("");
+  const [vaultBackupError,setVaultBackupError]=useState("");
+  const [vaultRestorePreview,setVaultRestorePreview]=useState<VaultRestorePreview|null>(null);
+  const [vaultRestorePhrase,setVaultRestorePhrase]=useState("");
+  const saveVaultBackup=async()=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session||!vaultUnlocked){setVaultBackupError("Unlock Vault and connect to the backup destination first.");return}
+    if(vaultBackupBusy)return;
+    const folder=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
+    if(!window.confirm("Create a NEW encrypted Vault backup on "+session.alias+" in "+folder+"?\n\nThe remote SSH account can read/copy the encrypted file. Secure the destination directory and keep your master password offline. The backup is NOT an automatic two-way sync."))return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    try{
+      const result=await backupEncryptedVaultToSsh(session.id,folder);
+      setVaultBackupNotice("Encrypted snapshot verified on "+session.alias+": "+result.remotePath+" ("+result.bytes+" bytes).");
+      try{
+        const entries=await listSftpDirectory(session.id,folder);
+        setSftpEntries({session:session.id,path:folder,items:entries});
+      }catch(error){
+        setVaultBackupError("Backup succeeded, but directory refresh failed: "+String(error));
+      }
+    }catch(error){setVaultBackupError("Encrypted backup failed: "+String(error))}
+    finally{setVaultBackupBusy(false)}
+  };
+  const exportVaultBackup=async()=>{
+    if(vaultBackupBusy)return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    try{
+      const result=await exportEncryptedVaultLocally();
+      if(result)setVaultBackupNotice(result+". Store it offline in a safe place.");
+    }catch(error){setVaultBackupError("Encrypted Vault export failed: "+String(error))}
+    finally{setVaultBackupBusy(false)}
+  };
+  const inspectVaultRestore=async()=>{
+    if(vaultBackupBusy)return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    setVaultRestorePhrase("");setVaultRestorePreview(null);
+    try{
+      const preview=await inspectEncryptedVaultBackup();
+      if(preview)setVaultRestorePreview(preview);
+    }catch(error){setVaultBackupError("Backup inspection failed: "+String(error))}
+    finally{setVaultBackupBusy(false)}
+  };
+  const commitVaultRestore=async()=>{
+    if(!vaultRestorePreview||vaultRestorePhrase!=="RESTORE"||vaultBackupBusy)return;
+    if(!window.confirm("FINAL CONFIRMATION: Replace the entire local PaSSH7 Vault with the selected backup?\n\nExisting hosts, saved credentials and keys will be replaced. A separate encrypted copy of your previous Vault will be saved locally before replacement; live SSH sessions will close."))return;
+    setVaultBackupBusy(true);setVaultBackupError("");setVaultBackupNotice("");
+    try{
+      await commitEncryptedVaultRestore(vaultRestorePreview.token);
+      setSshTabs([]);setActiveSsh("");setTunnels([]);
+      setSftpEntries(null);setSftpPreview(null);setDockerInventory(null);setAgentAvailability({});
+      const [saved,keys]=await Promise.all([getHosts(),getIdentities()]);
+      setHosts(saved.map(h=>({
+        id:h.alias,label:h.alias,address:h.hostname,user:h.username,
+        port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,
+        identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,
+        savedAuthMode:h.savedAuthMode
+      })));
+      setIdentities(keys);setSelected(saved[0]?.alias||"");
+      setVaultBackupNotice("Encrypted Vault restored. Previous local Vault preserved as an encrypted backup. Reconnect to your hosts.");
+      setVaultRestorePreview(null);setVaultRestorePhrase("");
+    }catch(error){setVaultBackupError("Vault restore was not completed: "+String(error))}
+    finally{setVaultBackupBusy(false)}
+  };
+
   const cancelActiveTransfer=async()=>{
     const current=sftpTransferProgress;
     if(!current||current.stage==="selecting"||current.stage==="cancelling")return;
@@ -666,12 +749,35 @@ export default function App(){
 }</span></div>)}
 {agentProbeError&&<p role="alert" className="wizardError">{agentProbeError}</p>}
 <label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Launches an installed CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
-        panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Browse remote directories, preview UTF-8 text, or transfer files through encrypted SFTP. Transfers are limited to 64 MiB per file; existing files are never silently overwritten.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button><button className="contextAction" disabled={!connected||!activeSsh||sftpTransferBusy||sftpBusy} onClick={()=>void transferSftp("upload")}>{sftpTransferBusy?"Transferring…":"Upload file to this directory"}</button>{sftpTransferProgress?.session===activeSsh&&<div className="sftpProgress" role="status">
+        panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Browse remote directories, preview UTF-8 text, or transfer files through encrypted SFTP. Transfers are limited to 64 MiB per file; existing files are never silently overwritten.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button>{sftpEntries?.session===activeSsh&&<><div className="sftpBreadcrumbs" aria-label="Remote path">{sftpBreadcrumbs(sftpEntries.path).map((crumb,index)=><button type="button" key={index} disabled={sftpBusy} onClick={()=>void browseSftp(crumb.path)} title={crumb.path}>{crumb.label}</button>)}</div><div className="sftpControls"><input aria-label="Filter remote files" placeholder="Filter files / folders…" value={sftpFilter} onChange={e=>setSftpFilter(e.target.value)}/><select aria-label="Sort remote files" value={sftpOrder} onChange={e=>setSftpOrder(e.target.value as "folders"|"name")}><option value="folders">Folders first</option><option value="name">By name</option></select></div></>}<button className="contextAction" disabled={!connected||!activeSsh||sftpTransferBusy||sftpBusy} onClick={()=>void transferSftp("upload")}>{sftpTransferBusy?"Transferring…":"Upload file to this directory"}</button><section className="vaultBackupCard" aria-label="Encrypted Vault backups">
+<strong><LockKeyhole size={14}/> Encrypted Vault backups</strong>
+<p className="note">Create immutable, encrypted snapshots on this SSH server. Only cipher text leaves this device. Existing versions are not overwritten and the remote file is read back for verification.</p>
+<div className="vaultBackupActions">
+<button type="button" disabled={!connected||!activeSsh||!vaultUnlocked||vaultBackupBusy||sftpTransferBusy} onClick={()=>void saveVaultBackup()}>{vaultBackupBusy?"Working…":"Back up Vault to this server"}</button>
+<button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void exportVaultBackup()}>Export local backup…</button><button type="button" disabled={!vaultUnlocked||vaultBackupBusy} onClick={()=>void inspectVaultRestore()}>Restore from encrypted file…</button>
+</div>
+<p className="note">To restore a remote snapshot, download its <code>passh7-vault-*.enc.json</code> file first, then choose it with Restore. You must know the same master password. This is manual versioned backup, not conflict-free multi-device sync.</p>
+{vaultBackupNotice&&<p role="status" className="note">{vaultBackupNotice}</p>}
+{vaultBackupError&&<p role="alert" className="wizardError">{vaultBackupError}</p>}
+{vaultRestorePreview&&<div className="vaultRestorePreview">
+<strong>Backup ready for recovery</strong>
+<p>{vaultRestorePreview.hosts} host(s), {vaultRestorePreview.identities} SSH identity/identities, {(vaultRestorePreview.bytes/1024).toFixed(1)} KiB.</p>
+<p className="note">Hosts: {vaultRestorePreview.hostAliases.slice(0,12).join(", ")||"None"}{vaultRestorePreview.hostAliases.length>12?" and more":""}</p>
+{vaultRestorePreview.identicalToCurrent&&<p className="note">The encrypted file is identical to your current Vault generation.</p>}
+<label>Type RESTORE to replace your local Vault
+<input aria-label="Confirm Vault restore" value={vaultRestorePhrase} onChange={e=>setVaultRestorePhrase(e.target.value)} placeholder="RESTORE"/>
+</label>
+<div className="vaultBackupActions">
+<button type="button" disabled={vaultBackupBusy} onClick={()=>{setVaultRestorePreview(null);setVaultRestorePhrase("")}}>Cancel recovery</button>
+<button type="button" disabled={vaultBackupBusy||vaultRestorePhrase!=="RESTORE"} onClick={()=>void commitVaultRestore()}>Restore selected backup</button>
+</div>
+</div>}
+</section>{sftpTransferProgress?.session===activeSsh&&<div className="sftpProgress" role="status">
   <strong>{sftpTransferProgress.direction==="upload"?"Uploading":"Downloading"} · {sftpTransferProgress.stage==="selecting"?"Choose a local file":sftpTransferProgress.stage==="cancelling"?"Cancelling…":"Transfer in progress"}</strong>
   <small>{(sftpTransferProgress.bytes/1048576).toFixed(2)} MiB{sftpTransferProgress.totalBytes!==null?" / "+(sftpTransferProgress.totalBytes/1048576).toFixed(2)+" MiB":""}</small>
   {sftpTransferProgress.totalBytes!==null&&<progress value={sftpTransferProgress.bytes} max={Math.max(1,sftpTransferProgress.totalBytes)} style={{width:"100%"}}/>}
   {sftpTransferProgress.stage!=="selecting"&&sftpTransferProgress.stage!=="cancelling"&&<button type="button" onClick={()=>void cancelActiveTransfer()}>Cancel transfer</button>}
-</div>}{sftpTransferResult?.session===activeSsh&&<p className="note" role="status">{sftpTransferResult.text}</p>}{sftpEntries?.session===activeSsh&&<div className="dockerInventory"><p className="muted">{sftpEntries.path} · {sftpEntries.items.length} entries</p><button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/..")} disabled={sftpBusy}>↑ Parent directory</button>{sftpEntries.items.map((item,index)=><div className="dockerItem" key={item.name+"-"+index}>{item.isDir?<button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/"+item.name)} disabled={sftpBusy}>📁 {item.name}</button>:<div className="sftpFile"><button type="button" disabled={sftpBusy||sftpPreviewBusy||sftpTransferBusy} onClick={()=>void readSftpPreview(sftpEntries.path+"/"+item.name)}>📄 {item.name} · Preview</button><button type="button" disabled={sftpBusy||sftpTransferBusy} onClick={()=>void transferSftp("download",sftpEntries.path+"/"+item.name)}>Download</button></div>}</div>)}</div>}{sftpPreview?.session===activeSsh&&<div><p className="muted" style={{overflowWrap:"anywhere"}}>Read-only preview: {sftpPreview.path}</p><textarea aria-label="Remote file preview" readOnly value={sftpPreview.body} rows={12} style={{width:"100%",fontFamily:"monospace",fontSize:"12px"}}/><button type="button" onClick={()=>setSftpPreview(null)}>Close preview</button></div>}{sftpPreviewBusy&&<p className="note">Loading file preview…</p>}{sftpError&&<p className="wizardError" role="alert">{sftpError}</p>}{!connected&&<div className="placeholder">Connect to the selected host before browsing.</div>}</>:
+</div>}{sftpTransferResult?.session===activeSsh&&<p className="note" role="status">{sftpTransferResult.text}</p>}{sftpEntries?.session===activeSsh&&<div className="dockerInventory"><p className="muted">{sftpEntries.path} · {visibleSftpEntries.length} of {sftpEntries.items.length} entries</p><button type="button" onClick={()=>void browseSftp(sftpBreadcrumbs(sftpEntries.path).at(-2)?.path||".")} disabled={sftpBusy}>↑ Parent directory</button>{visibleSftpEntries.map((item,index)=><div className="dockerItem" key={item.name+"-"+index}>{item.isDir?<button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/"+item.name)} disabled={sftpBusy}>📁 {item.name}</button>:<div className="sftpFile"><button type="button" disabled={sftpBusy||sftpPreviewBusy||sftpTransferBusy} onClick={()=>void readSftpPreview(sftpEntries.path+"/"+item.name)}>📄 {item.name} · Preview</button><button type="button" disabled={sftpBusy||sftpTransferBusy} onClick={()=>void transferSftp("download",sftpEntries.path+"/"+item.name)}>Download</button></div>}</div>)}</div>}{sftpPreview?.session===activeSsh&&<div><p className="muted" style={{overflowWrap:"anywhere"}}>Read-only preview: {sftpPreview.path}</p><textarea aria-label="Remote file preview" readOnly value={sftpPreview.body} rows={12} style={{width:"100%",fontFamily:"monospace",fontSize:"12px"}}/><button type="button" onClick={()=>setSftpPreview(null)}>Close preview</button></div>}{sftpPreviewBusy&&<p className="note">Loading file preview…</p>}{sftpError&&<p className="wizardError" role="alert">{sftpError}</p>}{!connected&&<div className="placeholder">Connect to the selected host before browsing.</div>}</>:
         panel==="docker"?<><div className="contextTitle"><Container size={18}/><h3>Docker containers</h3></div><p className="muted">Runs <code>docker ps -a</code> on the connected host using your SSH account. Read-only inventory.</p><button className="contextAction" disabled={!connected||!activeSsh||dockerBusy} onClick={()=>void refreshDocker()}>{dockerBusy?"Loading containers…":"Refresh containers"}</button>{dockerError&&<p className="wizardError" role="alert">{dockerError}</p>}{dockerActionStatus?.session===activeSsh&&<p role="status" className="note">{dockerActionStatus.text}</p>}{dockerInventory?.session===activeSsh?<div className="dockerInventory"><p className="muted">{dockerInventory.items.length} container(s)</p>{dockerInventory.items.map((item,index)=><div key={item.ID||index} className="dockerItem"><strong>{item.Names||item.ID||"Unnamed"}</strong><small>{item.Image||"Unknown image"}</small><span>{item.Status||item.State||"Unknown status"}</span>{item.Ports&&<small>{item.Ports}</small>}{item.ID&&<button type="button" disabled={dockerLogsBusy||!connected} onClick={()=>void viewDockerLogs(item.ID!,item.Names||item.ID||"Container")}>{dockerLogsBusy?"Loading logs…":"View logs"}</button>}{item.ID&&<div className="dockerActions">{(item.State||"").toLowerCase()==="running"?<><button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"restart")}>{dockerActionBusy===item.ID?"Working…":"Restart"}</button><button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"stop")}>Stop</button></>:<button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"start")}>{dockerActionBusy===item.ID?"Working…":"Start"}</button>}</div>}</div>)}</div>:
 <div className="placeholder"><Container size={23}/>{connected?"Click Refresh containers to fetch the real inventory.":"Connect to the server to inspect Docker."}</div>}{dockerLogs?.session===activeSsh&&<div className="dockerItem" style={{marginTop:14}}><strong>Recent logs: {dockerLogs.containerName}</strong><small>Last 200 lines · read-only · timestamps included</small><pre className="preview" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",maxHeight:"300px",overflow:"auto"}}>{dockerLogs.text||"No logs returned for this container."}</pre><button type="button" onClick={()=>setDockerLogs(null)}>Close logs</button></div>}</>:
         <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button><button className="contextAction" type="button" disabled={!connected||tunnelBusy} onClick={()=>void refreshLocalForwarding()}>Refresh active forwards</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{!tunnels.some(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected))&&<p className="note">No active local forwards for this host. Start one above to map a localhost port through SSH, or refresh to retrieve active native tunnels.</p>}{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusy} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
