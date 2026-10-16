@@ -528,7 +528,13 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let channel=tokio::time::timeout(Duration::from_secs(8),async {
                                 let mut cmd=connection.channel_open_session().await
                                     .map_err(|_|"Could not open remote AI detection channel".to_owned())?;
-                                let command=format!("{binary} --version");
+                                // SSH exec does not inherit interactive PATH. A login+interactive
+                                // shell sources shell startup files used by nvm, volta, bun,
+                                // mise and user CLI installations. Only exact allowlisted names
+                                // enter this command; no user-controlled shell text.
+                                let command=format!(
+                                    "${{SHELL:-/bin/sh}} -lic 'command -v {binary} >/dev/null 2>&1 && {binary} --version' 2>/dev/null || {binary} --version"
+                                );
                                 cmd.exec(true,command.as_bytes()).await
                                     .map_err(|_|"SSH server refused AI CLI version probe".to_owned())?;
                                 Ok::<_,String>(cmd)
@@ -554,6 +560,8 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                     _=>{}
                                                 }
                                             }
+                                            // Failed exec probes are not proof of absence: a
+                                            // human PTY may have a different PATH or rc files.
                                             let installed=exit_code==Some(0);
                                             let version=if installed {
                                                 String::from_utf8_lossy(&output).lines()
