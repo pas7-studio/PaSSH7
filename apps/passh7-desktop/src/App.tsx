@@ -1,7 +1,7 @@
 import {useCallback} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -33,7 +33,7 @@ export default function App(){
   const [accessPublicKey,setAccessPublicKey]=useState("");
   const [loginMode,setLoginMode]=useState<"key"|"password"|"key-password">("key-password");
   useEffect(()=>{if(sshTabs.length&&!sshTabs.some(t=>t.id===activeSsh)){setActiveSsh(sshTabs[0].id)}},[sshTabs,activeSsh]);
-  const onSessionClosed=useCallback((id:string)=>{setSshTabs(t=>t.filter(x=>x.id!==id));setActiveSsh(current=>current===id?"":current)},[]);
+  const onSessionClosed=useCallback((id:string)=>{setSshTabs(t=>t.filter(x=>x.id!==id));setTunnels(t=>t.filter(x=>x.session!==id));setActiveSsh(current=>current===id?"":current)},[]);
   const [hosts,setHosts]=useState<Host[]>(desktopAvailable()?[]:DEMO_HOSTS);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
   useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setActiveSsh("")}},[vaultUnlocked]);
@@ -86,6 +86,28 @@ export default function App(){
     try{const items=await listSftpDirectory(session.id,path);setSftpEntries({session:session.id,path,items});setSftpPath(path)}
     catch(e){setSftpError(String(e))}
     finally{setSftpBusy(false)}
+  };
+  const [tunnelLocalPort,setTunnelLocalPort]=useState(18080);
+  const [tunnelRemoteHost,setTunnelRemoteHost]=useState("127.0.0.1");
+  const [tunnelRemotePort,setTunnelRemotePort]=useState(8080);
+  const [tunnelBusy,setTunnelBusy]=useState(false);
+  const [tunnelError,setTunnelError]=useState("");
+  const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
+  const addTunnel=async()=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session){setTunnelError("Select an active SSH session for this host.");return}
+    setTunnelBusy(true);setTunnelError("");
+    try {
+      await startLocalForward(session.id,tunnelLocalPort,tunnelRemoteHost,tunnelRemotePort);
+      setTunnels(v=>[...v,{session:session.id,localPort:tunnelLocalPort,targetHost:tunnelRemoteHost,remotePort:tunnelRemotePort}]);
+    }catch(e){setTunnelError(String(e))}
+    finally{setTunnelBusy(false)}
+  };
+  const removeTunnel=async(session:string,localPort:number)=>{
+    setTunnelBusy(true);setTunnelError("");
+    try{await stopLocalForward(session,localPort);setTunnels(v=>v.filter(t=>!(t.session===session&&t.localPort===localPort)))}
+    catch(e){setTunnelError(String(e))}
+    finally{setTunnelBusy(false)}
   };
   const [agent,setAgent]=useState<AgentKind>("codex");
   const [agentStatus,setAgentStatus]=useState("");
@@ -273,7 +295,7 @@ export default function App(){
         {panel==="agent"?<><div className="contextTitle"><Bot size={18}/><h3>AI Agent</h3></div><p className="muted">Use Codex, Claude Code or OpenCode with scoped access to the active SSH host.</p><label className="fieldLabel">Agent</label><select value={agent} onChange={e=>setAgent(e.target.value as AgentKind)} aria-label="Select AI agent">{AGENTS.map(a=><option key={a.kind} value={a.kind}>{a.name}</option>)}</select><label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Launches an installed CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
         panel==="files"?<><div className="contextTitle"><FolderClosed size={18}/><h3>Remote files (SFTP)</h3></div><p className="muted">Read-only directory browsing over the authenticated SSH connection.</p><label className="fieldLabel">Remote directory</label><input aria-label="SFTP directory" value={sftpPath} onChange={e=>setSftpPath(e.target.value)} placeholder="." style={{width:"100%"}}/><button className="contextAction" disabled={!connected||!activeSsh||sftpBusy} onClick={()=>void browseSftp(sftpPath)}>{sftpBusy?"Reading directory…":"Browse directory"}</button>{sftpEntries?.session===activeSsh&&<div className="dockerInventory"><p className="muted">{sftpEntries.path} · {sftpEntries.items.length} entries</p><button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/..")} disabled={sftpBusy}>↑ Parent directory</button>{sftpEntries.items.map((item,index)=><div className="dockerItem" key={item.name+"-"+index}>{item.isDir?<button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/"+item.name)} disabled={sftpBusy}>📁 {item.name}</button>:<span>📄 {item.name}</span>}</div>)}</div>}{sftpError&&<p className="wizardError" role="alert">{sftpError}</p>}{!connected&&<div className="placeholder">Connect to the selected host before browsing.</div>}</>:
         panel==="docker"?<><div className="contextTitle"><Container size={18}/><h3>Docker containers</h3></div><p className="muted">Runs <code>docker ps -a</code> on the connected host using your SSH account. Read-only inventory.</p><button className="contextAction" disabled={!activeSsh||dockerBusy} onClick={()=>void refreshDocker()}>{dockerBusy?"Loading containers…":"Refresh containers"}</button>{dockerError&&<p className="wizardError" role="alert">{dockerError}</p>}{dockerInventory?.session===activeSsh?<div className="dockerInventory"><p className="muted">{dockerInventory.items.length} container(s)</p>{dockerInventory.items.map((item,index)=><div key={item.ID||index} className="dockerItem"><strong>{item.Names||item.ID||"Unnamed"}</strong><small>{item.Image||"Unknown image"}</small><span>{item.Status||item.State||"Unknown status"}</span>{item.Ports&&<small>{item.Ports}</small>}</div>)}</div>:<div className="placeholder"><Container size={23}/>{connected?"Click Refresh containers to fetch the real inventory.":"Connect to the server to inspect Docker."}</div>}</>:
-        <><div className="contextTitle"><Activity size={18}/><h3>Port forwarding</h3></div><p className="muted">Create local, remote or dynamic SSH tunnels when connected.</p><div className="placeholder"><Activity size={23}/>{connected?"SSH connected. Port forwarding is not implemented yet.":"No SSH session. Port forwarding is not implemented yet."}</div></>}
+        <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusy} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
       </div></aside>
     </div>
     {deleteTarget&&<div className="overlay" onMouseDown={()=>{setDeleteTarget(null);setError("")}}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm vault removal" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}<button aria-label="Close" onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button></div><p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted vault? This cannot be undone. Removing a host keeps its SSH key; removing a key used by a host is blocked.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<div className="wizardActions"><button onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button><button className="primary" onClick={()=>void confirmRemove()}>Confirm removal</button></div></div></div>}
