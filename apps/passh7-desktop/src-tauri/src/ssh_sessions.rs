@@ -296,68 +296,84 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::DockerList(response)) => {
-                            // Runs on a separate session channel; command is fixed by native code,
-                            // never constructed from untrusted renderer arguments.
-                            let listed = tokio::time::timeout(Duration::from_secs(20), async {
-                                let mut cmd = connection.channel_open_session().await
-                                    .map_err(|_| "Could not open remote command channel")?;
-                                cmd.exec(true, b"docker ps -a --format \"{{json .}}\"").await
-                                    .map_err(|_| "Docker command was rejected by the SSH server")?;
-                                let mut output = Vec::new();
-                                let mut exit_status = None;
-                                while let Some(message) = cmd.wait().await {
-                                    match message {
-                                        russh::ChannelMsg::Data { data } | russh::ChannelMsg::ExtendedData { data, .. } => {
-                                            if output.len().saturating_add(data.len()) > 2 * 1024 * 1024 {
-                                                return Err("Docker response exceeds 2 MiB".to_owned());
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker listing channel".to_owned())?;
+                                channel.exec(true,b"docker ps -a --format \"{{json .}}\"").await
+                                    .map_err(|_|"SSH server refused Docker inventory command".to_owned())?;
+                                Ok::<_,String>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker SSH channel setup timed out".into()));
+                            match setup {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let mut output=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await {
+                                                match message {
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if output.len().saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker inventory exceeds 2 MiB".to_owned());
+                                                        }
+                                                        output.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
                                             }
-                                            output.extend_from_slice(&data);
-                                        }
-                                        russh::ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
-                                        russh::ChannelMsg::Close => break,
-                                        _ => {}
-                                    }
+                                            let message=String::from_utf8_lossy(&output).into_owned();
+                                            if exit_status.unwrap_or(1)!=0{
+                                                return Err(format!("Docker inventory failed: {}",message.chars().take(500).collect::<String>()));
+                                            }
+                                            Ok::<String,String>(message)
+                                        }).await.unwrap_or_else(|_|Err("Docker inventory timed out after 20 seconds".into()));
+                                        let _=response.send(result);
+                                    });
                                 }
-                                let result = String::from_utf8_lossy(&output).into_owned();
-                                if exit_status.unwrap_or(1) != 0 {
-                                    return Err(format!("Docker listing failed: {}", result.chars().take(500).collect::<String>()));
-                                }
-                                Ok(result)
-                            }).await.unwrap_or_else(|_| Err("Docker listing timed out after 20 seconds".to_owned()));
-                            let _ = response.send(listed);
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::DockerLogs(container_id,response)) => {
-                            // The native IPC command only accepts a Docker hex ID.
-                            // No shell metacharacters or arbitrary commands can be supplied.
-                            let result = tokio::time::timeout(Duration::from_secs(20), async {
-                                let mut cmd = connection.channel_open_session().await
-                                    .map_err(|_| "Could not open Docker log channel".to_owned())?;
-                                let command = format!("docker logs --tail 200 --timestamps {container_id}");
-                                cmd.exec(true, command.as_bytes()).await
-                                    .map_err(|_| "SSH server rejected Docker log request".to_owned())?;
-                                let mut output = Vec::new();
-                                let mut exit_status = None;
-                                while let Some(message) = cmd.wait().await {
-                                    match message {
-                                        russh::ChannelMsg::Data { data } | russh::ChannelMsg::ExtendedData { data, .. } => {
-                                            if output.len().saturating_add(data.len()) > 512 * 1024 {
-                                                return Err("Docker log exceeds 512 KiB. Narrow the output in the SSH terminal.".to_owned());
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker log channel".to_owned())?;
+                                let command=format!("docker logs --tail 200 --timestamps {container_id}");
+                                channel.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"SSH server refused Docker logs command".to_owned())?;
+                                Ok::<_,String>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker log SSH channel setup timed out".into()));
+                            match setup {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let mut output=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await {
+                                                match message {
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if output.len().saturating_add(data.len())>512*1024{
+                                                            return Err("Docker logs exceed 512 KiB; inspect them in the SSH terminal".to_owned());
+                                                        }
+                                                        output.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
                                             }
-                                            output.extend_from_slice(&data);
-                                        },
-                                        russh::ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
-                                        russh::ChannelMsg::Close => break,
-                                        _ => {}
-                                    }
+                                            let message=String::from_utf8_lossy(&output).into_owned();
+                                            if exit_status.unwrap_or(1)!=0{
+                                                return Err(format!("Docker logs failed: {}",message.chars().take(500).collect::<String>()));
+                                            }
+                                            Ok::<String,String>(message)
+                                        }).await.unwrap_or_else(|_|Err("Docker logs timed out after 20 seconds".into()));
+                                        let _=response.send(result);
+                                    });
                                 }
-                                let result = String::from_utf8_lossy(&output).into_owned();
-                                if exit_status.unwrap_or(1) != 0 {
-                                    return Err(format!("Docker logs failed: {}",result.chars().take(500).collect::<String>()));
-                                }
-                                Ok(result)
-                            }).await.unwrap_or_else(|_|Err("Docker logs timed out after 20 seconds".to_owned()));
-                            let _=response.send(result);
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::DockerAction(action,container_id,response)) => {
@@ -403,51 +419,76 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
-                        Some(SessionCommand::SftpList(path, response)) => {
-                            let result = tokio::time::timeout(Duration::from_secs(20), async {
-                                let channel = connection.channel_open_session().await
-                                    .map_err(|e| format!("SFTP channel could not open: {e}"))?;
-                                channel.request_subsystem(true, "sftp").await
-                                    .map_err(|e| format!("SFTP subsystem refused: {e}"))?;
-                                let sftp = russh_sftp::client::SftpSession::new(channel.into_stream()).await
-                                    .map_err(|e| format!("SFTP initialization failed: {e}"))?;
-                                let entries = sftp.read_dir(path).await
-                                    .map_err(|e| format!("SFTP folder could not be read: {e}"))?;
-                                let mut result = Vec::new();
-                                for entry in entries {
-                                    if result.len() >= 2000 { break; }
-                                    let name = entry.file_name();
-                                    if name == "." || name == ".." { continue; }
-                                    result.push(SftpEntry {
-                                        name,
-                                        is_dir: entry.metadata().is_dir(),
-                                    });
-                                }
-                                result.sort_by(|a,b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-                                Ok::<_, String>(result)
-                            }).await.unwrap_or_else(|_| Err("SFTP listing timed out after 20 seconds".to_owned()));
-                            let _ = response.send(result);
-                            Ok(())
-                        },
-                        Some(SessionCommand::SftpRead(path,response)) => {
-                            let result=tokio::time::timeout(Duration::from_secs(20), async {
-                                use tokio::io::AsyncReadExt;
+                        Some(SessionCommand::SftpList(path,response)) => {
+                            // Only the SSH subsystem negotiation needs the connection handle.
+                            // Directory scanning and sorting happen outside the PTY loop.
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
                                 let channel=connection.channel_open_session().await
                                     .map_err(|e|format!("Could not open SFTP channel: {e}"))?;
                                 channel.request_subsystem(true,"sftp").await
+                                    .map_err(|e|format!("SFTP subsystem refused: {e}"))?;
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP channel setup timed out".into()));
+                            match opened {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|e|format!("SFTP initialization failed: {e}"))?;
+                                            let entries=sftp.read_dir(path).await
+                                                .map_err(|e|format!("SFTP folder could not be read: {e}"))?;
+                                            let mut result=Vec::new();
+                                            for entry in entries {
+                                                if result.len()>=2000 {break;}
+                                                let name=entry.file_name();
+                                                if name=="." || name==".." {continue;}
+                                                result.push(SftpEntry{name,is_dir:entry.metadata().is_dir()});
+                                            }
+                                            result.sort_by(|a,b|b.is_dir.cmp(&a.is_dir)
+                                                .then_with(||a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+                                            Ok::<Vec<SftpEntry>,String>(result)
+                                        }).await.unwrap_or_else(|_|Err("SFTP directory listing timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::SftpRead(path,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|e|format!("Could not open SFTP preview channel: {e}"))?;
+                                channel.request_subsystem(true,"sftp").await
                                     .map_err(|e|format!("SFTP subsystem unavailable: {e}"))?;
-                                let sftp=russh_sftp::client::SftpSession::new(channel.into_stream()).await
-                                    .map_err(|e|format!("SFTP initialization failed: {e}"))?;
-                                let mut file=sftp.open(path).await.map_err(|e|format!("Cannot open remote file: {e}"))?;
-                                const MAX:u64=262_144;
-                                let mut bytes=Vec::new();
-                                (&mut file).take(MAX+1).read_to_end(&mut bytes).await
-                                    .map_err(|e|format!("Cannot read remote file: {e}"))?;
-                                if bytes.len()>MAX as usize { return Err("File too large for preview (256 KiB limit)".to_owned()); }
-                                if bytes.contains(&0) { return Err("Binary file cannot be previewed as text".to_owned()); }
-                                String::from_utf8(bytes).map_err(|_|"Text preview requires UTF-8; use the terminal or a binary transfer tool".to_owned())
-                            }).await.unwrap_or_else(|_|Err("SFTP preview timed out after 20 seconds".to_owned()));
-                            let _=response.send(result);
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP preview channel setup timed out".into()));
+                            match opened {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        use tokio::io::AsyncReadExt;
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|e|format!("SFTP initialization failed: {e}"))?;
+                                            let mut file=sftp.open(path).await
+                                                .map_err(|e|format!("Cannot open remote file: {e}"))?;
+                                            const MAX:u64=262_144;
+                                            let mut bytes=Vec::new();
+                                            (&mut file).take(MAX+1).read_to_end(&mut bytes).await
+                                                .map_err(|e|format!("Cannot read remote file: {e}"))?;
+                                            if bytes.len()>MAX as usize {
+                                                return Err("File too large for preview (256 KiB limit)".into());
+                                            }
+                                            if bytes.contains(&0){
+                                                return Err("Binary file cannot be previewed as text".into());
+                                            }
+                                            String::from_utf8(bytes).map_err(|_|"Text preview requires UTF-8; download binary or non-UTF-8 files instead".into())
+                                        }).await.unwrap_or_else(|_|Err("SFTP text preview timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::SftpDownload(transfer_id,path,destination,response)) => {
@@ -867,6 +908,25 @@ mod transfer_tests{
         publish_download_exclusive(&stage,&target).await.unwrap();
         assert_eq!(tokio::fs::read(&target).await.unwrap(),b"new");
         assert!(!tokio::fs::try_exists(&stage).await.unwrap());
+        tokio::fs::remove_dir_all(folder).await.unwrap();
+    }
+    #[tokio::test]
+    async fn concurrent_download_publish_allows_only_one_winner(){
+        let folder=std::env::temp_dir().join(format!("passh7-publish-race-{}-{}",
+            std::process::id(),NEXT_ID.fetch_add(1,Ordering::Relaxed)));
+        tokio::fs::create_dir(&folder).await.unwrap();
+        let a=folder.join("first.part");
+        let b=folder.join("second.part");
+        let output=folder.join("final.bin");
+        tokio::fs::write(&a,b"first").await.unwrap();
+        tokio::fs::write(&b,b"second").await.unwrap();
+        let (one,two)=tokio::join!(
+            publish_download_exclusive(&a,&output),
+            publish_download_exclusive(&b,&output)
+        );
+        assert_ne!(one.is_ok(),two.is_ok(),"exactly one download must publish");
+        let content=tokio::fs::read(&output).await.unwrap();
+        assert!(content==b"first" || content==b"second");
         tokio::fs::remove_dir_all(folder).await.unwrap();
     }
     #[test]
