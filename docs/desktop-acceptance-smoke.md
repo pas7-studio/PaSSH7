@@ -20,6 +20,11 @@ during this checklist. Use a throwaway identity and Docker container.
 
 | ID | Scenario | Expected result |
 | --- | --- | --- |
+| JUMP-01 | Connect pinned public gateway (e.g. Main Server); add target private IP `192.168.1.20`, select Via Main Server, then Connect | Target fingerprint is discovered via gateway and verified independently; target password/key authenticates end-to-end; UI shows route and session state |
+| JUMP-02 | Connect private target, start SFTP, Docker, remote agent, and port-forward on its session | Each operation reaches private TARGET through nested SSH, never gateway shell; local private keys are never uploaded to gateway |
+| JUMP-03 | Drop/lock gateway, attempt private target connection while gateway is offline | Actionable gateway-not-connected error; dependent nested session exits instead of falsely staying connected |
+| JUMP-04 | Configure self-hop, missing gateway, gateway without host-key pin, or two-hop cycle | Vault refuses configuration; existing route remains intact |
+| JUMP-05 | Reject target fingerprint, force forwarding disabled in gateway sshd, change internal target address | Independent target pin is never bypassed; actionable SSH forwarding/network failure, no fallback to direct or TOFU trust |
 | SSH-01 | Unlock vault with correct password; list hosts | Saved hosts/identities appear, no secrets are rendered |
 | SSH-01A | Create a new Windows/Linux host using **Password only** with no generated or imported SSH identity | Host saves, independent host-key pin is verified, password login opens PTY and works |
 | SSH-01B | Generate/import a key after initial password login, install PUBLIC key remotely, attach it to the existing host | Host keeps same alias; key-based or key+password authentication works without creating a duplicate profile |

@@ -45,6 +45,7 @@ enum SessionCommand {
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardList(tokio::sync::oneshot::Sender<Vec<ActiveLocalForward>>),
     ForwardOpen(tokio::net::TcpStream,String,u16),
+    JumpOpen(String,u16,tokio::sync::oneshot::Sender<Result<russh::ChannelStream<russh::client::Msg>,String>>),
 }
 
 #[derive(Clone, Serialize)]
@@ -213,6 +214,28 @@ impl SshSessionManager {
             .ok_or_else(||"SSH session no longer exists".to_owned())
     }
 
+    /// Jump traffic runs only over an already authenticated, pinned gateway
+    /// session; the local machine never contacts the target's private address.
+    pub async fn jump_stream(&self,gateway_alias:&str,target:&str,port:u16)
+        ->Result<russh::ChannelStream<russh::client::Msg>,String>{
+        if target.trim().is_empty()||target.len()>253||port==0||
+            target.chars().any(|c|c.is_whitespace()||c.is_control()){
+            return Err("Invalid private SSH target hostname or port".into());
+        }
+        let sender={
+            let sessions=self.channels.lock().map_err(|_|"SSH session manager unavailable".to_owned())?;
+            sessions.iter().find(|(_,session)|session.alias==gateway_alias)
+                .map(|(_,session)|session.sender.clone())
+                .ok_or_else(||format!("Jump gateway {gateway_alias} is not connected. Connect it first."))?
+        };
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        sender.send(SessionCommand::JumpOpen(target.to_owned(),port,tx)).await
+            .map_err(|_|"Gateway SSH session closed before tunnel setup")?;
+        tokio::time::timeout(Duration::from_secs(15),rx).await
+            .map_err(|_|"Gateway could not open private SSH tunnel within 15 seconds".to_owned())?
+            .map_err(|_|"Gateway SSH tunnel setup interrupted".to_owned())?
+    }
+
     pub fn active_sessions(&self) -> Result<Vec<OpenedSession>, String> {
         let guard = self.channels.lock().map_err(|_| "Session manager unavailable".to_owned())?;
         let mut sessions: Vec<OpenedSession> = guard.iter().map(|(id, session)| OpenedSession {
@@ -255,6 +278,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let data = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         let host = data.hosts.iter().find(|h| h.alias == alias)
             .ok_or_else(|| "Host not found".to_owned())?.clone();
+        let jump=host.extensions.get("passh7_jump_alias")
+            .and_then(|v|v.as_str()).filter(|s|!s.is_empty());
+        crate::validate_jump_host(&data,&alias,jump).map_err(safe_err)?;
         let identity = if auth_mode == "password" {
             None
         } else {
@@ -286,9 +312,18 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         nodelay: true,
         inactivity_timeout: Some(Duration::from_secs(600)), ..Default::default()
     });
-    let mut connection = tokio_timeout_connect(config,
-        (host.hostname.as_str(), host.port),
-        PinnedSshClient { expected_pin: pin }).await?;
+    let jump_alias=host.extensions.get("passh7_jump_alias")
+        .and_then(|v|v.as_str()).filter(|s|!s.is_empty());
+    let mut connection=if let Some(gateway)=jump_alias {
+        let stream=manager.jump_stream(gateway,&host.hostname,host.port).await?;
+        tokio::time::timeout(Duration::from_secs(15),russh::client::connect_stream(
+            config,stream,PinnedSshClient{expected_pin:pin}
+        )).await.map_err(|_|"Nested SSH handshake over jump gateway timed out".to_owned())?
+            .map_err(|_|"Target SSH handshake or pinned host key validation failed through gateway".to_owned())?
+    }else{
+        tokio_timeout_connect(config,(host.hostname.as_str(),host.port),
+            PinnedSshClient{expected_pin:pin}).await?
+    };
 
     if auth_mode == "password" {
         let mut password = account_password.take().filter(|p| !p.is_empty())
@@ -520,6 +555,18 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                     }
                                 }
                             }
+                            Ok(())
+                        },
+                        Some(SessionCommand::JumpOpen(target,port,response)) => {
+                            // The gateway resolves/reaches the private address via direct-tcpip.
+                            // We never run ssh(1) on the gateway and never forward local keys.
+                            let opened=tokio::time::timeout(Duration::from_secs(12),
+                                connection.channel_open_direct_tcpip(target,port as u32,"127.0.0.1",0)
+                            ).await.map_err(|_|"Gateway SSH direct-tcpip timed out".to_owned())
+                                .and_then(|r|r.map_err(|e|format!(
+                                    "Gateway rejected forwarding to private SSH target: {e}"
+                                )));
+                            let _=response.send(opened.map(|channel|channel.into_stream()));
                             Ok(())
                         },
                         Some(SessionCommand::AgentProbe(binary,response)) => {
