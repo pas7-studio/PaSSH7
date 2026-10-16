@@ -108,3 +108,8 @@ export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey
 export async function listDockerContainers(sessionId:string):Promise<string>{
   return invoke<string>("ssh_session_docker_list",{id:sessionId});
 }
+
+export type SftpEntry={name:string;isDir:boolean};
+export async function listSftpDirectory(sessionId:string,path:string):Promise<SftpEntry[]>{
+  return invoke<SftpEntry[]>("ssh_session_sftp_list",{id:sessionId,path});
+}
