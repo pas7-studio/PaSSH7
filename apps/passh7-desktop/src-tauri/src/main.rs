@@ -213,6 +213,11 @@ async fn vault_restore_inspect(
     let chosen=rx.await.map_err(|_|"Backup file selection failed")?;
     let Some(chosen)=chosen else{return Ok(None)};
     let path=chosen.into_path().map_err(|_|"Choose a local encrypted backup file")?;
+    let meta=std::fs::metadata(&path)
+        .map_err(|e|format!("Cannot inspect selected encrypted backup: {e}"))?;
+    if !meta.is_file() || meta.len()>16*1024*1024{
+        return Err("Select an encrypted backup file no larger than 16 MiB".into());
+    }
     let bytes=std::fs::read(&path).map_err(|e|format!("Cannot read selected backup: {e}"))?;
     prepare_vault_restore_preview(bytes,&sessions,&pending).map(Some)
 }
