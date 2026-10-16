@@ -24,6 +24,7 @@ during this checklist. Use a throwaway identity and Docker container.
 | SSH-01A | Create a new Windows/Linux host using **Password only** with no generated or imported SSH identity | Host saves, independent host-key pin is verified, password login opens PTY and works |
 | SSH-01B | Generate/import a key after initial password login, install PUBLIC key remotely, attach it to the existing host | Host keeps same alias; key-based or key+password authentication works without creating a duplicate profile |
 | SSH-01C | Select an invalid or missing SSH key for a host | Native Vault refuses unknown identity; already-saved host remains intact |
+| SSH-01D | Import local OpenSSH config containing direct hosts, wildcard entries, ProxyJump and Include | Only direct, supported host profiles appear in the preview; SSH user is editable; selected hosts are imported without secrets or trusted fingerprints; duplicate aliases are skipped |
 | SSH-02 | Connect with pin verified independently | Shell prompt visible, terminal accepts keyboard input |
 | SSH-03 | Close terminal; repeat with invalid credentials | Disconnected dot appears; actionable authentication error |
 | SSH-04 | Check **Remember authentication**, successfully connect, lock and unlock, use **Quick connect** | No password prompts when saved valid credentials can be reused |
