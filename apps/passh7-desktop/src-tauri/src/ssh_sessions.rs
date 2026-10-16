@@ -1,6 +1,7 @@
-use std::{collections::HashMap, sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex}, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex}, time::Duration};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_dialog::DialogExt;
 use tokio::sync::mpsc;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
@@ -8,6 +9,7 @@ use crate::{SessionStore, PinnedSshClient, safe_err, vault_path, tokio_timeout_c
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 const EVENT: &str = "passh7:ssh-session";
+const MAX_TRANSFER: u64 = 64 * 1024 * 1024;
 
 #[derive(Default, Clone)]
 pub struct SshSessionManager {
@@ -30,6 +32,8 @@ enum SessionCommand {
     DockerLogs(String,tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
+    SftpDownload(String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
+    SftpUpload(String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardOpen(tokio::net::TcpStream,String,u16),
@@ -327,6 +331,97 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let _=response.send(result);
                             Ok(())
                         },
+                        Some(SessionCommand::SftpDownload(path,destination,response)) => {
+                            use tokio::io::AsyncReadExt;
+                            let local_name = destination.file_name().and_then(|s|s.to_str()).unwrap_or("download");
+                            let staging = destination.with_file_name(format!(
+                                ".{local_name}.passh7-{}.part", NEXT_ID.fetch_add(1, Ordering::Relaxed)
+                            ));
+                            let mut abort=cancelled.clone();
+                            let outcome = tokio::select! {
+                                changed=abort.changed() => {
+                                    let _=changed;
+                                    Err("SFTP download cancelled: SSH session was locked or closed".to_owned())
+                                },
+                                result=tokio::time::timeout(Duration::from_secs(90),async {
+                                    let ch=connection.channel_open_session().await
+                                        .map_err(|e|format!("SFTP download channel failed: {e}"))?;
+                                    ch.request_subsystem(true,"sftp").await
+                                        .map_err(|e|format!("SFTP subsystem unavailable: {e}"))?;
+                                    let sftp=russh_sftp::client::SftpSession::new(ch.into_stream()).await
+                                        .map_err(|e|format!("SFTP initialization failed: {e}"))?;
+                                    let remote=sftp.open(path).await
+                                        .map_err(|e|format!("Cannot open remote file for download: {e}"))?;
+                                    let mut local=tokio::fs::OpenOptions::new().write(true).create_new(true)
+                                        .open(&staging).await.map_err(|e|format!("Cannot create temporary download: {e}"))?;
+                                    let copied=tokio::io::copy(&mut remote.take(MAX_TRANSFER+1),&mut local).await
+                                        .map_err(|e|format!("SFTP download failed: {e}"))?;
+                                    if copied>MAX_TRANSFER {return Err(format!("File exceeds 64 MiB download limit ({copied} bytes read)"));}
+                                    tokio::io::AsyncWriteExt::flush(&mut local).await
+                                        .map_err(|e|format!("Cannot flush local download: {e}"))?;
+                                    drop(local);
+                                    // Never silently replace an existing local file.
+                                    if tokio::fs::try_exists(&destination).await.unwrap_or(true) {
+                                        return Err("Local file already exists; select a new download name".into());
+                                    }
+                                    tokio::fs::rename(&staging,&destination).await
+                                        .map_err(|e|format!("Cannot move completed download to destination: {e}"))?;
+                                    Ok::<u64,String>(copied)
+                                }) => result.unwrap_or_else(|_|Err("SFTP download timed out after 90 seconds".into()))
+                            };
+                            if outcome.is_err(){let _=tokio::fs::remove_file(&staging).await;}
+                            let _=response.send(outcome);
+                            Ok(())
+                        },
+                        Some(SessionCommand::SftpUpload(directory,source,response)) => {
+                            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                            let mut abort=cancelled.clone();
+                            let result=tokio::select! {
+                                changed=abort.changed() => {
+                                    let _=changed;
+                                    Err("SFTP upload cancelled: SSH session was locked or closed".to_owned())
+                                },
+                                outcome=tokio::time::timeout(Duration::from_secs(90),async {
+                                    let size=tokio::fs::metadata(&source).await
+                                        .map_err(|e|format!("Cannot stat local file: {e}"))?;
+                                    if !size.is_file(){return Err("Selected item is not a regular file".into());}
+                                    if size.len()>MAX_TRANSFER{return Err("File exceeds 64 MiB upload limit".into());}
+                                    let file_name=source.file_name().and_then(|n|n.to_str())
+                                        .ok_or("Selected filename is not valid UTF-8")?;
+                                    if !safe_sftp_filename(file_name){return Err("Selected filename is not safe for SFTP".into());}
+                                    let remote_path=join_sftp_path(&directory,file_name);
+                                    let ch=connection.channel_open_session().await
+                                        .map_err(|e|format!("SFTP upload channel failed: {e}"))?;
+                                    ch.request_subsystem(true,"sftp").await
+                                        .map_err(|e|format!("SFTP subsystem unavailable: {e}"))?;
+                                    let sftp=russh_sftp::client::SftpSession::new(ch.into_stream()).await
+                                        .map_err(|e|format!("SFTP initialization failed: {e}"))?;
+                                    let mut local=tokio::fs::File::open(&source).await
+                                        .map_err(|e|format!("Cannot open local file: {e}"))?;
+                                    // CREATE | EXCLUDE prevents accidental remote overwrites.
+                                    let mut remote=sftp.open_with_flags(
+                                        remote_path.clone(),
+                                        russh_sftp::protocol::OpenFlags::CREATE |
+                                        russh_sftp::protocol::OpenFlags::EXCLUDE |
+                                        russh_sftp::protocol::OpenFlags::WRITE
+                                    ).await.map_err(|e|format!("Cannot create remote file (file may already exist): {e}"))?;
+                                    let copied=tokio::io::copy(&mut local.take(MAX_TRANSFER+1),&mut remote).await;
+                                    let finished=match copied {
+                                        Ok(n) if n<=MAX_TRANSFER => remote.shutdown().await
+                                            .map_err(|e|format!("Cannot finalize SFTP upload: {e}")).map(|_|n),
+                                        Ok(_) => Err("Upload exceeded 64 MiB limit".into()),
+                                        Err(e) => Err(format!("SFTP upload failed: {e}"))
+                                    };
+                                    if finished.is_err() {
+                                        // Best effort; partial remote files may remain after a network loss.
+                                        let _=sftp.remove_file(remote_path).await;
+                                    }
+                                    finished
+                                }) => outcome.unwrap_or_else(|_|Err("SFTP upload timed out after 90 seconds".into()))
+                            };
+                            let _=response.send(result);
+                            Ok(())
+                        },
                         Some(SessionCommand::ForwardStart(local_port,target_host,remote_port,response)) => {
                             if forwarders.contains_key(&local_port) {
                                 let _ = response.send(Err("Local port already forwarded by this session".into()));
@@ -492,6 +587,76 @@ pub async fn ssh_session_sftp_read_text(id:String,path:String,manager:State<'_,S
     manager.sender(&id)?.send(SessionCommand::SftpRead(path,tx)).await
         .map_err(|_|"SSH connection has closed".to_owned())?;
     rx.await.map_err(|_|"SFTP preview was cancelled".to_owned())?
+}
+
+fn safe_sftp_filename(name:&str)->bool{
+    !name.is_empty() && name!="." && name!=".." &&
+    !name.contains('/') && !name.contains('\\') &&
+    !name.chars().any(|c|c.is_control()) && name.len()<=255
+}
+fn join_sftp_path(dir:&str,name:&str)->String{
+    format!("{}/{}",dir.trim_end_matches('/'),name)
+}
+fn valid_sftp_path(path:&str)->bool{
+    !path.is_empty() && path.len()<=4096 && !path.as_bytes().contains(&0)
+}
+
+#[tauri::command]
+pub async fn ssh_session_sftp_download(
+    id:String,path:String,manager:State<'_,SshSessionManager>,app:AppHandle
+)->Result<Option<String>,String>{
+    if !valid_sftp_path(&path){return Err("Invalid remote download path".into());}
+    let remote_name=path.rsplit('/').next().unwrap_or("");
+    if !safe_sftp_filename(remote_name){return Err("Select a regular file to download".into());}
+    let sender=manager.sender(&id)?;
+    let (selected_tx,selected_rx)=tokio::sync::oneshot::channel();
+    app.dialog().file().set_file_name(remote_name).save_file(move |selection|{
+        let _=selected_tx.send(selection);
+    });
+    let selected=selected_rx.await.map_err(|_|"Save dialog did not respond")?;
+    let Some(selected)=selected else{return Ok(None)};
+    let destination=selected.into_path().map_err(|_|"Only local filesystem destinations are supported")?;
+    let file_label=destination.file_name().and_then(|s|s.to_str()).unwrap_or("file").to_owned();
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    sender.send(SessionCommand::SftpDownload(path,destination,tx)).await
+        .map_err(|_|"SSH connection closed before download")?;
+    let bytes=rx.await.map_err(|_|"Download interrupted by SSH disconnection")??;
+    Ok(Some(format!("Downloaded {bytes} bytes to {file_label}")))
+}
+
+#[tauri::command]
+pub async fn ssh_session_sftp_upload(
+    id:String,directory:String,manager:State<'_,SshSessionManager>,app:AppHandle
+)->Result<Option<String>,String>{
+    if !valid_sftp_path(&directory){return Err("Invalid destination directory".into());}
+    let sender=manager.sender(&id)?;
+    let (selected_tx,selected_rx)=tokio::sync::oneshot::channel();
+    app.dialog().file().pick_file(move |selection|{let _=selected_tx.send(selection);});
+    let selected=selected_rx.await.map_err(|_|"Open file dialog did not respond")?;
+    let Some(selected)=selected else{return Ok(None)};
+    let source=selected.into_path().map_err(|_|"Only local filesystem uploads are supported")?;
+    let file_label=source.file_name().and_then(|s|s.to_str())
+        .ok_or("Selected local filename is invalid UTF-8")?.to_owned();
+    if !safe_sftp_filename(&file_label){return Err("Selected local filename is not safe for upload".into());}
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    sender.send(SessionCommand::SftpUpload(directory,source,tx)).await
+        .map_err(|_|"SSH connection closed before upload")?;
+    let bytes=rx.await.map_err(|_|"Upload interrupted by SSH disconnection")??;
+    Ok(Some(format!("Uploaded {bytes} bytes as {file_label}")))
+}
+
+#[cfg(test)]
+mod transfer_tests{
+    use super::*;
+    #[test]
+    fn denies_remote_path_separator_and_dot_filename(){
+        for name in ["","..",".","a/b","a\\b","bad\0name"]{
+            assert!(!safe_sftp_filename(name));
+        }
+        assert!(safe_sftp_filename("report 2026.zip"));
+        assert_eq!(join_sftp_path("/home/ubuntu/","result.bin"),"/home/ubuntu/result.bin");
+        assert_eq!(join_sftp_path(".","file.txt"),"./file.txt");
+    }
 }
 
 #[tauri::command]
