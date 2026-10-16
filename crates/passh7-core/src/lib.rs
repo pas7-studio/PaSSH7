@@ -174,7 +174,7 @@ impl Vault {
             if let Some(pin) = &h.pinned_host_key {
                 hostkey::validate_fingerprint(pin)?;
             }
-            if !keys.contains(h.identity_alias.as_str()) {
+            if !h.identity_alias.is_empty() && !keys.contains(h.identity_alias.as_str()) {
                 return Err(HubError::InvalidInput("host references missing identity"));
             }
         }
@@ -376,7 +376,7 @@ mod tests {
         assert!(matches!(vault.set_host_identity("lab","missing"),
             Err(HubError::InvalidInput("unknown identity alias"))));
         vault.add_identity(Identity{
-            alias:"lab-key".into(),private_key_pem:"--- private key test ---".into(),
+            alias:"lab-key".into(),private_key_pem:"-----BEGIN OPENSSH PRIVATE KEY-----\nTEST\n-----END OPENSSH PRIVATE KEY-----".into(),
             extensions:Default::default()
         }).unwrap();
         vault.set_host_identity("lab","lab-key").unwrap();
