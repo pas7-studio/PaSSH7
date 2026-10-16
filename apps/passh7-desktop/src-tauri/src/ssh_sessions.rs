@@ -52,27 +52,39 @@ impl SshSessionManager {
 }
 
 #[tauri::command]
-pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>, auth_mode: Option<String>, key_passphrase: Option<String>,
+pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>, auth_mode: Option<String>, key_passphrase: Option<String>, use_saved_credentials: Option<bool>,
     vault: State<'_, SessionStore>, manager: State<'_, SshSessionManager>, app: AppHandle
 ) -> Result<OpenedSession, String> {
     if !(20..=500).contains(&cols) || !(5..=200).contains(&rows) {
         return Err("Invalid PTY dimensions".into());
     }
     let mut account_password = account_password.map(zeroize::Zeroizing::new);
-    let key_passphrase = zeroize::Zeroizing::new(key_passphrase.unwrap_or_default());
+    let mut key_passphrase = zeroize::Zeroizing::new(key_passphrase.unwrap_or_default());
     let auth_mode = auth_mode.as_deref().unwrap_or("key");
     if !matches!(auth_mode, "key" | "password" | "key-password") {
         return Err("Unsupported SSH authentication mode".into());
     }
     let generation = manager.generation.load(Ordering::SeqCst);
-    let (host, secret) = vault.use_password(|password| {
+    let (host, secret, saved_account, saved_key_passphrase) = vault.use_password(|password| {
         let data = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         let host = data.hosts.iter().find(|h| h.alias == alias)
             .ok_or_else(|| "Host not found".to_owned())?.clone();
         let identity = data.identities.iter().find(|i| i.alias == host.identity_alias)
             .ok_or_else(|| "SSH identity missing".to_owned())?;
-        Ok((host, zeroize::Zeroizing::new(identity.private_key_pem.clone())))
+        let saved = if use_saved_credentials.unwrap_or(false) {
+            host.extensions.get("passh7_saved_auth").filter(|v| v.get("mode").and_then(|m| m.as_str()) == Some(auth_mode))
+        } else { None };
+        let saved_account = saved.and_then(|v| v.get("account_password")).and_then(|v| v.as_str()).unwrap_or_default();
+        let saved_key = saved.and_then(|v| v.get("key_passphrase")).and_then(|v| v.as_str()).unwrap_or_default();
+        Ok((host, zeroize::Zeroizing::new(identity.private_key_pem.clone()),
+            zeroize::Zeroizing::new(saved_account.to_owned()), zeroize::Zeroizing::new(saved_key.to_owned())))
     })?;
+    if account_password.as_ref().map(|v| v.is_empty()).unwrap_or(true) && !saved_account.is_empty() {
+        account_password = Some(saved_account);
+    }
+    if key_passphrase.is_empty() && !saved_key_passphrase.is_empty() {
+        key_passphrase = saved_key_passphrase;
+    }
     let pin = host.pinned_host_key.clone().ok_or("Host key is not pinned")?;
     passh7_core::hostkey::validate_fingerprint(&pin).map_err(safe_err)?;
     let key = if auth_mode != "password" {
