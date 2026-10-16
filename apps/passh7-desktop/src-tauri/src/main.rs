@@ -138,9 +138,11 @@ async fn vault_export_encrypted_backup(
         let _=passh7_core::decrypt(&data,password).map_err(safe_err)?;
         Ok(data)
     })?;
+    let mut created=false;
     let result=(||->Result<(),String>{
         let mut file=std::fs::OpenOptions::new().create_new(true).write(true)
             .open(&target).map_err(|e|format!("Cannot create new backup file (it may already exist): {e}"))?;
+        created=true;
         file.write_all(&data).map_err(|e|format!("Cannot write encrypted backup: {e}"))?;
         file.sync_all().map_err(|e|format!("Cannot sync encrypted backup: {e}"))?;
         drop(file);
@@ -148,7 +150,7 @@ async fn vault_export_encrypted_backup(
         if readback!=data{return Err("Exported encrypted bytes did not match the Vault".into());}
         Ok(())
     })();
-    if result.is_err(){let _=std::fs::remove_file(&target);}
+    if result.is_err() && created{let _=std::fs::remove_file(&target);}
     result?;
     Ok(Some(format!("Encrypted Vault exported and verified ({} bytes)",data.len())))
 }
