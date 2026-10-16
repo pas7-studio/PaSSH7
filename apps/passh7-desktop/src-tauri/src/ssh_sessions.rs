@@ -40,12 +40,21 @@ enum SessionCommand {
     SftpFinished(String),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
+    ForwardList(tokio::sync::oneshot::Sender<Vec<ActiveLocalForward>>),
     ForwardOpen(tokio::net::TcpStream,String,u16),
 }
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct SftpEntry { pub name: String, pub is_dir: bool }
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct ActiveLocalForward {
+    pub local_port:u16,
+    pub target_host:String,
+    pub remote_port:u16,
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
@@ -257,7 +266,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut buffered = 0usize;
         let mut overflowed = false;
         let mut closure_detail: Option<String> = None;
-        let mut forwarders: HashMap<u16,tokio::sync::oneshot::Sender<()>> = HashMap::new();
+        let mut forwarders: HashMap<u16,(tokio::sync::oneshot::Sender<()>,String,u16)> = HashMap::new();
         let mut transfers: HashMap<String,tokio::sync::watch::Sender<bool>> = HashMap::new();
         loop {
             tokio::select! {
@@ -633,7 +642,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 match tokio::net::TcpListener::bind(("127.0.0.1",local_port)).await {
                                     Ok(listener) => {
                                         let (stop_tx,mut stop_rx) = tokio::sync::oneshot::channel::<()>();
-                                        forwarders.insert(local_port,stop_tx);
+                                        forwarders.insert(local_port,(stop_tx,target_host.clone(),remote_port));
                                         let tx = forward_sender.clone();
                                         let mut cancel = cancelled.clone();
                                         tauri::async_runtime::spawn(async move {
@@ -660,12 +669,21 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::ForwardStop(local_port,response)) => {
-                            if let Some(cancel)=forwarders.remove(&local_port){
+                            if let Some((cancel,_,_))=forwarders.remove(&local_port){
                                 let _ = cancel.send(());
                                 let _ = response.send(Ok(()));
                             }else{
                                 let _ = response.send(Err("No active local forwarding on this port".into()));
                             }
+                            Ok(())
+                        },
+                        Some(SessionCommand::ForwardList(response)) => {
+                            let mut records:Vec<ActiveLocalForward>=forwarders.iter()
+                                .map(|(port,(_,host,remote_port))|ActiveLocalForward{
+                                    local_port:*port,target_host:host.clone(),remote_port:*remote_port
+                                }).collect();
+                            records.sort_by_key(|r|r.local_port);
+                            let _=response.send(records);
                             Ok(())
                         },
                         Some(SessionCommand::ForwardOpen(mut socket,target_host,remote_port)) => {
@@ -716,7 +734,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                 }
             }
         }
-        for (_,stop) in forwarders.drain() { let _=stop.send(()); }
+        for (_, (stop,_,_)) in forwarders.drain() { let _=stop.send(()); }
         for (_,cancel) in transfers.drain() { let _=cancel.send(true); }
         let _ = channel.close().await;
         let _ = connection.disconnect(russh::Disconnect::ByApplication, "Session closed", "en").await;
@@ -950,6 +968,15 @@ pub async fn ssh_session_forward_start(id:String,local_port:u16,target_host:Stri
     manager.sender(&id)?.send(SessionCommand::ForwardStart(local_port,target_host,remote_port,tx)).await
         .map_err(|_|"SSH connection has closed".to_owned())?;
     rx.await.map_err(|_|"Port forwarding request cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_forward_list(id:String,manager:State<'_,SshSessionManager>)
+    ->Result<Vec<ActiveLocalForward>,String>{
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::ForwardList(tx)).await
+        .map_err(|_|"SSH connection has closed".to_owned())?;
+    rx.await.map_err(|_|"Port forwarding inventory cancelled".to_owned())
 }
 
 #[tauri::command]

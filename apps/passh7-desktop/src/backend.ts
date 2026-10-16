@@ -136,6 +136,10 @@ export async function listSftpDirectory(sessionId:string,path:string):Promise<Sf
 export async function startLocalForward(sessionId:string,localPort:number,targetHost:string,remotePort:number):Promise<void>{
   return invoke("ssh_session_forward_start",{id:sessionId,localPort,targetHost,remotePort});
 }
+export type NativeLocalForward={localPort:number;targetHost:string;remotePort:number};
+export async function listLocalForwards(sessionId:string):Promise<NativeLocalForward[]>{
+  return invoke<NativeLocalForward[]>("ssh_session_forward_list",{id:sessionId});
+}
 export async function stopLocalForward(sessionId:string,localPort:number):Promise<void>{
   return invoke("ssh_session_forward_stop",{id:sessionId,localPort});
 }

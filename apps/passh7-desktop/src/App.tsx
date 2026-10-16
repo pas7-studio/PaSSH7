@@ -1,8 +1,8 @@
-import {useCallback} from "react";
+import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,discoverSshHostKey,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -20,6 +20,9 @@ const tabs: {id:Panel;label:string; Icon:typeof Bot}[]=[
 export default function App(){
   const [selected,setSelected]=useState("dev");
   const [sshTabs,setSshTabs]=useState<{id:string;alias:string}[]>([]);
+  // Native session events use a stable callback; its owner map stays fresh.
+  const sshTabsRef=useRef(sshTabs);
+  useEffect(()=>{sshTabsRef.current=sshTabs},[sshTabs]);
   const [activeSsh,setActiveSsh]=useState("");
   const [sshBusy,setSshBusy]=useState(false);
   const [loginOpen,setLoginOpen]=useState(false);
@@ -41,16 +44,36 @@ export default function App(){
     setActiveSsh(matching?.id??"");
   },[sshTabs,activeSsh,selected]);
   const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
-  const [sessionNotice,setSessionNotice]=useState("");
+  // The backend owns active TCP listeners. Recover them after WebView reload
+  // and when a previously existing native terminal session becomes visible.
+  useEffect(()=>{
+    if(!vaultUnlocked||!desktopAvailable()||sshTabs.length===0)return;
+    let live=true;
+    const ids=new Set(sshTabs.map(s=>s.id));
+    void Promise.all(sshTabs.map(async session=>{
+      try{
+        const items=await listLocalForwards(session.id);
+        return items.map(item=>({session:session.id,...item}));
+      }catch{return [] as {session:string;localPort:number;targetHost:string;remotePort:number}[]}
+    })).then(groups=>{
+      if(!live)return;
+      setTunnels(previous=>[
+        ...previous.filter(t=>!ids.has(t.session)),...groups.flat()
+      ]);
+    });
+    return()=>{live=false};
+  },[vaultUnlocked,sshTabs]);
+  const [sessionNotice,setSessionNotice]=useState<{alias:string;detail:string}|null>(null);
   const onSessionClosed=useCallback((id:string,detail?:string)=>{
+    const alias=sshTabsRef.current.find(t=>t.id===id)?.alias||"";
     setSshTabs(t=>t.filter(x=>x.id!==id));
     setTunnels(t=>t.filter(x=>x.session!==id));
     setActiveSsh(current=>current===id?"":current);
-    if(detail)setSessionNotice(detail);
+    if(detail)setSessionNotice({alias,detail});
   },[]);
   const [hosts,setHosts]=useState<Host[]>(desktopAvailable()?[]:DEMO_HOSTS);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
-  useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setTunnels([]);setActiveSsh("");setSessionNotice("")}},[vaultUnlocked]);
+  useEffect(()=>{if(!vaultUnlocked){setSshTabs([]);setTunnels([]);setActiveSsh("");setSessionNotice(null)}},[vaultUnlocked]);
   // The native SSH session manager is authoritative. Reconcile after a remote
   // disconnect, missed Tauri close event, sleep/resume, or vault expiration.
   useEffect(()=>{
@@ -69,7 +92,7 @@ export default function App(){
         });
         if(lost.length){
           setTunnels(current=>current.filter(t=>!lost.some(s=>s.id===t.session)));
-          setSessionNotice("SSH session closed unexpectedly. Reconnect to restore Files, Docker and tunnels.");
+          setSessionNotice({alias:lost[0]?.alias||"",detail:"SSH session closed unexpectedly. Reconnect to restore Files, Docker and tunnels."});
         }
       }catch{/* A transient IPC error must not mark an authenticated session offline. */}
     };
@@ -121,6 +144,39 @@ export default function App(){
   useEffect(()=>{if(desktopAvailable()){void vaultExists().then(setVaultPresent).catch(()=>setVaultPresent(false))}},[]);
   const lockVault=async()=>{await lockNativeVault();setVaultPassword("");setVaultUnlocked(false);setHosts([]);setIdentities([])};
   const unlockVault=async()=>{try{if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}await unlockNativeVault(vaultPassword);setVaultPassword("");const saved=await getHosts();setIdentities(await getIdentities());setHosts(saved.map((h,i)=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode})));setSelected(saved[0]?.alias||"");setVaultUnlocked(true);setVaultDialog(false);setError("")}catch(e){setError(String(e))}};
+  // A WebView refresh can remount React without terminating the Rust process.
+  // Recover ONLY an already-unlocked native vault and already-open sessions;
+  // never auto-unlock persisted vault data or request secret material.
+  useEffect(()=>{
+    if(!desktopAvailable())return;
+    let mounted=true;
+    const restore=async()=>{
+      try{
+        if(!await vaultStatus())return;
+        const [saved,identities,live]=await Promise.all([
+          getHosts(),getIdentities(),listLiveSshSessions()
+        ]);
+        if(!mounted)return;
+        const allowed=new Set(saved.map(h=>h.alias));
+        const sessions=live.filter(t=>allowed.has(t.alias));
+        setHosts(saved.map(h=>({
+          id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
+          group:"My hosts",fingerprint:h.hostKeyPinned,
+          hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode
+        })));
+        setIdentities(identities);
+        sshTabsRef.current=sessions;
+        setSshTabs(sessions);
+        setSelected(sessions[0]?.alias||saved[0]?.alias||"");
+        setActiveSsh(sessions[0]?.id||"");
+        setVaultUnlocked(true);
+      }catch(error){
+        if(mounted)setError("Could not restore the active Vault window: "+String(error));
+      }
+    };
+    void restore();
+    return()=>{mounted=false};
+  },[]);
   useEffect(()=>{if(!desktopAvailable()||!vaultUnlocked)return;const id=window.setInterval(()=>{void vaultStatus().then(ok=>{if(!ok){setVaultUnlocked(false);setHosts([]);setSelected("");}}).catch(()=>{})},30000);return ()=>window.clearInterval(id)},[vaultUnlocked]);
   const [addOpen,setAddOpen]=useState(false);
   const [step,setStep]=useState(0);
@@ -225,6 +281,20 @@ export default function App(){
       await startLocalForward(session.id,tunnelLocalPort,tunnelRemoteHost,tunnelRemotePort);
       setTunnels(v=>[...v,{session:session.id,localPort:tunnelLocalPort,targetHost:tunnelRemoteHost,remotePort:tunnelRemotePort}]);
     }catch(e){setTunnelError(String(e))}
+    finally{setTunnelBusy(false)}
+  };
+  const refreshLocalForwarding=async()=>{
+    const sessions=sshTabs.filter(s=>s.alias===selected);
+    if(!sessions.length){setTunnelError("Connect to this host before inspecting local forwards.");return}
+    setTunnelBusy(true);setTunnelError("");
+    try{
+      const results=await Promise.all(sessions.map(async session=>{
+        const entries=await listLocalForwards(session.id);
+        return entries.map(entry=>({session:session.id,...entry}));
+      }));
+      const ids=new Set(sessions.map(s=>s.id));
+      setTunnels(current=>[...current.filter(t=>!ids.has(t.session)),...results.flat()]);
+    }catch(error){setTunnelError("Cannot refresh native SSH forwards: "+String(error))}
     finally{setTunnelBusy(false)}
   };
   const removeTunnel=async(session:string,localPort:number)=>{
@@ -362,7 +432,7 @@ export default function App(){
     setSshBusy(true);setProbeError("");setCredentialWarning("");
     try{
       const opened=await openSshSession(selected,100,30,accountPassword,loginMode,loginKeyPassphrase,useSavedCredentials);
-      setSshTabs(t=>[...t,opened]);setActiveSsh(opened.id);setLoginOpen(false);setSessionNotice("");
+      setSshTabs(t=>[...t,opened]);setActiveSsh(opened.id);setLoginOpen(false);setSessionNotice(null);
       if(rememberCredentials&&(!useSavedCredentials||!!accountPassword||!!loginKeyPassphrase)){
         try{
           await saveHostCredentials(selected,loginMode,accountPassword||"",loginKeyPassphrase,useSavedCredentials);
@@ -378,11 +448,25 @@ export default function App(){
     setSshBusy(true);setProbeError("");setCredentialWarning("");
     try{
       const opened=await openSshSession(alias,100,30,undefined,mode,undefined,true);
-      setSshTabs(v=>[...v,opened]);setActiveSsh(opened.id);setLoginOpen(false);setSessionNotice("");
+      setSshTabs(v=>[...v,opened]);setActiveSsh(opened.id);setLoginOpen(false);setSessionNotice(null);
     }catch(e){
       setLoginMode(mode);setUseSavedCredentials(true);setRememberCredentials(true);
       setProbeError(String(e));setLoginOpen(true);
     }finally{setSshBusy(false)}
+  };
+  const reconnectNotice=(alias:string)=>{
+    const host=hosts.find(h=>h.id===alias);
+    if(!host||!vaultUnlocked)return;
+    setSelected(alias);
+    setSessionNotice(null);
+    const mode=(host.savedAuthMode as "key"|"password"|"key-password")||"key-password";
+    if(host.hasSavedCredentials){
+      void quickConnect(alias,mode);
+    }else{
+      setLoginMode(mode);setUseSavedCredentials(false);setRememberCredentials(false);
+      setLoginPassword("");setLoginKeyPassphrase("");setProbeError("");
+      setLoginOpen(true);
+    }
   };
   const runWindowsAdminScript=async(script:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh);
@@ -452,7 +536,7 @@ export default function App(){
     <header className="topbar"><div className="brand"><div className="brandicon"><TerminalSquare size={19}/></div><strong>PaSSH7</strong><span className="alpha">v{buildInfo?.version ?? "0.1.0"} · PREVIEW</span></div><div className="topactions"><button className="lock" onClick={()=>{if(desktopAvailable()){if(vaultUnlocked){void lockVault()}else{setVaultDialog(true)}}}}><LockKeyhole size={14}/> {vaultUnlocked?"Lock vault":desktopAvailable()?"Unlock vault":"Vault unavailable"}</button><button className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button><button className="iconbtn" title="Settings" aria-label="Settings" onClick={()=>setShowSettings(true)}><Settings2 size={17}/></button></div></header>
     <div className="workspace">
       {sidebar&&<aside className="sidebar"><div className="sectionHeading"><span>YOUR HOSTS</span><button className="iconbtn" title="Add host" aria-label="Add host" onClick={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}><Plus size={16}/></button></div><label className="search"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hosts" aria-label="Search hosts"/><span>⌘ K</span></label>
-        {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} onClick={()=>setSelected(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}</small></span><span className={"hostDot "+(sshTabs.some(t=>t.alias===h.id)?"trusted":"untrusted")} title={sshTabs.some(t=>t.alias===h.id)?"SSH session active":h.fingerprint?"Trusted host key; disconnected":"Disconnected; host key unpinned"}/></button>)}</section>)}
+        {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} onClick={()=>setSelected(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}</small></span><span className={"hostDot "+(sshTabs.some(t=>t.alias===h.id)?"connected":h.fingerprint?"trusted":"untrusted")} title={sshTabs.some(t=>t.alias===h.id)?"SSH connected ("+sshTabs.filter(t=>t.alias===h.id).length+" session(s))":h.fingerprint?"Host key pinned; SSH disconnected":"SSH disconnected; host key not pinned"}/></button>)}</section>)}
         {!filtered.length&&<div className="emptySearch"><p>{!vaultUnlocked&&desktopAvailable()?"Unlock your vault to access saved hosts.":hosts.length===0?"No saved SSH hosts yet. Add your first server to get started.":query.trim()?"No hosts match your search.":"No matching hosts."}</p>{desktopAvailable()&&vaultUnlocked&&hosts.length===0&&<button type="button" className="contextAction" onClick={()=>{setAddOpen(true);setStep(0);setError("")}}><Plus size={14}/> Add your first host</button>}{desktopAvailable()&&!vaultUnlocked&&<button type="button" className="contextAction" onClick={()=>setVaultDialog(true)}><LockKeyhole size={14}/> Unlock vault</button>}</div>}
         {desktopAvailable()&&vaultUnlocked&&<section className="identityManage"><div className="groupLabel">SSH IDENTITIES</div>{identities.map(name=><div className="identityManageRow" key={name}><KeyRound size={14}/><span title={name}>{name}</span><button className="iconbtn" title={"Show public key "+name} aria-label={"Show public key "+name} onClick={async()=>{try{const pub=await getPublicIdentity(name);setGeneratedKey(pub);setKeyDialog(true);setError("")}catch(e){setError(String(e))}}}><KeyRound size={14}/></button><button className="iconbtn" title={"Remove identity "+name} aria-label={"Remove identity "+name} onClick={()=>{setError("");setDeleteTarget({kind:"identity",alias:name})}}><Trash2 size={14}/></button></div>)}{!identities.length&&<p className="emptySearch">No keys imported</p>}</section>}
         <div className="sidebottom"><span><ShieldCheck size={15}/> Local-first workspace</span><small>{desktopAvailable()?(vaultUnlocked?`${hosts.length} saved host${hosts.length===1?"":"s"} in encrypted vault`:"Unlock vault to view saved hosts"):"Example hosts only. No real credentials."}</small></div></aside>}
@@ -468,7 +552,10 @@ export default function App(){
   }
   setLoginPassword("");setLoginKeyPassphrase("");setLoginMode((active.savedAuthMode as "key"|"password"|"key-password")||"key-password");setUseSavedCredentials(!!active.hasSavedCredentials);setRememberCredentials(!!active.hasSavedCredentials);setLoginOpen(true)
 }}>Connect <span>↗</span></button>{active.hasSavedCredentials&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} disabled={sshBusy||!vaultUnlocked} title="Connect using credentials saved in the encrypted vault" onClick={()=>void quickConnect(active.id,(active.savedAuthMode as "key"|"password"|"key-password")||"key-password")}>Quick connect</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void authenticateActive()} disabled={authBusy} title="Key-only SSH authentication check. For encrypted keys, Windows passwords or two-factor SSH use Connect instead.">{authBusy?"Testing key…":"Test SSH key-only"}</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void probeActive()} disabled={probeBusy} title="Check SSH banner; not an authenticated connection">{probeBusy?"Checking…":"Test SSH port"}</button>}</div></div>
-        {sessionNotice&&<div role="status" className="wizardError" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}><span>{sessionNotice}</span><button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice("")}>Dismiss</button></div>}{credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{connected?`${activeConnections} active session(s) on this host`:"NO ACTIVE SESSION ON THIS HOST"}</small>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar">{sshTabs.map(t=><button key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"} onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}>{t.alias} <span role="button" title="Disconnect" onClick={e=>{e.stopPropagation();void closeInteractive(t.id)}}>×</span></button>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
+        {sessionNotice&&<div role="status" className="wizardError" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+<span>{sessionNotice.alias?sessionNotice.alias+": ":""}{sessionNotice.detail}</span>
+{sessionNotice.alias&&hosts.some(h=>h.id===sessionNotice.alias)&&vaultUnlocked&&<button type="button" disabled={sshBusy} onClick={()=>reconnectNotice(sessionNotice.alias)}>Reconnect</button>}
+<button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button></div>}{credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{connected?`${activeConnections} active session(s) on this host`:"NO ACTIVE SESSION ON THIS HOST"}</small>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar">{sshTabs.map(t=><button key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"} onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}>{t.alias} <span role="button" title="Disconnect" onClick={e=>{e.stopPropagation();void closeInteractive(t.id)}}>×</span></button>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
         <footer><span className="footerBrand"><span className="statusDot" style={{background:connected?"#22c55e":undefined}}/> {connected?"SSH connected":desktopAvailable()?"No active SSH session":"Offline preview"}</span><span>{active.label} · {activeConnections} on host · {sshTabs.length} total</span><span>{buildInfo?.publisher ?? "PAS7 Studio"} · {buildInfo?.target ?? "Loading build info"}</span></footer>
       </main>
       <aside className="context"><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
@@ -481,7 +568,7 @@ export default function App(){
 </div>}{sftpTransferResult?.session===activeSsh&&<p className="note" role="status">{sftpTransferResult.text}</p>}{sftpEntries?.session===activeSsh&&<div className="dockerInventory"><p className="muted">{sftpEntries.path} · {sftpEntries.items.length} entries</p><button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/..")} disabled={sftpBusy}>↑ Parent directory</button>{sftpEntries.items.map((item,index)=><div className="dockerItem" key={item.name+"-"+index}>{item.isDir?<button type="button" onClick={()=>void browseSftp(sftpEntries.path+"/"+item.name)} disabled={sftpBusy}>📁 {item.name}</button>:<div className="sftpFile"><button type="button" disabled={sftpBusy||sftpPreviewBusy||sftpTransferBusy} onClick={()=>void readSftpPreview(sftpEntries.path+"/"+item.name)}>📄 {item.name} · Preview</button><button type="button" disabled={sftpBusy||sftpTransferBusy} onClick={()=>void transferSftp("download",sftpEntries.path+"/"+item.name)}>Download</button></div>}</div>)}</div>}{sftpPreview?.session===activeSsh&&<div><p className="muted" style={{overflowWrap:"anywhere"}}>Read-only preview: {sftpPreview.path}</p><textarea aria-label="Remote file preview" readOnly value={sftpPreview.body} rows={12} style={{width:"100%",fontFamily:"monospace",fontSize:"12px"}}/><button type="button" onClick={()=>setSftpPreview(null)}>Close preview</button></div>}{sftpPreviewBusy&&<p className="note">Loading file preview…</p>}{sftpError&&<p className="wizardError" role="alert">{sftpError}</p>}{!connected&&<div className="placeholder">Connect to the selected host before browsing.</div>}</>:
         panel==="docker"?<><div className="contextTitle"><Container size={18}/><h3>Docker containers</h3></div><p className="muted">Runs <code>docker ps -a</code> on the connected host using your SSH account. Read-only inventory.</p><button className="contextAction" disabled={!connected||!activeSsh||dockerBusy} onClick={()=>void refreshDocker()}>{dockerBusy?"Loading containers…":"Refresh containers"}</button>{dockerError&&<p className="wizardError" role="alert">{dockerError}</p>}{dockerActionStatus?.session===activeSsh&&<p role="status" className="note">{dockerActionStatus.text}</p>}{dockerInventory?.session===activeSsh?<div className="dockerInventory"><p className="muted">{dockerInventory.items.length} container(s)</p>{dockerInventory.items.map((item,index)=><div key={item.ID||index} className="dockerItem"><strong>{item.Names||item.ID||"Unnamed"}</strong><small>{item.Image||"Unknown image"}</small><span>{item.Status||item.State||"Unknown status"}</span>{item.Ports&&<small>{item.Ports}</small>}{item.ID&&<button type="button" disabled={dockerLogsBusy||!connected} onClick={()=>void viewDockerLogs(item.ID!,item.Names||item.ID||"Container")}>{dockerLogsBusy?"Loading logs…":"View logs"}</button>}{item.ID&&<div className="dockerActions">{(item.State||"").toLowerCase()==="running"?<><button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"restart")}>{dockerActionBusy===item.ID?"Working…":"Restart"}</button><button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"stop")}>Stop</button></>:<button type="button" disabled={!!dockerActionBusy||dockerBusy} onClick={()=>void runDockerAction(item.ID!,item.Names||item.ID!,"start")}>{dockerActionBusy===item.ID?"Working…":"Start"}</button>}</div>}</div>)}</div>:
 <div className="placeholder"><Container size={23}/>{connected?"Click Refresh containers to fetch the real inventory.":"Connect to the server to inspect Docker."}</div>}{dockerLogs?.session===activeSsh&&<div className="dockerItem" style={{marginTop:14}}><strong>Recent logs: {dockerLogs.containerName}</strong><small>Last 200 lines · read-only · timestamps included</small><pre className="preview" style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere",maxHeight:"300px",overflow:"auto"}}>{dockerLogs.text||"No logs returned for this container."}</pre><button type="button" onClick={()=>setDockerLogs(null)}>Close logs</button></div>}</>:
-        <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusy} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
+        <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button><button className="contextAction" type="button" disabled={!connected||tunnelBusy} onClick={()=>void refreshLocalForwarding()}>Refresh active forwards</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{!tunnels.some(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected))&&<p className="note">No active local forwards for this host. Start one above to map a localhost port through SSH, or refresh to retrieve active native tunnels.</p>}{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusy} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
       </div></aside>
     </div>
     {deleteTarget&&<div className="overlay" onMouseDown={()=>{setDeleteTarget(null);setError("")}}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm vault removal" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}<button aria-label="Close" onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button></div><p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted vault? This cannot be undone. Removing a host keeps its SSH key; removing a key used by a host is blocked.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<div className="wizardActions"><button onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button><button className="primary" onClick={()=>void confirmRemove()}>Confirm removal</button></div></div></div>}

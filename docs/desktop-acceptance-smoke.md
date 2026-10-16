@@ -29,6 +29,9 @@ during this checklist. Use a throwaway identity and Docker container.
 | SSH-07 | Abruptly stop remote sshd / disconnect VPN | Disconnected status and reason after reconnect/poll; stale tunnels cleaned |
 | SSH-08 | Remove a saved host with active SSH and forward | Only that host's sessions and tunnels close |
 | SSH-09 | Browse a slow SFTP directory and load Docker inventory/logs while running interactive commands | Terminal input and output stay responsive; slow inspections time out independently |
+| SSH-10 | Keep two native SSH sessions active and reload the WebView without exiting the app | If native Vault remains unlocked, saved hosts and session tabs reappear; PTY input still works |
+| SSH-11 | Close remote shell unexpectedly, then press Reconnect | Notice identifies the closed host; saved credentials initiate explicit Quick Connect, otherwise manual login dialog opens |
+| SSH-12 | Fully exit desktop app and relaunch | Vault remains locked and secrets are never automatically unlocked; user must enter master password |
 | SFTP-01 | Browse multiple folders, parent directory, read UTF-8 file | Correct entries and preview; unrelated session not used |
 | SFTP-02 | Preview a binary file | Helpful UTF-8/binary error, no corruption |
 | SFTP-03 | Upload test binary file via native file picker | New file present on remote host; matching SHA-256 checksum |
@@ -43,6 +46,7 @@ during this checklist. Use a throwaway identity and Docker container.
 | DOCKER-03 | Reject action confirmation; use SSH user lacking Docker permission | No action when cancelled; explicit permission error when rejected |
 | PORT-01 | Bind local port and request remote test service | Service reachable from local `127.0.0.1:<port>`; no public bind |
 | PORT-02 | Stop tunnel, lock Vault | Listener disappears and cannot be reached |
+| PORT-03 | Start two local forwards, reload only the WebView, then open Ports | Native forward inventory restores both active listeners; Refresh forwards matches backend; listeners still work |
 | AI-01 | Launch installed Codex/Claude/OpenCode CLI | Command goes only to selected terminal; CLI runs with SSH account permissions |
 | AI-02 | Launch an uninstalled CLI | Shell reports missing command; UI makes no false success claim |
 
