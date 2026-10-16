@@ -432,20 +432,46 @@ fn vault_set_host_identity(alias:String,identity_alias:String,sessions:State<'_,
         }).map_err(safe_err)
     })
 }
+fn validated_backup_directory(directory:Option<String>)->Result<Option<String>,String>{
+    match directory {
+        Some(dir) if !dir.trim().is_empty()=>{
+            if dir.len()>4096 || dir.chars().any(|c|c.is_control()){
+                return Err("Remote backup directory is too long or contains control characters".into());
+            }
+            Ok(Some(dir.trim().to_owned()))
+        },
+        _=>Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod backup_directory_tests{
+    use super::validated_backup_directory;
+
+    #[test]
+    fn accepts_remote_paths_and_clears_empty_preferences(){
+        assert_eq!(validated_backup_directory(Some(" /srv/backups/passh7 ".into())).unwrap(),
+            Some("/srv/backups/passh7".into()));
+        assert_eq!(validated_backup_directory(Some(".".into())).unwrap(),Some(".".into()));
+        assert_eq!(validated_backup_directory(Some("   ".into())).unwrap(),None);
+        assert_eq!(validated_backup_directory(None).unwrap(),None);
+    }
+    #[test]
+    fn rejects_unbounded_and_control_character_paths(){
+        assert!(validated_backup_directory(Some("x".repeat(4097))).is_err());
+        for path in ["foo\\nbar","bad\\0path","bad\\rdir"]{
+            // Convert explicit escape characters to their control bytes.
+            let actual=path.replace("\\n","\n").replace("\\0","\0").replace("\\r","\r");
+            assert!(validated_backup_directory(Some(actual)).is_err());
+        }
+    }
+}
 /// Save a non-secret remote backup directory per host inside the encrypted
 /// Vault. This does not connect, upload, schedule, or synchronize anything.
 #[tauri::command]
 fn vault_set_backup_directory(alias:String,directory:Option<String>,
     sessions:State<'_,SessionStore>)->Result<(),String>{
-    let normalized=match directory {
-        Some(dir) if !dir.trim().is_empty()=>{
-            if dir.len()>4096 || dir.chars().any(|c|c.is_control()){
-                return Err("Remote backup directory is too long or contains control characters".into());
-            }
-            Some(dir.trim().to_owned())
-        },
-        _=>None,
-    };
+    let normalized=validated_backup_directory(directory)?;
     sessions.use_password(|password|{
         passh7_core::transaction(&vault_path()?,password,|vault|{
             let host=vault.hosts.iter_mut().find(|h|h.alias==alias)
