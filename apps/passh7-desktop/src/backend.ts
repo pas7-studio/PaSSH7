@@ -169,6 +169,16 @@ export async function listDockerCatalog(sessionId:string,kind:DockerCatalogKind)
   const raw=await invoke<string>("ssh_session_docker_catalog",{id:sessionId,kind});
   return raw.split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line) as Record<string,string>);
 }
+export type DockerLogEvent={
+  sessionId:string;streamId:string;containerId:string;
+  kind:"data"|"closed"|"error";data:string|null;detail:string|null;
+};
+export async function startDockerLogStream(sessionId:string,containerId:string,tail=0):Promise<string>{
+  return invoke<string>("ssh_session_docker_log_start",{id:sessionId,containerId,tail});
+}
+export async function stopDockerLogStream(sessionId:string,streamId:string):Promise<void>{
+  await invoke<void>("ssh_session_docker_log_stop",{id:sessionId,streamId});
+}
 export async function readDockerLogs(sessionId:string,containerId:string,tail=200):Promise<string>{
   return invoke<string>("ssh_session_docker_logs",{id:sessionId,containerId,tail});
 }

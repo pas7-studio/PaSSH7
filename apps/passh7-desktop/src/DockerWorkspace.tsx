@@ -7,6 +7,7 @@ type Logs={session:string;containerId:string;containerName:string;text:string}|n
 type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|null;
   loading:boolean;error:string;actionStatus:string|null;actionBusy:string;
   logs:Logs;logsBusy:boolean;logsError:string;tail:number;follow:boolean;
+  liveStatus:"off"|"connecting"|"streaming"|"closed"|"error";
   onFollow:(value:boolean)=>void;onTail:(value:number)=>void;
   onRefresh:()=>void;onAction:(id:string,name:string,action:"start"|"stop"|"restart")=>void;
   onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;};
@@ -101,7 +102,7 @@ export default function DockerWorkspace(p:Props){
       <label className="filesSearch"><Search size={14}/><input value={logsSearch} onChange={e=>setLogsSearch(e.target.value)} placeholder="Find in logs" aria-label="Search Docker logs"/></label>
       <select value={level} onChange={e=>setLevel(e.target.value as typeof level)} aria-label="Log severity"><option value="all">All levels</option><option value="warn">Warnings</option><option value="error">Errors</option></select>
       <select value={p.tail} onChange={e=>p.onTail(Number(e.target.value))} aria-label="Recent log lines">{[50,100,200,500,1000].map(n=><option value={n} key={n}>{n} lines</option>)}</select>
-      <label className="compactToggle"><input type="checkbox" checked={p.follow} onChange={e=>p.onFollow(e.target.checked)}/> Follow</label>
+      <label className="compactToggle" title="Open an SSH log stream. Stop following automatically on navigation or disconnect."><input type="checkbox" checked={p.follow} onChange={e=>p.onFollow(e.target.checked)}/> Follow live</label>
       <label className="compactToggle"><input type="checkbox" checked={wrap} onChange={e=>setWrap(e.target.checked)}/> Wrap</label>
       <button title="Reload selected container logs" disabled={!p.logs||p.logsBusy} onClick={()=>{if(p.logs)p.onLogs(p.logs.containerId,p.logs.containerName)}}><RefreshCw size={15}/></button>
       <button title="Copy visible logs" disabled={!logLines.length} onClick={()=>navigator.clipboard.writeText(logLines.join("\n"))}><Clipboard size={15}/></button>
@@ -115,7 +116,7 @@ export default function DockerWorkspace(p:Props){
         {logLines.map((line,index)=><div className="dockerLogLine" key={index}><span>{index+1}</span><code className={/\berror\b|fatal|panic/i.test(line)?"logError":/\bwarn/i.test(line)?"logWarn":""}>{line}</code></div>)}
         {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}
       </>:<div className="workspaceEmpty">Select a container and click View logs. Log output is fetched through a dedicated SSH exec channel.</div>}
-    </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines</span><span>{p.follow?"Polling every 4 s":"Manual refresh"}</span></div>
+    </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
     </section></>:<section className="dockerCatalogWorkspace">
       <div className="dockerToolbar">
         <div className="filesSearch"><Search size={15}/><input value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder={"Search "+tab+"…"} aria-label={"Search Docker "+tab}/></div>

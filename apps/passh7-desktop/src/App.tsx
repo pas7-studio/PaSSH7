@@ -6,7 +6,7 @@ import SettingsWorkspace from "./SettingsWorkspace";
 import {loadPreferences,savePreferences,type AppPreferences} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -668,6 +668,9 @@ export default function App(){
   const [dockerActionStatus,setDockerActionStatus]=useState<{session:string;text:string}|null>(null);
   const [dockerLogs,setDockerLogs]=useState<{session:string;containerId:string;containerName:string;text:string}|null>(null);
   const [dockerLogsError,setDockerLogsError]=useState<{session:string;message:string}|null>(null);
+  const dockerLogsRequestRef=useRef(0);
+  useEffect(()=>{dockerLogsRequestRef.current++},[activeSsh,selected]);
+  const [dockerLiveStatus,setDockerLiveStatus]=useState<"off"|"connecting"|"streaming"|"closed"|"error">("off");
   const [dockerError,setDockerError]=useState("");
   const runDockerAction=async(containerId:string,containerName:string,action:"start"|"stop"|"restart")=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -692,14 +695,20 @@ export default function App(){
   const viewDockerLogs=async(containerId:string,containerName:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setDockerError("Select a connected SSH session to read Docker logs.");return}
+    const request=++dockerLogsRequestRef.current;
     setDockerLogsBusy(true);setDockerLogsError(null);setDockerError("");
     // A new selection must never display stale log data from another container.
     setDockerLogs(previous=>previous?.session===session.id&&previous.containerId===containerId?previous:null);
     try{
       const text=await readDockerLogs(session.id,containerId,preferences.dockerTail);
-      setDockerLogs({session:session.id,containerId,containerName,text});
-    }catch(e){setDockerLogsError({session:session.id,message:"Could not read Docker logs: "+String(e)})}
-    finally{setDockerLogsBusy(false)}
+      if(request===dockerLogsRequestRef.current)
+        setDockerLogs({session:session.id,containerId,containerName,text});
+    }catch(e){
+      if(request===dockerLogsRequestRef.current)
+        setDockerLogsError({session:session.id,message:"Could not read Docker logs: "+String(e)});
+    }finally{
+      if(request===dockerLogsRequestRef.current)setDockerLogsBusy(false);
+    }
   };
   const refreshDocker=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -717,13 +726,76 @@ export default function App(){
     const timer=window.setInterval(()=>{void refreshDocker()},15000);
     return ()=>window.clearInterval(timer);
   },[panel,activeSsh,selected,preferences.dockerAutoRefresh]);
+  // A real dedicated SSH exec channel follows Docker output. Subscribe to
+  // native events before requesting the stream so its first bytes are never
+  // dropped. Changing host, container, workspace or Follow closes the channel.
   useEffect(()=>{
-    if(panel!=="docker"||!preferences.dockerFollowLogs||!dockerLogs||dockerLogs.session!==activeSsh)return;
-    const timer=window.setInterval(()=>{
-      if(!dockerLogsBusy)void viewDockerLogs(dockerLogs.containerId,dockerLogs.containerName);
-    },4000);
-    return ()=>window.clearInterval(timer);
-  },[panel,activeSsh,preferences.dockerFollowLogs,dockerLogs?.session,dockerLogs?.containerId,dockerLogsBusy]);
+    if(panel!=="docker"||!preferences.dockerFollowLogs||!dockerLogs?.containerId||
+       dockerLogs.session!==activeSsh){
+      setDockerLiveStatus("off");
+      return;
+    }
+    const sessionId=activeSsh;
+    const containerId=dockerLogs.containerId;
+    let disposed=false;
+    let finished=false;
+    let streamId="";
+    let unsubscribe:(()=>void)|undefined;
+    let flushTimer:number|undefined;
+    let pending="";
+    const decoder=new TextDecoder("utf-8");
+    setDockerLiveStatus("connecting");
+    const flush=()=>{
+      if(flushTimer!==undefined){window.clearTimeout(flushTimer);flushTimer=undefined;}
+      if(!pending||disposed)return;
+      const chunk=pending;pending="";
+      setDockerLogs(previous=>previous?.session===sessionId&&previous.containerId===containerId
+        ?{...previous,text:(previous.text+chunk).slice(-1_500_000)}:previous);
+    };
+    void (async()=>{
+      unsubscribe=await listen<DockerLogEvent>("passh7:docker-log",event=>{
+        if(disposed)return;
+        const data=event.payload;
+        if(data.sessionId!==sessionId||data.containerId!==containerId||
+           (streamId&&data.streamId!==streamId))return;
+        if(data.kind==="data"&&data.data){
+          const binary=atob(data.data);
+          const bytes=new Uint8Array(binary.length);
+          for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+          pending+=decoder.decode(bytes,{stream:true});
+          if(pending.length>64*1024)flush();
+          else if(flushTimer===undefined)flushTimer=window.setTimeout(flush,80);
+        }else{
+          finished=true;
+          pending+=decoder.decode();
+          flush();
+          if(data.kind==="error"){
+            setDockerLiveStatus("error");
+            setDockerLogsError({session:sessionId,message:data.detail||"Docker live log channel failed"});
+          }else setDockerLiveStatus("closed");
+        }
+      });
+      if(disposed){unsubscribe();unsubscribe=undefined;return;}
+      const opened=await startDockerLogStream(sessionId,containerId,0);
+      streamId=opened;
+      if(disposed){
+        void stopDockerLogStream(sessionId,opened).catch(()=>{});
+      }else if(!finished)setDockerLiveStatus("streaming");
+    })().catch(error=>{
+      if(!disposed){
+        setDockerLiveStatus("error");
+        setDockerLogsError({session:sessionId,message:"Could not follow Docker logs: "+String(error)});
+      }
+    });
+    return ()=>{
+      // Suppress event handlers before tearing down the async listener.
+      // Rust also closes every follow channel when the owning SSH session ends.
+      disposed=true;
+      if(flushTimer!==undefined)window.clearTimeout(flushTimer);
+      unsubscribe?.();
+      if(streamId)void stopDockerLogStream(sessionId,streamId).catch(()=>{});
+    };
+  },[panel,activeSsh,preferences.dockerFollowLogs,dockerLogs?.session,dockerLogs?.containerId]);
   // Lazy-load contextual tools on the selected host. Do not show an empty panel
   // when a usable authenticated SSH session is already available.
   useEffect(()=>{
@@ -1029,13 +1101,14 @@ export default function App(){
  actionStatus={dockerActionStatus?.session===activeSsh?dockerActionStatus.text:null}
  actionBusy={dockerActionBusy} logs={dockerLogs} logsBusy={dockerLogsBusy}
  logsError={dockerLogsError?.session===activeSsh?dockerLogsError.message:""}
+ liveStatus={dockerLiveStatus}
  tail={preferences.dockerTail} follow={preferences.dockerFollowLogs}
  onTail={tail=>updatePreferences({...preferences,dockerTail:tail})}
  onFollow={follow=>updatePreferences({...preferences,dockerFollowLogs:follow})}
  onRefresh={()=>void refreshDocker()}
  onAction={(id,name,action)=>void runDockerAction(id,name,action)}
  onLogs={(id,name)=>void viewDockerLogs(id,name)}
- onCloseLogs={()=>{setDockerLogs(null);setDockerLogsError(null)}}
+ onCloseLogs={()=>{dockerLogsRequestRef.current++;setDockerLogs(null);setDockerLogsError(null)}}
  />:
         panel==="settings"?<SettingsWorkspace
  preferences={preferences} onChange={updatePreferences}
