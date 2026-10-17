@@ -23,6 +23,12 @@ jobs:
         run: |
           npm install --no-audit --no-fund --prefix apps/passh7-desktop
           npm run build --prefix apps/passh7-desktop
+      - name: Ensure visual fixtures are excluded from production
+        run: |
+          if grep -R "DEV UI FIXTURE" apps/passh7-desktop/dist; then
+            echo "Development fixture leaked into the release bundle"
+            exit 1
+          fi
       - name: Install isolated visual-test dependencies
         run: npm install --no-audit --no-fund --prefix apps/passh7-desktop/tests/visual
       - name: Check npm-bundled Chromium availability
