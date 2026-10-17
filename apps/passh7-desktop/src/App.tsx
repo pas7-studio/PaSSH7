@@ -129,22 +129,49 @@ export default function App(){
     setActiveSsh(matching?.id??"");
   },[sshTabs,activeSsh,selected]);
   const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
+  // Each native SSH session owns independent port-forward operations. A slow
+  // response from A may update A's cache, but never B's busy/error state.
+  const tunnelRevision=useRef(new Map<string,number>());
+  const tunnelInFlight=useRef(new Set<string>());
+  const [tunnelBusySessions,setTunnelBusySessions]=useState<string[]>([]);
+  const [tunnelErrors,setTunnelErrors]=useState<Record<string,string>>({});
+  const tunnelBusy=tunnelBusySessions.includes(activeSsh);
+  const tunnelError=tunnelErrors[activeSsh]||"";
+  const setPortError=(session:string,message:string)=>
+    setTunnelErrors(previous=>({...previous,[session]:message}));
+  const beginPortOperation=(session:string)=>{
+    if(tunnelInFlight.current.has(session))return false;
+    tunnelInFlight.current.add(session);
+    tunnelRevision.current.set(session,(tunnelRevision.current.get(session)||0)+1);
+    setTunnelBusySessions(previous=>[...previous.filter(id=>id!==session),session]);
+    setPortError(session,"");
+    return true;
+  };
+  const finishPortOperation=(session:string)=>{
+    tunnelInFlight.current.delete(session);
+    setTunnelBusySessions(previous=>previous.filter(id=>id!==session));
+  };
   // The backend owns active TCP listeners. Recover them after WebView reload
   // and when a previously existing native terminal session becomes visible.
   useEffect(()=>{
     if(!vaultUnlocked||!desktopAvailable()||sshTabs.length===0)return;
     let live=true;
-    const ids=new Set(sshTabs.map(s=>s.id));
-    void Promise.all(sshTabs.map(async session=>{
-      try{
-        const items=await listLocalForwards(session.id);
-        return items.map(item=>({session:session.id,...item}));
-      }catch{return [] as {session:string;localPort:number;targetHost:string;remotePort:number}[]}
-    })).then(groups=>{
+    const observed=sshTabs.map(session=>({
+      session:session.id,revision:tunnelRevision.current.get(session.id)||0
+    }));
+    void Promise.allSettled(observed.map(async ({session,revision})=>({
+      session,revision,items:await listLocalForwards(session)
+    }))).then(results=>{
       if(!live)return;
-      setTunnels(previous=>[
-        ...previous.filter(t=>!ids.has(t.session)),...groups.flat()
-      ]);
+      setTunnels(previous=>{
+        const accepted=results.flatMap(result=>result.status==="fulfilled"&&
+          (tunnelRevision.current.get(result.value.session)||0)===result.value.revision&&
+          sshTabsRef.current.some(tab=>tab.id===result.value.session)
+            ?[result.value]:[]);
+        const updated=new Set(accepted.map(result=>result.session));
+        return [...previous.filter(item=>!updated.has(item.session)),
+          ...accepted.flatMap(({session,items})=>items.map(item=>({session,...item})))];
+      });
     });
     return()=>{live=false};
   },[vaultUnlocked,sshTabs]);
@@ -641,38 +668,57 @@ export default function App(){
   const [tunnelLocalPort,setTunnelLocalPort]=useState(18080);
   const [tunnelRemoteHost,setTunnelRemoteHost]=useState("127.0.0.1");
   const [tunnelRemotePort,setTunnelRemotePort]=useState(8080);
-  const [tunnelBusy,setTunnelBusy]=useState(false);
-  const [tunnelError,setTunnelError]=useState("");
 
   const addTunnel=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
-    if(!session){setTunnelError("Select an active SSH session for this host.");return}
-    setTunnelBusy(true);setTunnelError("");
-    try {
-      await startLocalForward(session.id,tunnelLocalPort,tunnelRemoteHost,tunnelRemotePort);
-      setTunnels(v=>[...v,{session:session.id,localPort:tunnelLocalPort,targetHost:tunnelRemoteHost,remotePort:tunnelRemotePort}]);
-    }catch(e){setTunnelError(String(e))}
-    finally{setTunnelBusy(false)}
+    if(!session)return;
+    if(!beginPortOperation(session.id))return;
+    const port=tunnelLocalPort,target=tunnelRemoteHost,remotePort=tunnelRemotePort;
+    try{
+      await startLocalForward(session.id,port,target,remotePort);
+      if(sshTabsRef.current.some(tab=>tab.id===session.id)){
+        setTunnels(previous=>[
+          ...previous.filter(item=>!(item.session===session.id&&item.localPort===port)),
+          {session:session.id,localPort:port,targetHost:target,remotePort}
+        ]);
+      }
+    }catch(error){
+      setPortError(session.id,"Could not start local forward: "+String(error));
+    }finally{finishPortOperation(session.id)}
   };
   const refreshLocalForwarding=async()=>{
-    const sessions=sshTabs.filter(s=>s.alias===selected);
-    if(!sessions.length){setTunnelError("Connect to this host before inspecting local forwards.");return}
-    setTunnelBusy(true);setTunnelError("");
+    // Refresh every PTY of this host. Each session is isolated: a slow or
+    // broken sibling must never discard healthy forwarding inventories.
+    const sessions=sshTabs.filter(tab=>tab.alias===selected);
+    const eligible=sessions.filter(tab=>beginPortOperation(tab.id));
+    if(!eligible.length)return;
     try{
-      const results=await Promise.all(sessions.map(async session=>{
-        const entries=await listLocalForwards(session.id);
-        return entries.map(entry=>({session:session.id,...entry}));
-      }));
-      const ids=new Set(sessions.map(s=>s.id));
-      setTunnels(current=>[...current.filter(t=>!ids.has(t.session)),...results.flat()]);
-    }catch(error){setTunnelError("Cannot refresh native SSH forwards: "+String(error))}
-    finally{setTunnelBusy(false)}
+      const results=await Promise.allSettled(eligible.map(async tab=>({
+        session:tab.id,items:await listLocalForwards(tab.id)
+      })));
+      for(let index=0;index<results.length;index++){
+        const response=results[index];
+        const session=eligible[index].id;
+        if(!sshTabsRef.current.some(tab=>tab.id===session))continue;
+        if(response.status==="fulfilled"){
+          setTunnels(previous=>[
+            ...previous.filter(item=>item.session!==session),
+            ...response.value.items.map(item=>({session,...item}))
+          ]);
+        }else{
+          setPortError(session,"Cannot refresh native SSH forwards: "+String(response.reason));
+        }
+      }
+    }finally{for(const tab of eligible)finishPortOperation(tab.id)}
   };
   const removeTunnel=async(session:string,localPort:number)=>{
-    setTunnelBusy(true);setTunnelError("");
-    try{await stopLocalForward(session,localPort);setTunnels(v=>v.filter(t=>!(t.session===session&&t.localPort===localPort)))}
-    catch(e){setTunnelError(String(e))}
-    finally{setTunnelBusy(false)}
+    if(!sshTabsRef.current.some(tab=>tab.id===session)||!beginPortOperation(session))return;
+    try{
+      await stopLocalForward(session,localPort);
+      setTunnels(previous=>previous.filter(item=>!(item.session===session&&item.localPort===localPort)));
+    }catch(error){
+      setPortError(session,"Could not stop local forward: "+String(error));
+    }finally{finishPortOperation(session)}
   };
   const [agent,setAgent]=useState<AgentKind>("codex");
   const [agentStatus,setAgentStatus]=useState("");
@@ -1472,7 +1518,9 @@ export default function App(){
  />:
         panel==="ports"?<PortForwardingWorkspace
  host={active.label} connected={connected} session={activeSsh}
- forwards={tunnels} busy={tunnelBusy} error={tunnelError}
+ forwards={tunnels} busy={tunnelBusy} busySessions={tunnelBusySessions}
+ sessions={sshTabs.filter(tab=>tab.alias===selected).map(tab=>tab.id)}
+ error={tunnelError}
  localPort={tunnelLocalPort} remoteHost={tunnelRemoteHost} remotePort={tunnelRemotePort}
  onLocalPort={setTunnelLocalPort} onRemoteHost={setTunnelRemoteHost} onRemotePort={setTunnelRemotePort}
  onStart={()=>void addTunnel()} onRefresh={()=>void refreshLocalForwarding()}
