@@ -12,6 +12,7 @@ type Props={
   availability:Partial<Record<AgentKind,AgentProbeState>>;
   checking:boolean;error:string;status:string;context:string;
   onCheck:()=>void;onLaunch:()=>void;onTerminal:()=>void;onSession:(id:string)=>void;
+  onPrepareRdp:()=>void;
 };
 export default function AgentWorkspace(p:Props){
   const [copyFeedback,setCopyFeedback]=useState("");
@@ -104,6 +105,13 @@ export default function AgentWorkspace(p:Props){
             <p>{probe.location?"The executable exists, but its version check failed. Verify Node.js and this SSH account's environment before reinstalling.":"Graphical apps run in the Windows desktop session. SSH provides a text terminal, not the app's window. Use Remote Desktop (RDP) for the GUI, or install the separate CLI below."}</p>
             <div><code>{installation[p.agent].command}</code><button type="button" onClick={()=>void copyInstall()}><Clipboard size={14}/> Copy install command</button></div>
             <a href={installation[p.agent].url} target="_blank" rel="noreferrer">{installation[p.agent].label} <ExternalLink size={12}/></a>
+            {probe.desktopApp&&<div className="agentRdpHelp">
+              <strong>Use the installed desktop app through RDP</strong>
+              <p>Open an RDP tunnel via your SSH connection, then use the Windows Remote Desktop client. Remote Desktop must be enabled on the target Windows machine.</p>
+              <button type="button" onClick={p.onPrepareRdp}><ExternalLink size={14}/> Prepare RDP tunnel in Port Forwarding</button>
+              <code>mstsc /v:127.0.0.1:13389</code>
+              <small>Start the tunnel first. PaSSH7 does not auto-enable Windows Remote Desktop, open desktop sessions or run GUI apps inside SSH.</small>
+            </div>}
             <p>The install command is never executed automatically. Reconnect SSH or re-check CLI detection after installation.</p>
           </div>}
           {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>}
