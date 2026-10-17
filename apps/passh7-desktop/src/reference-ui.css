@@ -1053,3 +1053,12 @@
 .shell.light .globalSessionNotice{background:#fff4e8;color:#623c23;border-color:#e3b993}
 .shell.light .globalSessionNoticeActions button{background:#fff;border-color:#d1a57d;color:#623c23}
 @media(max-width:700px){.globalSessionNotice{padding:8px 12px}.globalSessionNoticeText{flex:1 1 100%}}
+
+/* Docker errors must explain whether SSH, CLI, permissions or the daemon
+   failed; avoid a raw stderr string disguised as an empty container list. */
+.dockerActionableError{display:flex;flex-direction:column;align-items:flex-start;gap:7px;line-height:1.5;overflow-wrap:anywhere}
+.dockerActionableError strong{font-size:13px}
+.dockerActionableError span{font-family:ui-monospace,Consolas,monospace;font-size:11px;white-space:pre-wrap}
+.dockerActionableError small{font-size:12px;line-height:1.55;max-width:90ch}
+.dockerActionableError button{border:1px solid currentColor;border-radius:6px;padding:6px 12px;font-weight:600;background:transparent}
+.dockerActionableError button:hover:not(:disabled){opacity:.8}
