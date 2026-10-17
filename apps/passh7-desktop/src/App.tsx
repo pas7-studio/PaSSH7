@@ -724,6 +724,20 @@ export default function App(){
     }catch(error){setDockerError("Docker "+action+" failed: "+String(error))}
     finally{setDockerActionBusy("")}
   };
+  const openDockerShell=async(containerId:string,containerName:string)=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session){setDockerError("Select a connected SSH terminal first.");return}
+    if(!/^[a-f0-9]{12,64}$/i.test(containerId)){
+      setDockerError("Invalid container ID; refresh Docker inventory.");return;
+    }
+    if(!window.confirm("Open an interactive sh in "+containerName+" on "+session.alias+"?\n\n"+
+      "This executes as your remote SSH account with Docker privileges. The command "+
+      "will be sent to the current terminal; confirm it is at a shell prompt."))return;
+    try{
+      await writeSshSession(session.id,"docker exec -it "+containerId+" sh\r");
+      setDockerError("");setPanel("terminal");
+    }catch(error){setDockerError("Could not start Docker shell: "+String(error))}
+  };
   const viewDockerLogs=async(containerId:string,containerName:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setDockerError("Select a connected SSH session to read Docker logs.");return}
@@ -1212,6 +1226,7 @@ export default function App(){
  onRefresh={()=>void refreshDocker()}
  onAction={(id,name,action)=>void runDockerAction(id,name,action)}
  onLogs={(id,name)=>void viewDockerLogs(id,name)}
+ onShell={(id,name)=>void openDockerShell(id,name)}
  onCloseLogs={()=>{dockerLogsRequestRef.current++;setDockerLogs(null);setDockerLogsError(null)}}
  />:
         panel==="settings"?<SettingsWorkspace
