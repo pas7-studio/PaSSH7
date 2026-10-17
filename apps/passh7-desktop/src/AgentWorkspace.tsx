@@ -24,7 +24,7 @@ export default function AgentWorkspace(p:Props){
     claude:{command:"npm install -g @anthropic-ai/claude-code",url:"https://docs.anthropic.com/en/docs/claude-code/getting-started",label:"Claude Code setup"},
     opencode:{command:"npm install -g opencode-ai",url:"https://opencode.ai/docs/",label:"OpenCode CLI installation"}
   };
-  const cliStatus=(state:AgentProbeState|null)=>{
+  const cliStatus=(state:AgentProbeState|null|undefined)=>{
     if(!state)return "Not checked";
     if(state.installed)return "CLI detected";
     if(state.desktopApp)return "Desktop app only";
