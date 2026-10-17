@@ -26,5 +26,7 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npm run build
-      - name: Validate native read-only Docker stats command
+      - name: Generate native icon for Tauri compile-time embed
+        run: python3 apps/passh7-desktop/scripts/create_icon.py
+      - name: Validate native Docker allowlist and inspection compilation
         run: cargo test --manifest-path apps/passh7-desktop/src-tauri/Cargo.toml --bin passh7-desktop docker_catalog_tests
