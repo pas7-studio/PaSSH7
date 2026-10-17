@@ -995,3 +995,19 @@
 @media(max-width:750px){
   .agentDiscovery>div{grid-template-columns:minmax(0,1fr);gap:5px}
 }
+
+
+/* A GUI is not an SSH CLI: explicit optional RDP tunnel guidance. */
+.agentRdpHelp{
+  display:grid;gap:8px;padding:12px;border:1px solid #335f85;border-radius:8px;
+  background:#102c47;color:#bad8f5;
+}
+.agentRdpHelp>strong{font-size:11px;color:#e3f1ff}
+.agentRdpHelp>p,.agentRdpHelp>small{font-size:10px;color:#abc5df;line-height:1.65;margin:0}
+.agentRdpHelp>button{justify-self:start;display:inline-flex;align-items:center;gap:7px;
+  min-height:32px;font-size:11px;border:1px solid #4174ab;background:#1a4f83;color:#f0f7ff}
+.agentRdpHelp>code{font:11px "Cascadia Code",Consolas,monospace;overflow-wrap:anywhere;color:#8dc2ff}
+.shell.light .agentRdpHelp{background:#eef6ff;border-color:#b8d4f0}
+.shell.light .agentRdpHelp>strong{color:#254869}
+.shell.light .agentRdpHelp>p,.shell.light .agentRdpHelp>small{color:#51708d}
+.shell.light .agentRdpHelp>code{color:#2466ad}
