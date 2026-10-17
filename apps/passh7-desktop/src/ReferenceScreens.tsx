@@ -198,7 +198,7 @@ export default function ReferenceScreens(){
               diagnostic:"No CLI found for this Windows SSH account."}
           }} checking={false} error="" status=""
           context={"Host: dev-server\nTarget: deploy@192.0.2.10\nVisual fixture: no agent is launched"}
-          onCheck={()=>{}} onLaunch={()=>{}} onTerminal={()=>choose("terminal")} onSession={()=>{}}
+          onCheck={()=>{}} onLaunch={()=>{}} onTerminal={()=>choose("terminal")} onPrepareRdp={()=>choose("ports")} onSession={()=>{}}
         />:<TerminalReference/>}
       </div></aside>
     </div>
