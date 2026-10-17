@@ -1,6 +1,6 @@
 import {useRef,useState,type ReactNode} from "react";
 import {Activity,Bell,Bot,ChevronDown,Clipboard,Container,Download,FolderClosed,Info,Keyboard,LockKeyhole,Monitor,Palette,RefreshCw,Settings2,ShieldCheck,TerminalSquare,Upload} from "lucide-react";
-import {type AppPreferences,defaultPreferences,validatePreferences} from "./preferences";
+import {type AppPreferences,defaultPreferences,defaultPaneSizes,validatePreferences} from "./preferences";
 import type {BuildInfo} from "./backend";
 
 type Section="general"|"ssh"|"security"|"terminal"|"files"|"docker"|"ports"|"agents"|"notifications"|"appearance"|"shortcuts"|"diagnostics";
@@ -63,10 +63,10 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
     if(!window.confirm("Reset "+sections.find(s=>s.id===section)?.label+" preferences to defaults?"))return;
     switch(section){
       case "general":onChange({...preferences,rememberWorkspace:defaultPreferences.rememberWorkspace});break;
-      case "appearance":onChange({...preferences,theme:defaultPreferences.theme,density:defaultPreferences.density});break;
+      case "appearance":onChange({...preferences,theme:defaultPreferences.theme,density:defaultPreferences.density,paneSizes:{...defaultPaneSizes}});break;
       case "terminal":onChange({...preferences,terminalFontSize:defaultPreferences.terminalFontSize,terminalScrollback:defaultPreferences.terminalScrollback});break;
-      case "files":onChange({...preferences,sftpShowHidden:defaultPreferences.sftpShowHidden,sftpSort:defaultPreferences.sftpSort,confirmTransfer:defaultPreferences.confirmTransfer});break;
-      case "docker":onChange({...preferences,dockerTail:defaultPreferences.dockerTail,dockerAutoRefresh:defaultPreferences.dockerAutoRefresh,dockerFollowLogs:defaultPreferences.dockerFollowLogs});break;
+      case "files":onChange({...preferences,sftpShowHidden:defaultPreferences.sftpShowHidden,sftpSort:defaultPreferences.sftpSort,confirmTransfer:defaultPreferences.confirmTransfer,paneSizes:{...preferences.paneSizes,filesTree:defaultPaneSizes.filesTree,filesInspector:defaultPaneSizes.filesInspector}});break;
+      case "docker":onChange({...preferences,dockerTail:defaultPreferences.dockerTail,dockerAutoRefresh:defaultPreferences.dockerAutoRefresh,dockerFollowLogs:defaultPreferences.dockerFollowLogs,paneSizes:{...preferences.paneSizes,dockerInspector:defaultPaneSizes.dockerInspector,dockerLogs:defaultPaneSizes.dockerLogs}});break;
       default:break;
     }
     setNotice("Section preferences reset.");
@@ -168,6 +168,14 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
           {sectionCard("Theme and layout",<>
             <label className="prefRow"><span><strong>Theme</strong><small>Switch between deep navy and light workspace themes.</small></span><select value={preferences.theme} onChange={e=>update("theme",e.target.value as AppPreferences["theme"])}><option value="dark">Dark navy</option><option value="light">Light</option></select></label>
             <label className="prefRow"><span><strong>Display density</strong><small>Control the spacing of tables and interactive controls.</small></span><select value={preferences.density} onChange={e=>update("density",e.target.value as AppPreferences["density"])}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
+          </>)}
+          {sectionCard("Resizable workspace panels",<>
+            <p className="prefInfo">Drag the dividers in Files or Docker to resize panels. Use arrow keys while a divider is focused; double-click to restore its default. Sizes are kept only in local UI preferences, not in your encrypted Vault.</p>
+            {infoRow("Files tree / inspector", "Saved widths in pixels.",preferences.paneSizes.filesTree+" px / "+preferences.paneSizes.filesInspector+" px")}
+            {infoRow("Docker inspector / logs","Saved inspector width and log viewer height.",preferences.paneSizes.dockerInspector+" px / "+preferences.paneSizes.dockerLogs+" px")}
+            <div className="settingsActions"><button type="button" onClick={()=>{onChange({...preferences,paneSizes:{...defaultPaneSizes}});setNotice("Panel sizes restored to defaults.");}}><RefreshCw size={14}/> Reset all panel sizes</button></div>
+          </>)}
+
           </>)}
         </>}
         {section==="shortcuts"&&<>
