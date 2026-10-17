@@ -1107,7 +1107,6 @@ export default function App(){
  queueDownloads={paths=>enqueueSftpTransfer("download",paths)}
  readPreview={path=>void readSftpPreview(path)}
  preview={sftpPreview} previewBusy={sftpPreviewBusy}
- transferBusy={sftpTransferBusy}
  transferJobs={transferQueue.jobs} transferPaused={transferQueue.paused}
  onPauseQueue={transferQueue.setQueuePaused}
  onCancelJob={id=>void transferQueue.cancel(id)}
