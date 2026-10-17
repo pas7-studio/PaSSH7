@@ -1361,6 +1361,7 @@ fn docker_catalog_command(kind:&str)->Option<&'static str>{
         "volumes"=>Some("docker volume ls --format \"{{json .}}\""),
         "networks"=>Some("docker network ls --format \"{{json .}}\""),
         "stats"=>Some("docker stats --no-stream --format \"{{json .}}\""),
+        "compose"=>Some("docker compose ls --format json"),
         _=>None
     }
 }
@@ -1383,7 +1384,7 @@ mod docker_catalog_tests{
     use super::docker_catalog_command;
     #[test]
     fn only_fixed_read_only_catalog_commands_are_accepted(){
-        for kind in ["images","volumes","networks","stats"]{
+        for kind in ["images","volumes","networks","stats","compose"]{
             let command=docker_catalog_command(kind).unwrap();
             assert!(command.starts_with("docker "));
             assert!(command.contains("--format"));
