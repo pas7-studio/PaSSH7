@@ -111,7 +111,7 @@ test("production App retains one xterm per SSH session while docking and exports
   await page.keyboard.type("echo persistent");
   await page.keyboard.press("Enter");
   await expect.poll(()=>page.evaluate(()=>
-    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}}).__mockSshBridge.writes.length)
+    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}}).__mockSshBridge.writes.length
   )).toBeGreaterThan(0);
   const writes=await page.evaluate(()=>
     (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}}).__mockSshBridge.writes
