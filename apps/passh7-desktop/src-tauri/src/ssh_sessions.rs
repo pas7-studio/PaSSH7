@@ -1667,7 +1667,7 @@ foreach ($ext in @('.exe','.cmd','.bat','.ps1','')) {{
   if ($found) {{ break }}
   $which = Get-Command ($name + $ext) -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($which -and $which.Source -and
-      $which.Source -notmatch '\\\\WindowsApps\\\\' -and
+      $which.Source -notmatch '\\WindowsApps\\' -and
       (Test-Path -LiteralPath $which.Source -PathType Leaf)) {{
     $found = $which.Source
     $source = 'Shell PATH'
