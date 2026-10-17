@@ -22,6 +22,7 @@ export async function runNativeAppSession(page:Page){
     let dockerListFailure="";
     const exports:Array<{containerName:string;contents:string}>=[];
     const delayedSftp:Array<()=>void>=[];
+    const agentProbes:Array<{id:string;agent:string}>=[];
     const file=(name:string)=>({name,isDir:false,sizeBytes:100,modifiedAt:null,
       unixPermissions:null,ownerId:null,groupId:null});
     const sessions=[{id:"session-a",alias:"linux-test"},{id:"session-b",alias:"linux-test"},{id:"session-c",alias:"win-test"}];
@@ -63,6 +64,17 @@ export async function runNativeAppSession(page:Page){
           ID:"aaaaaaaaaaaa",Names:"api-test",Image:"api:latest",State:"running",Status:"Up 1 hour",Ports:""
         });
         case "ssh_session_docker_catalog":return "";
+        case "ssh_session_agent_probe":
+          agentProbes.push({id:String(args.id),agent:String(args.agent)});
+          if(args.agent==="codex")return {installed:true,version:"codex test v1",
+            platform:"unix",source:"PATH",location:null,desktopApp:null,
+            launchCommand:"codex",diagnostic:null};
+          if(args.agent==="claude")return {installed:false,version:null,
+            platform:"windows",source:null,location:null,desktopApp:"Claude",
+            launchCommand:null,diagnostic:"GUI only"};
+          return {installed:false,version:null,platform:"unix",
+            source:null,location:null,desktopApp:null,
+            launchCommand:null,diagnostic:"Not installed"};
         case "ssh_session_docker_inspect":return JSON.stringify({
           image:"api:latest",created:null,startedAt:null,finishedAt:null,restartPolicy:null,mounts:[],networks:[]
         });
@@ -98,7 +110,7 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_INTERNALS__=mock;
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
-      writes,resized,ready,exports,
+      writes,resized,ready,exports,agentProbes,
       localTouches(){return localTouches;},
       failDockerList(message:string){dockerListFailure=message;},
       pendingWrites(){return delayedWrites.length;},
@@ -321,5 +333,31 @@ export async function runNativeAppSession(page:Page){
   await page.getByRole("button",{name:"Retry inventory"}).click();
   await expect(page.locator(".dockerTableScroll tbody tr")).toHaveCount(1);
   await expect(page.locator(".dockerActionableError")).toHaveCount(0);
+
+  // One-click, scoped, read-only diagnostics: real React Settings UI with
+  // simulated native SSH/SFTP/Docker/CLI IPC and no agent launch or mutation.
+  await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
+  await page.locator(".sshTab").filter({hasText:"linux-test"}).first().click();
+  await page.locator(".workspaceNav button").filter({hasText:"Settings"}).click();
+  await page.locator(".settingsNav button").filter({hasText:"About & Diagnostics"}).click();
+  await expect(page.getByLabel("Remote host health check")).toBeVisible();
+  await page.getByRole("button",{name:"Run host checks"}).click();
+  await expect(page.getByLabel("Remote host health check")).toContainText("Docker inventory works");
+  await expect(page.getByLabel("Remote host health check")).toContainText("SFTP directory access works");
+  await expect(page.getByLabel("Remote host health check")).toContainText("Remote terminal CLI available");
+  await expect(page.getByLabel("Remote host health check")).toContainText("Windows desktop application detected");
+  await expect(page.getByLabel("Remote host health check")).toContainText("No usable CLI found");
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{agentProbes:Array<{id:string;agent:string}>}})
+      .__mockSshBridge.agentProbes.length
+  )).toBe(3);
+  const probes=await page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{agentProbes:Array<{id:string;agent:string}>}})
+      .__mockSshBridge.agentProbes
+  );
+  expect(probes.every(item=>item.id==="session-a")).toBe(true);
+  await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
+  await expect(page.getByLabel("Remote host health check")).toContainText("Not checked yet");
+  await expect(page.getByLabel("Remote host health check")).not.toContainText("codex test v1");
   expect(browserErrors).toEqual([]);
 }
