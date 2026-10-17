@@ -4,7 +4,7 @@
  * No real Vault, SSH session or Docker daemon is opened by this page.
  */
 import {useState} from "react";
-import {Activity,Bot,ChevronDown,Command,Container,FileText,FolderClosed,LockKeyhole,Network,Search,Server,Settings2,ShieldCheck,TerminalSquare} from "lucide-react";
+import {Bot,ChevronDown,Command,Container,FolderClosed,LockKeyhole,Network,Search,Server,Settings2,ShieldCheck,TerminalSquare} from "lucide-react";
 import RemoteFilesWorkspace from "./RemoteFilesWorkspace";
 import DockerWorkspace from "./DockerWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
@@ -142,11 +142,11 @@ export default function ReferenceScreens(){
           backupPanel={<section className="vaultBackupCard"><strong>Encrypted Vault backups</strong><p className="prefInfo">Reference layout only · No actual vault or files are accessed.</p></section>}
         />:<DockerWorkspace
           host="dev-server" session="visual-fixture" connected={true} items={containerRows} stats={dockerStats} statsError=""
-          details={{session:"visual-fixture",containerId:containerRows[0].ID,data:dockerDetails}} detailsError={null}
+          details={{session:"visual-fixture",containerId:chosenContainer.ID,data:{...dockerDetails,image:chosenContainer.Image}}} detailsError={null}
           onInspect={id=>{const selectedRow=containerRows.find(c=>c.ID===id);if(selectedRow)setChosenContainer(selectedRow)}}
           paneSizes={preferences.paneSizes} onPaneSize={pane}
           loading={false} error="" actionStatus={null} actionBusy=""
-          logs={{session:"visual-fixture",containerId:containerRows[0].ID,containerName:containerRows[0].Names,text:logs}}
+          logs={{session:"visual-fixture",containerId:chosenContainer.ID,containerName:chosenContainer.Names,text:logs}}
           logsBusy={false} logsError="" tail={preferences.dockerTail} follow={false}
           liveStatus="off" onFollow={()=>{}} onTail={()=>{}}
           autoRefresh={false} onAutoRefresh={()=>{}} onRefresh={()=>{}}
