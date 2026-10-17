@@ -1418,6 +1418,55 @@ pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>
     manager.sender(&id)?.send(SessionCommand::Close).await.map_err(|_| "SSH session already closed".to_owned())
 }
 
+/// All Docker list/catalog invocations use the documented literal JSON
+/// output mode, avoiding shell-specific Go-template quoting on Windows SSH.
+/// Reduce each record BEFORE IPC so container command lines, labels and other
+/// unrelated potentially sensitive Docker metadata never enter the WebView.
+fn safe_docker_json_lines(kind:&str,raw:&str)->Result<String,String>{
+    let fields:&[&str]=match kind{
+        "containers"=>&["ID","Names","Image","State","Status","Ports"],
+        "images"=>&["Repository","Tag","ID","Size","CreatedSince"],
+        "volumes"=>&["Name","Driver","Scope"],
+        "networks"=>&["Name","ID","Driver","Scope"],
+        "stats"=>&["ID","Name","CPUPerc","MemUsage","MemPerc"],
+        "compose"=>&["Name","Status","ConfigFiles"],
+        value if value.starts_with("compose-project:")=>&["ID","Names","Image","State","Status","Ports"],
+        _=>return Err("Unsupported Docker catalog projection".into()),
+    };
+    let sanitize=|value:&serde_json::Value|->Result<serde_json::Value,String>{
+        let source=value.as_object().ok_or_else(||"Docker JSON record is not an object".to_owned())?;
+        let mut safe=serde_json::Map::new();
+        for field in fields{
+            if let Some(value)=source.get(*field){
+                if value.is_string()||value.is_number()||value.is_boolean(){
+                    safe.insert((*field).to_owned(),value.clone());
+                }
+            }
+        }
+        Ok(serde_json::Value::Object(safe))
+    };
+    if kind=="compose"{
+        let array:serde_json::Value=serde_json::from_str(raw.trim())
+            .map_err(|_|"Docker Compose did not return a JSON project array".to_owned())?;
+        let projects=array.as_array()
+            .ok_or_else(||"Docker Compose returned an unexpected project format".to_owned())?;
+        if projects.len()>250{return Err("Docker Compose returned more than 250 projects".into())}
+        let mut safe=Vec::with_capacity(projects.len());
+        for project in projects{safe.push(sanitize(project)?);}
+        return serde_json::to_string(&safe).map_err(|_|"Docker project serialization failed".into());
+    }
+    let mut lines=Vec::new();
+    for line in raw.lines().filter(|line|!line.trim().is_empty()){
+        if lines.len()>=2000{return Err("Docker catalog exceeded 2000 records".into())}
+        let value:serde_json::Value=serde_json::from_str(line.trim())
+            .map_err(|_|"Could not parse Docker JSON output; verify Docker CLI supports --format json".to_owned())?;
+        let safe=sanitize(&value)?;
+        lines.push(serde_json::to_string(&safe)
+            .map_err(|_|"Docker row serialization failed".to_owned())?);
+    }
+    Ok(lines.join("\n"))
+}
+
 /// Fixed commands only: no user-supplied shell command or arbitrary container
 /// names. The catalog response is bounded in the SSH actor.
 fn docker_catalog_command(kind:&str)->Option<String>{
