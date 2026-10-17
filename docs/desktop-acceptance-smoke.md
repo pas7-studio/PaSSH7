@@ -115,6 +115,7 @@ during this checklist. Use a throwaway identity and Docker container.
 | AGENT-UI-09 | Lock Vault or disconnect while AI Agents embedded terminal is running | Terminal disappears, old session events cannot be routed to another host, and launch/check actions disable immediately |
 | AGENT-UI-10 | Start Check installed tools on host A, then switch immediately to host B before the native probe completes | Host B never displays A's errors, versions or completion notice; A's stale request cannot leave B's Check installed tools button busy; fresh B probe succeeds |
 | AGENT-UI-11 | Initiate CLI launch on host A, quickly change selected host before SSH write resolves | No misleading A launch success or failure banner is shown on B. The original SSH command is never retargeted to B |
+| SSH-DISCONNECT-UI-01 | While viewing Docker or AI Agents, terminate the selected SSH connection unexpectedly | A persistent, accessible host-labelled banner appears outside the hidden Terminal panel, with Reconnect (when Vault remains unlocked) and Dismiss; other hosts' PTYs, logs and connections remain unaffected |
 | AGENT-UI-06 | Have two sessions for the same host and select one in AI Agent | Launch targets the explicitly selected session; no command is written to a different host |
 | AGENT-UI-07 | Copy SSH context; inspect remote terminal and settings | Context contains non-secret host and route information only; no passwords, private keys or Vault secrets are copied or supplied to the agent |
 
