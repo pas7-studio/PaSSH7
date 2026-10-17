@@ -34,14 +34,14 @@ Migration layer: apps/passh7-desktop/src/reference-ui.css, loaded after legacy s
 
 | Workstream | Implemented in redesign branch | Remaining |
 | --- | --- | --- |
-| AppShell | single left rail, active-host header, page navigation, persistent sidebar visibility | interactive Windows WebView2 and full accessibility audit |
+| AppShell | persistent left rail, native active-host header, shared WorkspaceHeader/Status/Metric/Empty foundations, consistent light/dark design language and optional terminal inspector | interactive Windows WebView2 and deep accessibility audit |
 | Settings | 12 sections with functional collapsible cards, remembered category, live xterm font/cursor controls, inspector rail, import/export and pane reset | native config/log folders and advanced backend settings |
 | Remote Files | lazy SFTP tree with active-path reveal, text preview and bounded raster image preview (PNG/JPEG/GIF/WebP ≤768 KiB), history, resizable tree/inspector, multiselect, serial transfer queue (pause pending, cancel, retry, progress/history) and Vault backups | multi-file native upload picker, pause/resume active transfer, large files |
 | Docker | resource tabs, native KPIs, CPU/RAM sortable inventory, sanitized inspector, live/fullscreen logs, split sizes, confirmed container shell, read-only Compose project discovery and project-container listing | Compose service controls, mutations, richer metrics and Windows live verification |
-| Connections | Vault hosts, fingerprint state, connection and terminal actions | host groups/tags, favorites |
-| Snippets | command cards, user-entered command with explicit SSH confirmation | encrypted reusable user snippets, platform-aware templates |
-| Port Forwarding | standalone native SSH forwarding workspace | presets and recovery experience |
-| AI Agents | dedicated workspace, remote probes and PTY launches | scoped MCP agent broker is future work |
+| Connections | Vault hosts, verified/offline/connected status, group-aware search, accessible keyboard table, All/Connected/Trusted filters, side inspector and authenticated actions | persisted host groups/tags, favorites |
+| Snippets | unified categorized command cards, searchable Shell/System/Docker templates, review/copy/run inspector, keyboard shortcut and existing explicit PTY confirmation | encrypted reusable user snippets, platform-aware templates |
+| Port Forwarding | unified SSH tunnel dashboard, route preview, loopback bind guarantee, accessible table, selected endpoint inspector and copy/stop actions | presets and recovery experience |
+| AI Agents | unified target-status header, honest detected/missing status, remotely checked CLI selection, explicit PTY launches and prominent permission summary | scoped MCP agent broker is future work |
 
 ## Security and transport truth
 
@@ -74,7 +74,7 @@ Do not claim release readiness or exact pixel parity based on CI alone; Windows 
 
 The approved Settings / Remote Files / Docker mockups remain the canonical visual target.
 The actual workspace React components have a **development-only** deterministic fixture at
-`?__reference=1&screen=settings|files|docker`. It is watermarked and does not
+`?__reference=1&screen=connections|terminal|files|docker|ports|snippets|agent|settings`. It is watermarked and does not
 connect to SSH, Vault or Docker. The CI build gate checks that `DEV UI FIXTURE`
 is absent from the production Vite bundle.
 
@@ -82,9 +82,9 @@ is absent from the production Vite bundle.
 on the existing self-hosted runner. It uses Chromium bundled with an isolated
 npm test dependency, not the blocked Playwright CDN, AWS, or hosted Actions runners.
 
-Last green visual evidence: https://github.com/pas7-studio/PaSSH7/actions/runs/39031809762
-- Nine screenshots: three workspaces at 1440x900, 1920x1080 and 900x720.
-- Viewport overflow, required layout elements, resize keyboard, accordion and Docker search checks.
+Last green visual evidence: https://github.com/pas7-studio/PaSSH7/actions/runs/39033405449
+- Twenty-four screenshots: all eight workspaces at 1440x900, 1920x1080 and 900x720.
+- Viewport overflow, real layout/card tables and inspectors, resizing by keyboard, Settings accordion, Docker search, Connections filters and Snippets categories.
 - Actual offline App sidebar persistence across reload and header restore.
 - Screenshot artifact: `PaSSH7-reference-UI-screenshots`.
 
@@ -95,3 +95,12 @@ acceptance with pinned SSH test hosts remains a separate release gate.
 For local reference screenshots: install desktop npm dependencies, run Vite on
 127.0.0.1:4187, open `http://127.0.0.1:4187/?__reference=1&screen=settings`,
 and use `apps/passh7-desktop/tests/visual` for isolated Playwright tests.
+
+## Full UI consistency pass
+
+- Shared `WorkspaceChrome.tsx`: one page header, status, empty-state and metric vocabulary for Connections, Terminal-adjacent workflows, Files, Docker, Ports, Snippets, Agents and Settings. The design layer reuses navy color, spacing, form, error and focus tokens.
+- Real terminal view now prioritizes a full-width SSH canvas. Session details are hidden by default and can be reopened with a button. SSH session tabs use separate keyboard-focusable select/disconnect buttons, not a clickable nested span.
+- Native dialogs (Vault, host onboarding, SSH login) use a unified high-contrast modal treatment, keyboard focus and responsive bounds without altering credential flow.
+- The screenshot fixture for Terminal contains only illustrative text, not a running PTY. Other screens use real React components with synthetic data only in the DEV fixture. All fixtures remain excluded from the production bundle by CI.
+- Last 24-screenshot validation: https://github.com/pas7-studio/PaSSH7/actions/runs/39033405449. This verifies browser layout, not Windows WebView2 fonts/metrics or real SSH behavior.
+
