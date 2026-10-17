@@ -1,6 +1,7 @@
 import {useEffect,useMemo,useState,type ReactNode} from "react";
 import {ArrowLeft,ArrowRight,ArrowUp,Clipboard,Download,FileText,FolderClosed,FolderPlus,Home,Pencil,RefreshCw,Search,Trash2,Upload} from "lucide-react";
 import type {SftpEntry} from "./backend";
+import RemoteDirectoryTree from "./RemoteDirectoryTree";
 
 const size=(n:number|null)=>n===null?"—":n<1024?n+" B":n<1048576?(n/1024).toFixed(1)+" KiB":(n/1048576).toFixed(2)+" MiB";
 const full=(dir:string,name:string)=>dir.replace(/\/$/,"")+"/"+name;
@@ -102,13 +103,10 @@ export default function RemoteFilesWorkspace(p:Props){
     </div>
     {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
     <div className="filesGrid">
-      <nav className="filesFolders" aria-label="Remote folder navigation"><div className="paneTitle">FOLDERS</div>
-        <button onClick={()=>open("/")} disabled={!p.connected}>/ Root</button>
-        {crumbs(path).slice(1).map((c,i)=><button key={c.path} className={i===crumbs(path).length-2?"selected":""} onClick={()=>open(c.path)}>↳ <FolderClosed size={14}/> {c.label}</button>)}
-        <div className="paneTitle">SUBFOLDERS</div>
-        {dir?.items.filter(item=>item.isDir).map(item=><button key={item.name} onClick={()=>open(full(path,item.name))}><FolderClosed size={14}/> {item.name}</button>)}
-        {!dir&&<p>Connect and browse to load remote folders.</p>}
-      </nav>
+      <div className="filesFolders"><RemoteDirectoryTree session={p.session} connected={p.connected} currentPath={path} onNavigate={open}/>
+        <div className="remoteCurrentFolder"><strong>CURRENT DIRECTORY</strong>
+          <button type="button" title={path} disabled={!p.connected} onClick={()=>open(path)}><FolderClosed size={14}/><span>{path}</span></button></div>
+      </div>
       <div className="filesTablePane"><div className="paneTitle">{path} <span>{dir?Math.min(items.length,visibleLimit)+" of "+items.length+" entries":"Not loaded"}</span></div>
         <div className="filesTableWrap"><table className="workspaceTable"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Permissions</th><th>Type</th></tr></thead><tbody>
           {renderedItems.map(item=><tr key={item.name} tabIndex={0} role="row" aria-selected={item.name===selected} className={item.name===selected?"selected":""}
@@ -140,11 +138,12 @@ export default function RemoteFilesWorkspace(p:Props){
         </>:<div className="workspaceEmpty">Select a file to see details and preview its contents.</div>}
       </aside>
     </div>
-    {(p.transferProgress?.session===p.session||p.transferResult)&&<div className="wideTransferQueue"><strong>Transfer queue</strong>
+    <div className="wideTransferQueue"><strong>Transfer queue</strong>
       {p.transferProgress?.session===p.session&&<div className="transferRow"><span>{p.transferProgress.direction==="upload"?"Uploading":"Downloading"} · {p.transferProgress.stage}</span><span>{size(p.transferProgress.bytes)} / {size(p.transferProgress.totalBytes)}</span>
         <progress value={p.transferProgress.bytes} max={Math.max(1,p.transferProgress.totalBytes||1)}/><button onClick={p.cancelTransfer} disabled={p.transferProgress.stage==="cancelling"}>Cancel</button></div>}
       {p.transferResult&&<p role="status">{p.transferResult}</p>}
-    </div>}
+      {!(p.transferProgress?.session===p.session)&&!p.transferResult&&<p className="transferQueueEmpty">No active transfers. Upload and download activity will appear here.</p>}
+    </div>
     <div className="filesVaultSection">{p.backupPanel}</div>
   </div>;
 }
