@@ -534,6 +534,10 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::DockerLogStart(container_id,tail,stream_id,response)) => {
+                            if docker_log_streams.len()>=2{
+                                let _=response.send(Err("Close an existing live log viewer on this SSH session before starting another".into()));
+                                continue;
+                            }
                             // Establish a dedicated exec channel. The regular PTY remains
                             // responsive; no Docker log bytes are stored in native memory.
                             let setup=tokio::time::timeout(Duration::from_secs(10),async {
