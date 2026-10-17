@@ -8,6 +8,8 @@ import AgentWorkspace from "./AgentWorkspace";
 import ConnectionsWorkspace from "./ConnectionsWorkspace";
 import SnippetsWorkspace from "./SnippetsWorkspace";
 import PortForwardingWorkspace from "./PortForwardingWorkspace";
+import QuickSwitch from "./QuickSwitch";
+import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
@@ -884,6 +886,10 @@ export default function App(){
   const sidebar=preferences.sidebarExpanded;
   const toggleSidebar=()=>updatePreferences({...preferences,sidebarExpanded:!sidebar});
   const [commandOpen,setCommandOpen]=useState(false);
+  const topDialog=commandOpen?"quick-switch":configImportOpen?"ssh-import":keyDialog?"identity":
+    loginOpen?"ssh-login":tofuCandidate?"host-trust":accessOpen?"windows-access":
+    vaultDialog?"vault":deleteTarget?"confirm-delete":addOpen?"host-wizard":null;
+  useModalFocus(topDialog);
 
   const [theme,setTheme]=useState<"dark"|"light">(()=>loadPreferences().theme);
   const [buildInfo,setBuildInfo]=useState<BuildInfo|null>(null);
@@ -1335,7 +1341,18 @@ export default function App(){
       {error&&<p role="alert" className="wizardError">{error}</p>}
       <div className="wizardActions"><button onClick={()=>step===0?setAddOpen(false):setStep(step-1)}>{step===0?"Cancel":"Back"}</button><button className="primary" onClick={async()=>{const issue=validateHostDraft({...draft,fingerprint:step<2?"":draft.fingerprint,identity:step===0?"placeholder":draft.identity});if(step===0&&(!draft.label.trim()||!draft.hostname.trim()||!draft.username.trim()||draft.port<1||draft.port>65535)){setError("Complete the connection details");return}if(step>=1&&issue){setError(issue);return}setError("");if(step<3){setStep(step+1);return}if(desktopAvailable()){try{await addHost({alias:draft.label,hostname:draft.hostname,port:draft.port,username:draft.username,identityAlias:draft.auth==="password"?"":draft.identity,pinnedHostKey:draft.fingerprint||null});const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias})));setSelected(draft.label);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false)}catch(err){setError(String(err))}return}const id="preview-"+Date.now();setHosts(v=>[...v,{id,label:draft.label,address:draft.hostname,user:draft.username,port:draft.port,group:"My hosts",fingerprint:!!draft.fingerprint,identityAlias:draft.auth==="password"?"":draft.identity}]);setSelected(id);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false);}}> {step===3?(desktopAvailable()?"Save host":"Add to preview"):"Continue"} </button></div>
     </div></div>}
-    {commandOpen&&<div className="overlay" onMouseDown={()=>setCommandOpen(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Search size={18}/> Quick switch <button onClick={()=>setCommandOpen(false)} aria-label="Close"><X size={17}/></button></div><p>Switch to a host</p>{hosts.map(h=><button className="paletteHost" key={h.id} onClick={()=>{setSelected(h.id);setCommandOpen(false)}}><Server size={16}/>{h.label}<small>{h.address}</small></button>)}</div></div>}
+    {commandOpen&&<div className="overlay quickSwitchOverlay" onMouseDown={()=>setCommandOpen(false)}>
+      <div className="modal quickSwitchModal" role="dialog" aria-modal="true" aria-label="Quick switch"
+        onMouseDown={e=>e.stopPropagation()}>
+        <div className="quickSwitchTitle"><Command size={17}/><strong>Quick switch</strong>
+          <button type="button" aria-label="Close" onClick={()=>setCommandOpen(false)}><X size={17}/></button>
+        </div>
+        <QuickSwitch hosts={hosts} connectedAliases={sshTabs.map(t=>t.alias)} selected={selected}
+          onChooseHost={setSelected}
+          onWorkspace={route=>setPanel(route)}
+          onClose={()=>setCommandOpen(false)}/>
+      </div>
+    </div>}
 
   </div>;
 }
