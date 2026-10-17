@@ -1,0 +1,133 @@
+/* PaSSH7 reference UI (2026-10-17)
+   Canonical reference: Settings / Remote Files / Docker dark navy desktop mocks.
+   This layer intentionally follows legacy styles.css until workspaces finish migration. */
+.shell{
+ --bg:#081420;--panel:#0d1b2c;--panel2:#112237;--surface:#182c45;
+ --border:#253a52;--fg:#ecf4ff;--muted:#94a9c5;
+ --accent:#3287ff;--accentSoft:#173d72;--positive:#43d78d;
+ background:radial-gradient(ellipse 70% 80% at 85% 5%,#112640 0%,transparent 70%),var(--bg);
+ color:var(--fg);font-family:Inter,"Segoe UI Variable","Segoe UI",system-ui,sans-serif;
+ font-size:13px;letter-spacing:.003em}
+.shell.light{--bg:#eaf0f9;--panel:#fff;--panel2:#f4f7fc;--surface:#e6effb;--border:#cddbec;--fg:#15263a;--muted:#586d83;--accent:#2369cf;--accentSoft:#dceafb;--positive:#157e5b}
+.shell button{transition:background-color .14s ease,color .14s ease,border-color .14s ease}
+.shell button:focus-visible,.shell [role=button]:focus-visible,.shell input:focus-visible,.shell select:focus-visible,.shell textarea:focus-visible{outline:2px solid #66afff;outline-offset:2px}
+.shell button:disabled{opacity:.47}
+.topbar{height:61px;min-height:61px;border-bottom:1px solid var(--border);background:#0b1827;gap:0;padding:0}
+.shell.light .topbar{background:var(--panel)}
+.topbar .brand{align-self:stretch;width:222px;min-width:222px;border-right:1px solid var(--border);padding:0 17px;gap:12px}
+.topbar .brand strong{font-size:16px;color:var(--fg);letter-spacing:-.3px}
+.topbar .brandicon{border:1px solid #547394;background:transparent;border-radius:7px;padding:6px;color:#dcecff}
+.topbar .alpha{display:none}
+.topHost{display:flex;align-items:center;gap:13px;padding:0 16px;min-width:0;flex:1}
+.topHost .hostSelectIcon{height:34px;width:34px;flex:none;border:1px solid #3d7bd2;border-radius:7px;background:#122c4d;color:#6eb7ff;display:grid;place-items:center}
+.topHost .hostDot{height:11px;width:11px}
+.topHostIdentity{display:flex;flex-direction:column;gap:4px;min-width:0}
+.topHostIdentity strong{font-size:13px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topHostIdentity small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topHost .hostStatusLabel{font-size:11px;color:var(--muted);border:1px solid var(--border);padding:4px 7px;border-radius:6px;white-space:nowrap}
+.topactions{padding:0 13px;gap:8px}
+.topactions .topQuickButton{display:flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid #3c5673;border-radius:6px;background:var(--panel);color:var(--fg);font-size:11px;white-space:nowrap}
+.topactions .topDisconnect{color:#ff7883;border-color:#893b4d;background:#201b2a}
+.topactions .topDisconnect:disabled{opacity:.5}
+.topactions .lock{border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--muted);font-size:11px;white-space:nowrap}
+.workspace{background:transparent}
+.sidebar{width:222px;padding:11px 9px 12px;border-right:1px solid var(--border);background:linear-gradient(160deg,#0e1e31,#0a1725);scrollbar-width:thin}
+.shell.light .sidebar{background:var(--panel)}
+.workspaceNav{gap:3px;padding-bottom:13px;margin-bottom:14px}
+.workspaceNav button{min-height:38px;padding:10px 11px;color:#bfcee0;font-size:12px;font-weight:550;border-radius:6px;gap:12px}
+.workspaceNav button.active{color:#fff;background:linear-gradient(105deg,#2268d2,#2b86ff);box-shadow:inset 3px 0 0 #64a9ff,0 2px 8px #052a5c44}
+.workspaceNav button:hover{background:#193956}
+.workspaceNav button.active:hover{background:#2a75e4}
+.sidebar .sectionHeading{margin-top:2px;color:#bbcce2;font-size:11px;letter-spacing:.05em}
+.sidebar .search{background:#0d1d2e;border:1px solid #28415e;padding:9px}
+.sidebar .groupLabel{font-size:11px;letter-spacing:0;color:#c4d3e7;margin:16px 8px 6px}
+.sidebar .host{padding:8px 11px;border-radius:6px;color:#bcd0e7;gap:10px}
+.sidebar .host.selected{background:#1b3553;border-color:#1f3a5b}
+.sidebar .hostText strong{font-size:11px;font-weight:570}
+.sidebar .hostText small{font-size:10px;line-height:1.35}
+.sidebar .hostDot{order:-1}
+.sidebar .sidebottom{border-top:1px solid var(--border)}
+.main{background:transparent}
+.workspaceFull>.main{display:none}
+.workspaceFull>.context.fullContext{background:transparent}
+.fullContext>.contextBody{scrollbar-width:thin}
+.context{background:var(--panel)}
+.widePage{max-width:none;padding:16px 17px 22px;gap:13px}
+.widePageTitle{min-height:56px;gap:15px;padding-bottom:2px}
+.widePageTitle>svg{color:#4aa9ff;width:34px;height:34px;stroke-width:1.7}
+.widePageTitle h1{font-size:24px;letter-spacing:-.45px;margin:0 0 5px}
+.widePageTitle p{font-size:12px;color:#a4b8d4}
+.widePageTitle .workspaceConnected,.widePageTitle .workspaceOffline{font-size:11px}
+.widePage button,.widePage select,.widePage input{background:#102137;border:1px solid #314b6a;border-radius:6px;color:var(--fg);font-size:11px}
+.widePage button:hover:not(:disabled){background:#1c3758;border-color:#508aca}
+.widePage .workspacePrimary{background:linear-gradient(90deg,#206cdf,#3389fc);border-color:#408ffa;font-weight:650}
+.widePage .workspacePrimary:hover:not(:disabled){background:#287cf0}
+.workspaceTable{font-size:11px;color:#cbd9eb}
+.workspaceTable thead th{background:#16283e;color:#bdcce0;border-bottom:1px solid #304761;letter-spacing:.015em;font-weight:600}
+.workspaceTable tbody td{border-bottom:1px solid #21354c}
+.workspaceTable tbody tr:hover{background:#183553}
+.workspaceTable tbody tr.selected{background:#13447c}
+.workspaceTable tbody tr:nth-child(2n):not(.selected){background:#0c1b2b55}
+.filesFolders,.filesTablePane,.filesInspector,.dockerContainersPane,.dockerInspector,.dockerLogViewer,.settingsCard,.dockerCatalogWorkspace,.vaultBackupCard{background:linear-gradient(180deg,#102037,#0c1b2c);border:1px solid #2b425e;border-radius:9px}
+.shell.light .filesFolders,.shell.light .filesTablePane,.shell.light .filesInspector,.shell.light .dockerContainersPane,.shell.light .dockerInspector,.shell.light .dockerLogViewer,.shell.light .settingsCard,.shell.light .dockerCatalogWorkspace,.shell.light .vaultBackupCard{background:var(--panel)}
+.paneTitle{color:#d9e7f7;font-size:12px;font-weight:650}
+.dockerMetrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.dockerMetrics>div{border:1px solid #2a435e;background:linear-gradient(160deg,#10243b,#0c1b2d);padding:13px 15px;border-radius:8px;gap:6px;min-height:91px}
+.dockerMetrics small{font-size:11px;color:#bfcee2}
+.dockerMetrics strong{font-size:23px;line-height:1.15}
+.dockerResourceTabs{gap:7px}
+.dockerResourceTabs button.active{background:#1b67c8;color:#fff;border-color:#287bf1}
+.dockerWorkspaceGrid{grid-template-columns:minmax(0,1fr) minmax(245px,24%);height:clamp(325px,43vh,550px);gap:11px}
+.dockerLogViewer{height:clamp(240px,30vh,380px);min-height:240px;overflow:hidden}
+.dockerLogToolbar{gap:9px}
+.dockerLogsBody{background:#081522;scrollbar-width:thin}
+.dockerLogLine:nth-child(even){background:#10203770}
+.dockerLogLine code{color:#c6dbf1}
+.dockerLogsBody .logError{color:#ff858c}
+.dockerLogsBody .logWarn{color:#f5c565}
+.dockerStatus.running{background:#0b4e35;color:#53ee9a}
+.dockerStatus.stopped{background:#4d2233;color:#ffa2a7}
+.filesGrid{grid-template-columns:minmax(150px,20%) minmax(0,1fr) minmax(240px,25%);gap:11px;height:clamp(370px,49vh,635px)}
+.filesFolders{padding:8px}
+.filesFolders .paneTitle{padding:10px}
+.filesFolders button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;justify-content:flex-start}
+.filesFolders button.selected{background:#154a86;border-color:#266ec5}
+.filesInspector{overflow:auto}
+.filesPathBar{gap:7px}
+.filesCrumbs{background:#0d1e32;border:1px solid #2d455f;border-radius:6px}
+.filesActions{gap:7px}
+.filesActions .filesToolbarSpacer{flex:1}
+.wideTransferQueue{background:#10243a;border:1px solid #2d4867;border-radius:8px}
+.filesVaultSection .vaultBackupCard{border:1px solid #2b4868;border-radius:8px;background:linear-gradient(125deg,#112641,#0c1e31)}
+.agentHero,.agentSection{background:linear-gradient(155deg,#10243c,#0c1d30)}
+.agentPage .agentCard{background:#13273e}
+.agentPage .agentCard.active{background:#17447d}
+.agentContextPreview,.agentLaunchCommand{background:#081728}
+.settingsPage .settingsLayout{grid-template-columns:minmax(190px,220px) minmax(0,1fr) minmax(230px,280px);gap:12px}
+.settingsPage .settingsNav{border:1px solid #2a405a;border-radius:9px;background:#0d1e30;padding:7px;align-self:start;gap:3px}
+.settingsPage .settingsNav button{text-align:left;align-items:center;gap:11px;padding:10px;border-radius:6px;min-height:54px;border:1px solid transparent;background:transparent}
+.settingsPage .settingsNav button.selected{background:linear-gradient(105deg,#1959b8,#2678ed);border-color:#2e81f3;color:#fff}
+.settingsPage .settingsNav button.selected small{color:#c7ddfc}
+.settingsPage .settingsNav strong{font-size:12px}
+.settingsPage .settingsNav small{font-size:10px;color:#91a9c7}
+.settingsHeading{padding:6px 9px 3px;align-items:start}
+.settingsHeading h2{font-size:18px}
+.settingsHeading p{font-size:12px}
+.settingsCard{padding:15px 16px;gap:0}
+.settingsCard h3{font-size:13px;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:1px}
+.settingsCard p{font-size:11px;line-height:1.65}
+.prefRow{padding:11px 0;min-height:54px}
+.prefRow strong{font-size:11px;font-weight:650}
+.prefRow small{font-size:10px;color:#a3b4ce}
+.prefRow input[type=checkbox]{accent-color:var(--accent);width:17px;height:17px}
+.settingsHelp{gap:11px}
+.settingsHelp .settingsCard{padding:15px}
+.settingsHelp h3{margin:0 0 8px}
+.settingsHelp .settingsCard p{line-height:1.65;margin:7px 0}
+.settingsHelp .diagnosticList{padding:10px 0}
+.settingsImportBar{justify-content:flex-end}
+.settingsImportBar button{font-size:11px}
+.settingsPage .settingsDanger{border-color:#a64a59!important;color:#ff8f98!important;background:#271a2a!important}
+@media(max-width:1250px){.settingsPage .settingsLayout{grid-template-columns:minmax(160px,195px) minmax(0,1fr)}.settingsHelp{grid-column:2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.dockerWorkspaceGrid{grid-template-columns:minmax(0,1fr) 270px}}
+@media(max-width:900px){.topbar .brand{min-width:184px;width:184px}.sidebar{width:184px}.topHost .hostStatusLabel{display:none}.widePage{padding:12px}.filesGrid{grid-template-columns:minmax(150px,1fr) minmax(0,2fr);height:auto}.filesInspector{grid-column:1/-1;max-height:340px}.settingsPage .settingsLayout{grid-template-columns:170px minmax(0,1fr)}}
+@media(max-width:680px){.topbar .brand{min-width:60px;width:60px}.topbar .brand strong{display:none}.topactions .topQuickButton{padding:8px}.topactions .topQuickButton span{display:none}.topHost{gap:8px;padding:0 8px}.sidebar{width:60px;padding:9px 4px}.workspaceNav button{font-size:0;justify-content:center;padding:10px}.workspaceNav button svg{width:19px;height:19px}.sidebar .sectionHeading,.sidebar .search,.sidebar .groupLabel,.sidebar .hostText,.sidebar .sidebottom,.sidebar .identityManage{display:none}.sidebar .host{justify-content:center}.sidebar .hostDot{order:0}.settingsPage .settingsLayout{display:flex;flex-direction:column}.settingsPage .settingsNav{display:flex;overflow-x:auto;width:100%;max-width:100%}.settingsPage .settingsNav button{min-width:135px}.settingsHelp{display:flex;flex-direction:column;width:100%}.dockerWorkspaceGrid{display:flex;flex-direction:column;height:auto}.dockerInspector{min-height:235px}}
