@@ -2,6 +2,8 @@ import {useEffect,useMemo,useState,type ReactNode} from "react";
 import {ArrowLeft,ArrowRight,ArrowUp,Clipboard,Download,FileText,FolderClosed,FolderPlus,Home,Pencil,RefreshCw,Search,Trash2,Upload} from "lucide-react";
 import type {SftpEntry} from "./backend";
 import RemoteDirectoryTree from "./RemoteDirectoryTree";
+import PaneResizeHandle from "./PaneResizeHandle";
+import {defaultPaneSizes,type PaneSizes} from "./preferences";
 
 const size=(n:number|null)=>n===null?"—":n<1024?n+" B":n<1048576?(n/1024).toFixed(1)+" KiB":(n/1048576).toFixed(2)+" MiB";
 const full=(dir:string,name:string)=>dir.replace(/\/$/,"")+"/"+name;
@@ -30,9 +32,14 @@ type Props={
   preview:Preview;previewBusy:boolean;
   transferBusy:boolean;transferProgress:Progress;transferResult:string|null;
   cancelTransfer:()=>void;backupPanel:ReactNode;
+  paneSizes:PaneSizes;onPaneSize:(key:keyof PaneSizes,value:number)=>void;
 };
 export default function RemoteFilesWorkspace(p:Props){
   const [selected,setSelected]=useState<string>("");
+  const [treeWidth,setTreeWidth]=useState(p.paneSizes.filesTree);
+  const [inspectorWidth,setInspectorWidth]=useState(p.paneSizes.filesInspector);
+  useEffect(()=>setTreeWidth(p.paneSizes.filesTree),[p.paneSizes.filesTree]);
+  useEffect(()=>setInspectorWidth(p.paneSizes.filesInspector),[p.paneSizes.filesInspector]);
   const [visibleLimit,setVisibleLimit]=useState(250);
   const [history,setHistory]=useState<string[]>([]);
   const [historyIndex,setHistoryIndex]=useState(-1);
@@ -102,11 +109,13 @@ export default function RemoteFilesWorkspace(p:Props){
       <select value={p.sort} onChange={e=>p.setSort(e.target.value as Props["sort"])} aria-label="File sorting"><option value="folders">Folders first</option><option value="name">By name</option><option value="size">Largest first</option><option value="modified">Newest first</option></select>
     </div>
     {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
-    <div className="filesGrid">
+    <div className="filesGrid resizableFilesGrid" style={{gridTemplateColumns:`minmax(150px,${treeWidth}px) 7px minmax(210px,1fr) 7px minmax(245px,${inspectorWidth}px)`}}>
       <div className="filesFolders"><RemoteDirectoryTree session={p.session} connected={p.connected} currentPath={path} onNavigate={open}/>
         <div className="remoteCurrentFolder"><strong>CURRENT DIRECTORY</strong>
           <button type="button" title={path} disabled={!p.connected} onClick={()=>open(path)}><FolderClosed size={14}/><span>{path}</span></button></div>
       </div>
+      <PaneResizeHandle label="Remote folder tree width" direction="vertical" value={treeWidth} min={150} max={360}
+        defaultValue={defaultPaneSizes.filesTree} onPreview={setTreeWidth} onCommit={n=>{setTreeWidth(n);p.onPaneSize("filesTree",n)}}/>
       <div className="filesTablePane"><div className="paneTitle">{path} <span>{dir?Math.min(items.length,visibleLimit)+" of "+items.length+" entries":"Not loaded"}</span></div>
         <div className="filesTableWrap"><table className="workspaceTable"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Permissions</th><th>Type</th></tr></thead><tbody>
           {renderedItems.map(item=><tr key={item.name} tabIndex={0} role="row" aria-selected={item.name===selected} className={item.name===selected?"selected":""}
@@ -129,6 +138,9 @@ export default function RemoteFilesWorkspace(p:Props){
         {p.connected&&!dir&&<div className="workspaceEmpty">Choose a directory and click Open to load its contents.</div>}
         </div>
       </div>
+      <PaneResizeHandle label="File details inspector width" direction="vertical" value={inspectorWidth} min={245} max={500}
+        invert defaultValue={defaultPaneSizes.filesInspector} onPreview={setInspectorWidth}
+        onCommit={n=>{setInspectorWidth(n);p.onPaneSize("filesInspector",n)}}/>
       <aside className="filesInspector"><div className="paneTitle">FILE DETAILS</div>
         {selectedItem?<><div className="inspectorFile"><FileText size={28}/><strong>{selectedItem.name}</strong><small>{selectedItem.isDir?"Directory":"Remote file"}</small></div>
           <dl><dt>Size</dt><dd>{size(selectedItem.sizeBytes)}</dd><dt>Modified</dt><dd>{selectedItem.modifiedAt!==null?new Date(selectedItem.modifiedAt*1000).toLocaleString():"Unknown"}</dd><dt>Permissions</dt><dd><code>{octalPermissions(selectedItem.unixPermissions)}</code></dd><dt>Owner ID</dt><dd>{selectedItem.ownerId??"Unknown"}</dd><dt>Group ID</dt><dd>{selectedItem.groupId??"Unknown"}</dd><dt>Path</dt><dd className="filePath">{selectedPath}</dd></dl>
