@@ -142,6 +142,15 @@ export async function runNativeAppSession(page:Page){
     (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}}).__mockSshBridge.writes
   );
   expect(writes.every(item=>item.id==="session-b")).toBe(true);
+  await page.getByRole("button",{name:"Focus console"}).click();
+  await page.keyboard.type("partial-shell-input");
+  // Simulate clicking outside xterm immediately before an agent launch.
+  // The pending keystrokes must be flushed even without Enter.
+  await page.getByRole("heading",{name:"SSH context"}).click();
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}})
+      .__mockSshBridge.writes.some(item=>item.id==="session-b"&&item.data.includes("partial-shell-input"))
+  )).toBe(true);
   await chooser.selectOption("session-a");
   await expect(page.locator(".agentTerminalFrame .xterm[data-original-instance='kept']")).toHaveCount(1);
   await page.getByRole("button",{name:"Expand console"}).click();
