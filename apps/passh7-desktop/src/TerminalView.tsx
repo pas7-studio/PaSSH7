@@ -16,6 +16,19 @@ const fontStack=(choice:AppPreferences["terminalFontFamily"]):string=>{
   }
 };
 
+const terminalTheme=(theme:AppPreferences["theme"])=>theme==="light"?{
+  background:"#f7fbff",foreground:"#1d344e",cursor:"#216dd0",
+  cursorAccent:"#f7fbff",selectionBackground:"#bdd8f5a8",
+  black:"#324155",red:"#b83247",green:"#166e4c",yellow:"#95620d",
+  blue:"#236abc",magenta:"#8a49a6",cyan:"#087b86",white:"#eaf0f8",
+  brightBlack:"#687b91",brightRed:"#d84857",brightGreen:"#23895f",
+  brightYellow:"#bb8628",brightBlue:"#327fe0",brightMagenta:"#a169c2",
+  brightCyan:"#1e96a3",brightWhite:"#ffffff"
+}:{
+  background:"#081522",foreground:"#e5effb",cursor:"#7bb7ff",
+  selectionBackground:"#23559488"
+};
+
 const INPUT_BATCH_MS=3;
 const OUTPUT_BATCH_MS=4;
 const MAX_INPUT_CHARS=4096;
@@ -85,7 +98,7 @@ export default function TerminalView({id,active,onClosed}:Props){
       convertEol:false,scrollback:preferences.terminalScrollback,
       fontFamily:fontStack(preferences.terminalFontFamily),lineHeight:preferences.terminalLineHeight,
       fontSize:preferences.terminalFontSize,
-      theme:{background:"#081522",foreground:"#e5effb",cursor:"#7bb7ff",selectionBackground:"#23559488"}
+      theme:terminalTheme(preferences.theme)
     });
     const fit=new FitAddon();terminal.loadAddon(fit);terminal.open(node);
     fitRef.current=fit;termRef.current=terminal;
@@ -98,6 +111,7 @@ export default function TerminalView({id,active,onClosed}:Props){
       terminal.options.cursorStyle=p.terminalCursorStyle;
       terminal.options.cursorBlink=p.terminalCursorBlink;
       terminal.options.scrollback=p.terminalScrollback;
+      terminal.options.theme=terminalTheme(p.theme);
       if(node.clientWidth>40&&node.clientHeight>40)fit.fit();
     };
     window.addEventListener("passh7:preferences",onPreferences);
