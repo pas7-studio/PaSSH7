@@ -135,7 +135,7 @@ export default function App(){
     });
     return()=>{live=false};
   },[vaultUnlocked,sshTabs]);
-  const [sessionNotice,setSessionNotice]=useState<{alias:string;detail:string}|null>(null);
+  const [sessionNotice,setSessionNotice]=useState<{alias:string;detail:string;kind?:"close-failed"}|null>(null);
   const onSessionClosed=useCallback((id:string,detail?:string)=>{
     const alias=sshTabsRef.current.find(t=>t.id===id)?.alias||"";
     setSshTabs(t=>t.filter(x=>x.id!==id));
@@ -1179,7 +1179,7 @@ export default function App(){
           return;
         }
       }catch{/* Cannot establish backend state: preserve the visible session. */}
-      setSessionNotice({alias,detail:"Could not confirm SSH disconnect; session may still be active. "+String(error)});
+      setSessionNotice({alias,kind:"close-failed",detail:"Could not confirm SSH disconnect; session may still be active. "+String(error)});
     }
   };
   const active=hosts.find(h=>h.id===selected) || {id:"",label:"No host selected",address:"",user:"",port:22,group:"Workspace",fingerprint:false};
@@ -1208,7 +1208,7 @@ export default function App(){
         <span><strong>{sessionNotice.alias||"SSH connection"}</strong> · {sessionNotice.detail}</span>
       </div>
       <div className="globalSessionNoticeActions">
-        {sessionNotice.alias&&hosts.some(h=>h.id===sessionNotice.alias)&&vaultUnlocked&&
+        {sessionNotice.kind!=="close-failed"&&sessionNotice.alias&&hosts.some(h=>h.id===sessionNotice.alias)&&vaultUnlocked&&
           <button type="button" disabled={sshBusy} onClick={()=>reconnectNotice(sessionNotice.alias)}>Reconnect</button>}
         <button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button>
       </div>
