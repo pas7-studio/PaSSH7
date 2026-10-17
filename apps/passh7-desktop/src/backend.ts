@@ -216,6 +216,10 @@ export async function stopDockerLogStream(sessionId:string,streamId:string):Prom
 export async function readDockerLogs(sessionId:string,containerId:string,tail=200):Promise<string>{
   return invoke<string>("ssh_session_docker_logs",{id:sessionId,containerId,tail});
 }
+/** Native Windows/Linux Save As. Returns null on cancel; existing files are not overwritten. */
+export async function saveVisibleDockerLogs(containerName:string,contents:string):Promise<string|null>{
+  return invoke<string|null>("docker_save_visible_logs",{containerName,contents});
+}
 /** Explicitly confirmed container state operation. Container ID and action are native validated. */
 export async function controlDockerContainer(sessionId:string,containerId:string,action:"start"|"stop"|"restart"):Promise<string>{
   return invoke<string>("ssh_session_docker_action",{id:sessionId,containerId,action});
