@@ -6,6 +6,8 @@ export type AppPreferences={
   dockerTail:number;
   dockerAutoRefresh:boolean;
   dockerFollowLogs:boolean;
+  vaultAutoLockMinutes:0|5|15|30|60;
+  vaultLockOnBlur:boolean;
   sftpShowHidden:boolean;
   sftpSort:"folders"|"name"|"size"|"modified";
   confirmTransfer:boolean;
@@ -14,6 +16,7 @@ export type AppPreferences={
 export const defaultPreferences:AppPreferences={
   theme:"dark",density:"comfortable",terminalFontSize:13,terminalScrollback:5000,
   dockerTail:200,dockerAutoRefresh:false,dockerFollowLogs:false,
+  vaultAutoLockMinutes:0,vaultLockOnBlur:false,
   sftpShowHidden:true,sftpSort:"folders",confirmTransfer:true,
   rememberWorkspace:true
 };
@@ -33,6 +36,8 @@ export function validatePreferences(source:unknown):AppPreferences{
     dockerTail:[50,100,200,500,1000].includes(data.dockerTail??0)?data.dockerTail!:200,
     dockerAutoRefresh:data.dockerAutoRefresh===true,
     dockerFollowLogs:data.dockerFollowLogs===true,
+    vaultAutoLockMinutes:([0,5,15,30,60].includes(data.vaultAutoLockMinutes??-1)?data.vaultAutoLockMinutes:0) as AppPreferences["vaultAutoLockMinutes"],
+    vaultLockOnBlur:data.vaultLockOnBlur===true,
     sftpShowHidden:data.sftpShowHidden!==false,
     sftpSort:["folders","name","size","modified"].includes(data.sftpSort??"")?data.sftpSort!:"folders",
     confirmTransfer:data.confirmTransfer!==false,
