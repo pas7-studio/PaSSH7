@@ -1,4 +1,4 @@
-import {useEffect} from "react";
+import {useEffect,useRef} from "react";
 
 const FOCUSABLE=[
   'a[href]', 'button:not([disabled])', 'input:not([disabled])',
@@ -18,12 +18,25 @@ function visibleFocusTargets(dialog:HTMLElement):HTMLElement[]{
  * Vault or import tasks still honor disabled close buttons.
  */
 export default function useModalFocus(activeDialog:string|null){
+  const previousOutsideFocus=useRef<HTMLElement|null>(null);
+  // Capture the opener BEFORE React autoFocus moves focus into a new dialog.
+  useEffect(()=>{
+    const track=(event:FocusEvent)=>{
+      const target=event.target;
+      if(target instanceof HTMLElement&&!target.closest(".overlay"))
+        previousOutsideFocus.current=target;
+    };
+    document.addEventListener("focusin",track,true);
+    return()=>document.removeEventListener("focusin",track,true);
+  },[]);
   useEffect(()=>{
     if(!activeDialog)return;
     const dialogs=Array.from(document.querySelectorAll<HTMLElement>(".overlay [role='dialog']"));
     const dialog=dialogs.at(-1);
     if(!dialog)return;
-    const previous=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    const active=document.activeElement;
+    const previous=previousOutsideFocus.current?.isConnected?previousOutsideFocus.current:
+      active instanceof HTMLElement&&!dialog.contains(active)?active:null;
     if(!dialog.hasAttribute("tabindex"))dialog.setAttribute("tabindex","-1");
 
     // Let children with React autoFocus run before selecting the initial focus.
