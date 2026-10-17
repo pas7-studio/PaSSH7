@@ -1355,15 +1355,27 @@ pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>
 
 /// Fixed commands only: no user-supplied shell command or arbitrary container
 /// names. The catalog response is bounded in the SSH actor.
-fn docker_catalog_command(kind:&str)->Option<&'static str>{
+fn docker_catalog_command(kind:&str)->Option<String>{
     match kind{
-        "images"=>Some("docker image ls --format \"{{json .}}\""),
-        "volumes"=>Some("docker volume ls --format \"{{json .}}\""),
-        "networks"=>Some("docker network ls --format \"{{json .}}\""),
-        "stats"=>Some("docker stats --no-stream --format \"{{json .}}\""),
-        "compose"=>Some("docker compose ls --format json"),
-        _=>None
+        "images"=>Some("docker image ls --format \"{{json .}}\"".into()),
+        "volumes"=>Some("docker volume ls --format \"{{json .}}\"".into()),
+        "networks"=>Some("docker network ls --format \"{{json .}}\"".into()),
+        "stats"=>Some("docker stats --no-stream --format \"{{json .}}\"".into()),
+        "compose"=>Some("docker compose ls --format json".into()),
+        _=>{
+            // Project values are never interpolated without strict validation.
+            // Compose project labels can be queried without reading compose
+            // YAML files, env files, or sending their contents to the WebView.
+            let project=kind.strip_prefix("compose-project:")?;
+            if !valid_compose_project_name(project){return None;}
+            Some(format!("docker ps -a --filter label=com.docker.compose.project={project} --format \"{{{{json .}}}}\""))
+        }
     }
+}
+fn valid_compose_project_name(name:&str)->bool{
+    !name.is_empty()&&name.len()<=128&&
+    name.as_bytes()[0].is_ascii_lowercase()&&
+    name.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_'||b==b'-')
 }
 
 #[tauri::command]
@@ -1389,7 +1401,10 @@ mod docker_catalog_tests{
             assert!(command.starts_with("docker "));
             assert!(command.contains("--format"));
         }
-        for bad in ["containers","images; rm -rf /","logs","docker ps",""]{
+        assert!(docker_catalog_command("compose-project:my_project").unwrap().contains("label=com.docker.compose.project=my_project"));
+        for bad in ["containers","images; rm -rf /","logs","docker ps","",
+            "compose-project:","compose-project:Bad","compose-project:foo;id",
+            "compose-project:../foo","compose-project:-bad","compose-project:foo\nbar"]{
             assert!(docker_catalog_command(bad).is_none());
         }
     }
