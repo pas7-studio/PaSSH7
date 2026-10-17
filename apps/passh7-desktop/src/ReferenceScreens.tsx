@@ -177,7 +177,8 @@ export default function ReferenceScreens(){
         />:screen==="snippets"?<SnippetsWorkspace host="dev-server" connected={true}
           onTerminal={()=>choose("terminal")} onExecute={()=>{}}
         />:screen==="ports"?<PortForwardingWorkspace host="dev-server" session="visual-fixture"
-          connected={true} forwards={exampleForwards} busy={false} error=""
+          connected={true} forwards={exampleForwards} busy={false}
+          sessions={["visual-fixture"]} busySessions={[]} error=""
           localPort={3000} remoteHost="127.0.0.1" remotePort={3000}
           onLocalPort={()=>{}} onRemoteHost={()=>{}} onRemotePort={()=>{}}
           onStart={()=>{}} onRefresh={()=>{}} onStop={()=>{}}
