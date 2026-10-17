@@ -195,3 +195,9 @@ A green screenshot smoke is NOT proof of pixel-perfect parity.
 On packaged Windows 11 WebView2, separately verify native rendering,
 keyboard and pointer interactions, font fallback, Vault locking, file dialogs,
 SFTP transfer queue, real Docker stats/logs, and switching two pinned hosts.
+
+## UI consistency pass (all workspaces)
+
+Run manual `PaSSH7 reference UI screenshot smoke` and compare the 24 images: Connections, Terminal (visual-only fixture), Files, Docker, Port Forwarding, Snippets, AI Agents and Settings at 1440x900, 1920x1080 and 900x720. Latest green evidence: https://github.com/pas7-studio/PaSSH7/actions/runs/39033405449.
+
+On Windows 11 verify real Terminal: switching multiple SSH tabs preserves PTY output; close buttons are independently keyboard accessible; Session details opens/closes without disconnect; selected host, info header and xterm resize stay consistent. Verify Connections filters, Snippets search/copy/confirmation, Ports copy/stop, Agent missing-CLI message and all native modal contrast. Real native smoke is not replaced by headless fixtures.
