@@ -137,8 +137,23 @@ export type SshSessionEvent = {id:string;kind:"data"|"closed";data?:string;detai
 export async function openSshSession(alias:string,cols:number,rows:number,accountPassword?:string,authMode:"key"|"password"|"key-password"="key",keyPassphrase?:string,useSavedCredentials=false):Promise<OpenedSshSession>{
   return invoke<OpenedSshSession>("ssh_session_open",{alias,cols,rows,accountPassword:accountPassword||null,authMode,keyPassphrase:keyPassphrase||null,useSavedCredentials});
 }
-export async function writeSshSession(id:string,data:string):Promise<void>{
-  return invoke("ssh_session_write",{id,data});
+// One FIFO per SSH session, shared by xterm keystrokes, snippets, Docker
+// shell launch and AI agent launch. Tauri IPC calls are individually async:
+// without this queue a later UI action can reach the native PTY before bytes
+// queued by the interactive terminal. Different SSH sessions never block
+// each other. Always remove settled tails so closed sessions retain no state.
+const pendingSshWrites=new Map<string,Promise<void>>();
+export function writeSshSession(id:string,data:string):Promise<void>{
+  const previous=pendingSshWrites.get(id);
+  const next=(previous??Promise.resolve()).catch(()=>{}).then(()=>
+    invoke<void>("ssh_session_write",{id,data})
+  );
+  pendingSshWrites.set(id,next);
+  void next.then(
+    ()=>{if(pendingSshWrites.get(id)===next)pendingSshWrites.delete(id)},
+    ()=>{if(pendingSshWrites.get(id)===next)pendingSshWrites.delete(id)}
+  );
+  return next;
 }
 export async function resizeSshSession(id:string,cols:number,rows:number):Promise<void>{
   return invoke("ssh_session_resize",{id,cols,rows});
