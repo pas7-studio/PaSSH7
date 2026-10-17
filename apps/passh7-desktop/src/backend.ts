@@ -277,6 +277,10 @@ export async function cancelSftpTransfer(sessionId:string,transferId:string):Pro
   await invoke("ssh_session_sftp_cancel",{id:sessionId,transferId});
 }
 
+/** Small, magic-byte-verified PNG/JPEG/GIF/WebP data URL. Max 768 KiB. */
+export async function readSftpImage(sessionId:string,path:string):Promise<string>{
+  return invoke<string>("ssh_session_sftp_read_image",{id:sessionId,path});
+}
 export async function readSftpText(sessionId:string,path:string):Promise<string>{
   return invoke<string>("ssh_session_sftp_read_text",{id:sessionId,path});
 }
