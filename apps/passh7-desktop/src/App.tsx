@@ -11,7 +11,7 @@ import PortForwardingWorkspace from "./PortForwardingWorkspace";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -305,7 +305,9 @@ export default function App(){
   },[sftpEntries,sftpFilter,sftpOrder]);
   const [sftpError,setSftpError]=useState("");
   const [sftpNotice,setSftpNotice]=useState<{session:string;text:string}|null>(null);
-  const [sftpPreview,setSftpPreview]=useState<{session:string;path:string;body:string}|null>(null);
+  const [sftpPreview,setSftpPreview]=useState<{session:string;path:string;body:string;kind:"image"|"text"}|null>(null);
+  const [sftpPreviewError,setSftpPreviewError]=useState<{session:string;path:string;message:string}|null>(null);
+  const sftpPreviewRequestRef=useRef(0);
   const [sftpPreviewBusy,setSftpPreviewBusy]=useState(false);
   const transferSessionRef=useRef(activeSsh);
   transferSessionRef.current=activeSsh;
@@ -515,10 +517,19 @@ export default function App(){
   const readSftpPreview=async(path:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Select an active SSH session first.");return}
-    setSftpPreviewBusy(true);setSftpError("");
-    try{setSftpPreview({session:session.id,path,body:await readSftpText(session.id,path)})}
-    catch(e){setSftpError(String(e))}
-    finally{setSftpPreviewBusy(false)}
+    const request=++sftpPreviewRequestRef.current;
+    const image=/\.(png|jpe?g|gif|webp)$/i.test(path);
+    setSftpPreviewBusy(true);setSftpPreview(null);setSftpPreviewError(null);
+    try{
+      const body=image?await readSftpImage(session.id,path):await readSftpText(session.id,path);
+      if(request===sftpPreviewRequestRef.current)
+        setSftpPreview({session:session.id,path,body,kind:image?"image":"text"});
+    }catch(error){
+      if(request===sftpPreviewRequestRef.current)
+        setSftpPreviewError({session:session.id,path,message:String(error)});
+    }finally{
+      if(request===sftpPreviewRequestRef.current)setSftpPreviewBusy(false);
+    }
   };
 
   const [sftpMutationBusy,setSftpMutationBusy]=useState(false);
@@ -1107,6 +1118,7 @@ export default function App(){
  queueDownloads={paths=>enqueueSftpTransfer("download",paths)}
  readPreview={path=>void readSftpPreview(path)}
  preview={sftpPreview} previewBusy={sftpPreviewBusy}
+ previewError={sftpPreviewError?.session===activeSsh?sftpPreviewError:null}
  transferJobs={transferQueue.jobs} transferPaused={transferQueue.paused}
  onPauseQueue={transferQueue.setQueuePaused}
  onCancelJob={id=>void transferQueue.cancel(id)}
