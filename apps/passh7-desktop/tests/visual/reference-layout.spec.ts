@@ -154,5 +154,16 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await expect(page.getByRole("button",{name:"Quick switch"})).toBeFocused();
   });
 
+  await test.step("Appearance light theme reaches terminal and workspace chrome",async()=>{
+    await page.goto("/?__reference=1&screen=settings",{waitUntil:"domcontentloaded"});
+    await expect(page.locator(".settingsNav")).toBeVisible();
+    await page.locator(".settingsNav button").filter({hasText:"Appearance"}).click();
+    await page.locator(".prefRow").filter({hasText:"Switch between deep navy"}).locator("select").selectOption("light");
+    await expect(page.locator(".shell")).toHaveClass(/light/);
+    await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
+    await expect(page.locator(".referenceTerminalText")).toHaveCSS("background-color","rgb(247, 251, 255)");
+    await expect(page.locator(".referenceTerminalText")).toHaveCSS("color","rgb(40, 68, 99)");
+  });
+
   expect(failures,"uncaught React/browser errors").toEqual([]);
 });
