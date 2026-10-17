@@ -127,3 +127,34 @@ and use `apps/passh7-desktop/tests/visual` for isolated Playwright tests.
   The full screenshot suite still covers all 8 screens at three viewports.
 - Packaged Windows WebView2 accessibility and two-host live acceptance remain
   pending and cannot be inferred from the Chromium run.
+
+## Windows SSH agent CLI vs desktop app detection (2026-10-17)
+
+PaSSH7 must **not** treat a Windows desktop app installation as evidence that a
+terminal CLI is installed. The authenticated Windows SSH account may start
+under cmd.exe/PowerShell and may not inherit the logged-in desktop user's PATH,
+especially npm/WinGet user-bin shims.
+
+Agent discovery now uses separate bounded native SSH exec probes:
+- Windows: exact allowlisted Codex/Claude/OpenCode names, PowerShell
+  `-EncodedCommand` via UTF-16LE; check Get-Command and known CLI locations
+  (%APPDATA%/npm, WinGet Links, ~/.local/bin, ~/.bun/bin). Get-StartApps is used
+  **only** to label a GUI desktop app, never as an SSH terminal executable.
+- Unix: existing login-shell allowlisted command + --version check.
+- The native backend distinguishes CLI present, desktop-app-only, missing and
+  probe errors, with the discovery source, non-secret executable path and
+  actionable diagnostic. A resolved Windows CLI uses an encoded PowerShell
+  command to invoke the exact probed absolute path (including spaces).
+- CLI execution remains an **explicitly confirmed** action in an existing
+  authenticated PTY, with full remote-account privileges. No auto-install, no
+  permission escalation and no GUI injection into Windows Session 0.
+- Desktop GUI programs require a proper interactive Windows desktop (e.g.
+  Remote Desktop/RDP). SSH text sessions cannot show their windows.
+- The UI offers copy-only, review-first installation commands and links to
+  official install documentation; no shell install scripts are executed by
+  clicking a button.
+- Native safety tests, TypeScript production build and 8-workspace visual
+  regression: https://github.com/pas7-studio/PaSSH7/actions/runs/39039408111
+- Real Windows OpenSSH smoke against the intended Windows host remains to be
+  done before claiming the app/CLI is actually present and launchable.
+
