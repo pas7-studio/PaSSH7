@@ -181,9 +181,19 @@ export async function listDockerStats(sessionId:string):Promise<DockerRuntimeSta
     .map(line=>JSON.parse(line) as DockerRuntimeStats);
 }
 /** Returns at most 200 timestamped lines for one container. Does not start, stop or mutate Docker. */
-export type DockerCatalogKind="images"|"volumes"|"networks";
+export type DockerCatalogKind="images"|"volumes"|"networks"|"compose";
 export async function listDockerCatalog(sessionId:string,kind:DockerCatalogKind):Promise<Record<string,string>[]>{
   const raw=await invoke<string>("ssh_session_docker_catalog",{id:sessionId,kind});
+  if(kind==="compose"){
+    const parsed=JSON.parse(raw.trim()) as unknown;
+    if(!Array.isArray(parsed))throw Error("Docker Compose returned an unexpected project list format.");
+    return parsed.slice(0,250).map((item:unknown)=>{
+      if(!item||typeof item!=="object"||Array.isArray(item))throw Error("Invalid Docker Compose project record.");
+      const record=item as Record<string,unknown>;
+      return {Name:String(record.Name??"—"),Status:String(record.Status??"—"),
+        ConfigFiles:String(record.ConfigFiles??"—")};
+    });
+  }
   return raw.split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line) as Record<string,string>);
 }
 export type DockerLogEvent={
