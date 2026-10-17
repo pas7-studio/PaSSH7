@@ -7,6 +7,14 @@ import "@xterm/xterm/css/xterm.css";
 import {loadPreferences,type AppPreferences} from "./preferences";
 
 type Props={id:string;active:boolean;onClosed:(id:string,detail?:string)=>void};
+const fontStack=(choice:AppPreferences["terminalFontFamily"]):string=>{
+  switch(choice){
+    case "consolas":return "Consolas, monospace";
+    case "jetbrains":return '"JetBrains Mono", Consolas, monospace';
+    case "monospace":return "monospace";
+    default:return '"Cascadia Code", Consolas, monospace';
+  }
+};
 
 const INPUT_BATCH_MS=3;
 const OUTPUT_BATCH_MS=4;
@@ -73,9 +81,11 @@ export default function TerminalView({id,active,onClosed}:Props){
     if(!node)return;
     const preferences=loadPreferences();
     const terminal=new Terminal({
-      cursorBlink:true,convertEol:false,scrollback:preferences.terminalScrollback,
-      fontFamily:"Cascadia Code, Consolas, monospace",
-      fontSize:preferences.terminalFontSize,theme:{background:"#0e1420",foreground:"#e5ecf6"}
+      cursorBlink:preferences.terminalCursorBlink,cursorStyle:preferences.terminalCursorStyle,
+      convertEol:false,scrollback:preferences.terminalScrollback,
+      fontFamily:fontStack(preferences.terminalFontFamily),lineHeight:preferences.terminalLineHeight,
+      fontSize:preferences.terminalFontSize,
+      theme:{background:"#081522",foreground:"#e5effb",cursor:"#7bb7ff",selectionBackground:"#23559488"}
     });
     const fit=new FitAddon();terminal.loadAddon(fit);terminal.open(node);
     fitRef.current=fit;termRef.current=terminal;
@@ -83,6 +93,10 @@ export default function TerminalView({id,active,onClosed}:Props){
       const p=(event as CustomEvent<AppPreferences>).detail;
       if(!p)return;
       terminal.options.fontSize=p.terminalFontSize;
+      terminal.options.fontFamily=fontStack(p.terminalFontFamily);
+      terminal.options.lineHeight=p.terminalLineHeight;
+      terminal.options.cursorStyle=p.terminalCursorStyle;
+      terminal.options.cursorBlink=p.terminalCursorBlink;
       terminal.options.scrollback=p.terminalScrollback;
       if(node.clientWidth>40&&node.clientHeight>40)fit.fit();
     };
