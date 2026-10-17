@@ -120,6 +120,11 @@ export default function TerminalView({id,active,layoutKey,onClosed}:Props){
     let live=true;
     const input=createInputSender(id,terminal,()=>live);
     const disposeInput=terminal.onData(input.accept);
+    // A button action (Launch CLI, snippet, Docker shell) may immediately send
+    // its own command after xterm loses focus. Flush outstanding typed bytes
+    // on blur before that action is enqueued in the shared session FIFO.
+    const keyboardInput=node.querySelector(".xterm-helper-textarea");
+    keyboardInput?.addEventListener("blur",input.flush);
 
     // The SSH event stream is base64 because it contains arbitrary PTY bytes,
     // including non-UTF-8 data and ANSI controls. xterm parses Uint8Array
@@ -196,6 +201,7 @@ export default function TerminalView({id,active,layoutKey,onClosed}:Props){
     });
     return ()=>{
       window.removeEventListener("passh7:preferences",onPreferences);
+      keyboardInput?.removeEventListener("blur",input.flush);
       input.dispose();
       live=false;
       flushOutput();
