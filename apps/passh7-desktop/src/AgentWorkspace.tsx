@@ -1,4 +1,4 @@
-import {useRef,useState} from "react";
+import {useCallback,useRef,useState} from "react";
 import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
 import type {RemoteAgentAvailability} from "./backend";
@@ -18,6 +18,10 @@ type Props={
 export default function AgentWorkspace(p:Props){
   const [copyFeedback,setCopyFeedback]=useState("");
   const terminalPane=useRef<HTMLDivElement>(null);
+  const setDock=useCallback((node:HTMLDivElement|null)=>{
+    terminalPane.current=node;
+    p.onTerminalDock?.(node);
+  },[p.onTerminalDock]);
   const focusTerminal=()=>{
     const input=terminalPane.current?.querySelector(".xterm-helper-textarea");
     if(input instanceof HTMLTextAreaElement)input.focus();
@@ -131,7 +135,7 @@ export default function AgentWorkspace(p:Props){
               <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
             </div>
           </div>
-          <div className="agentTerminalFrame" ref={node=>{terminalPane.current=node;p.onTerminalDock?.(node)}}/>
+          <div className="agentTerminalFrame" ref={setDock}/>
           <p className="agentHint">Type directly in this terminal. Select another SSH session above to change the active console. Nothing is executed without your action.</p>
         </section>}
         <section className="agentSection">
