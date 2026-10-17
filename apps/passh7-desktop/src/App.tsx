@@ -1,4 +1,5 @@
-import {useCallback,useRef} from "react";
+import {useCallback,useLayoutEffect,useRef} from "react";
+import {createPortal} from "react-dom";
 import TerminalView from "./TerminalView";
 import RemoteFilesWorkspace from "./RemoteFilesWorkspace";
 import useSftpTransferQueue from "./useSftpTransferQueue";
@@ -50,6 +51,26 @@ export default function App(){
   const sshTabsRef=useRef(sshTabs);
   useEffect(()=>{sshTabsRef.current=sshTabs},[sshTabs]);
   const [activeSsh,setActiveSsh]=useState("");
+  // One persistent xterm and event subscriber per native SSH session.
+  // Reparent its DOM surface between Terminal and AI Agents; never remount
+  // the renderer or attach a second PTY viewer when changing workspaces.
+  const terminalSurfaces=useRef(new Map<string,HTMLDivElement>());
+  const mainTerminalDock=useRef<HTMLDivElement|null>(null);
+  const agentTerminalDock=useRef<HTMLDivElement|null>(null);
+  const parkedTerminals=useRef<HTMLDivElement|null>(null);
+  const agentTerminalDockRef=useCallback((node:HTMLDivElement|null)=>{
+    agentTerminalDock.current=node;
+  },[]);
+  const getTerminalSurface=(id:string)=>{
+    let surface=terminalSurfaces.current.get(id);
+    if(!surface){
+      surface=document.createElement("div");
+      surface.className="terminalSessionSurface";
+      surface.dataset.sshSession=id;
+      terminalSurfaces.current.set(id,surface);
+    }
+    return surface;
+  };
   const [sshBusy,setSshBusy]=useState(false);
   const [loginOpen,setLoginOpen]=useState(false);
   const [tofuCandidate,setTofuCandidate]=useState<{alias:string;fingerprint:string}|null>(null);
@@ -650,6 +671,25 @@ export default function App(){
   const [panel,setPanel]=useState<Panel>(()=>{
     try{const value=localStorage.getItem("passh7.workspace.v1");return ["connections","terminal","agent","files","docker","snippets","ports","settings"].includes(value||"")?value as Panel:"connections"}catch{return "agent"}
   });
+  useLayoutEffect(()=>{
+    const dock=panel==="agent"?agentTerminalDock.current
+      :panel==="terminal"?mainTerminalDock.current:null;
+    const parking=parkedTerminals.current;
+    if(!parking)return;
+    const liveIds=new Set(sshTabs.map(tab=>tab.id));
+    for(const tab of sshTabs){
+      const node=terminalSurfaces.current.get(tab.id);
+      if(!node)continue;
+      const target=tab.id===activeSsh&&vaultUnlocked&&dock?dock:parking;
+      if(node.parentElement!==target)target.appendChild(node);
+    }
+    for(const [id,node] of terminalSurfaces.current){
+      if(!liveIds.has(id)){
+        node.remove();
+        terminalSurfaces.current.delete(id);
+      }
+    }
+  },[panel,activeSsh,sshTabs,vaultUnlocked]);
   const [preferences,setPreferences]=useState<AppPreferences>(loadPreferences);
   const updatePreferences=(value:AppPreferences)=>{
     setPreferences(value);savePreferences(value);setSftpOrder(value.sftpSort);setTheme(value.theme);
@@ -1134,7 +1174,14 @@ export default function App(){
     onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}><span className="sshTabConnectionDot" aria-hidden="true"/>{t.alias}</button>
   <button type="button" className="sshTabClose" title={"Disconnect "+t.alias}
     aria-label={"Disconnect "+t.alias} onClick={()=>void closeInteractive(t.id)}><X size={14}/></button>
-</div>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
+</div>)}</div>}
+        <div ref={mainTerminalDock} className="terminalDockSlot" style={{display:connected?"block":"none"}} aria-label="Interactive terminal session"/>
+        <div ref={parkedTerminals} className="terminalParked" aria-hidden="true"/>
+        {sshTabs.map(t=>createPortal(
+          <TerminalView id={t.id} active={t.id===activeSsh&&(panel==="terminal"||panel==="agent")} layoutKey={panel} onClosed={onSessionClosed}/>,
+          getTerminalSurface(t.id),t.id
+        ))}
+        {!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
         <footer><span className="footerBrand"><span className="statusDot" style={{background:connected?"#22c55e":undefined}}/> {connected?"SSH connected":desktopAvailable()?"No active SSH session":"Offline preview"}</span><span>{active.label} · {activeConnections} on host · {sshTabs.length} total</span><span>{buildInfo?.publisher ?? "PAS7 Studio"} · {buildInfo?.target ?? "Loading build info"}</span></footer>
       </main>
       {(panel!=="terminal"||terminalDetailsOpen)&&<aside id={panel==="terminal"?"passh7-terminal-inspector":undefined} className={"context "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"fullContext":"")}><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
@@ -1157,7 +1204,7 @@ export default function App(){
  agent={agent} onAgent={setAgent}
  availability={agentAvailability} checking={agentProbeBusy}
  error={agentProbeError} status={agentStatus} context={context}
- liveTerminal={true} onSessionClosed={onSessionClosed}
+ liveTerminal={true} onTerminalDock={agentTerminalDockRef}
  onCheck={()=>void checkRemoteAgents()}
  onLaunch={()=>void launchRemoteAgent()}
  onTerminal={()=>setPanel("terminal")}
