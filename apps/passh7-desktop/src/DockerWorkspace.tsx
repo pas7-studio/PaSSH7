@@ -1,10 +1,10 @@
 import {useEffect,useMemo,useState} from "react";
-import {listDockerCatalog,type DockerCatalogKind} from "./backend";
-import {Clipboard,Container,Download,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
+import {listDockerCatalog,type DockerCatalogKind,type DockerRuntimeStats} from "./backend";
+import {Clipboard,Container,Cpu,Download,HardDrive,Layers,Maximize2,Minimize2,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
 
 export type ContainerRow={ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string};
 type Logs={session:string;containerId:string;containerName:string;text:string}|null;
-type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|null;
+type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|null;stats:DockerRuntimeStats[]|null;statsError:string;
   loading:boolean;error:string;actionStatus:string|null;actionBusy:string;
   logs:Logs;logsBusy:boolean;logsError:string;tail:number;follow:boolean;
   liveStatus:"off"|"connecting"|"streaming"|"closed"|"error";
@@ -12,6 +12,15 @@ type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|nu
   onRefresh:()=>void;onAction:(id:string,name:string,action:"start"|"stop"|"restart")=>void;
   onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;};
 const isRunning=(item:ContainerRow)=>(item.State||"").toLowerCase()==="running";
+const parseMemoryBytes=(text:string)=>{
+  const match=text.split("/")[0]?.trim().match(/^([\d.]+)\s*([KMGT]?i?B|B)$/i);
+  if(!match)return 0;
+  const n=Number(match[1]);
+  const unit=match[2].toLowerCase();
+  const powers:{[name:string]:number}={b:1,kb:1000,mb:1000**2,gb:1000**3,tb:1000**4,kib:1024,mib:1024**2,gib:1024**3,tib:1024**4};
+  return Number.isFinite(n)?n*(powers[unit]||0):0;
+};
+const readableMemory=(bytes:number)=>bytes>=1024**3?(bytes/1024**3).toFixed(2)+" GiB":(bytes/1024**2).toFixed(1)+" MiB";
 export default function DockerWorkspace(p:Props){
   const [search,setSearch]=useState("");
   const [tab,setTab]=useState<"containers"|DockerCatalogKind>("containers");
@@ -48,9 +57,12 @@ export default function DockerWorkspace(p:Props){
   const [logsSearch,setLogsSearch]=useState("");
   const [wrap,setWrap]=useState(false);
   const [level,setLevel]=useState<"all"|"error"|"warn">("all");
+  const [logsFullscreen,setLogsFullscreen]=useState(false);
   const running=(p.items||[]).filter(isRunning).length;
   const stopped=(p.items||[]).length-running;
   const images=new Set((p.items||[]).map(c=>c.Image).filter(Boolean)).size;
+  const totalCpu=p.stats?.reduce((sum,item)=>sum+(Number.parseFloat(item.CPUPerc||"")||0),0)??null;
+  const totalMemory=p.stats?.reduce((sum,item)=>sum+parseMemoryBytes(item.MemUsage||""),0)??null;
   const visible=useMemo(()=>(p.items||[]).filter(row=>
     (filter==="all"||(filter==="running"?isRunning(row):!isRunning(row))) &&
     (row.Names+" "+row.ID+" "+row.Image+" "+row.Status).toLowerCase().includes(search.toLowerCase())
@@ -64,10 +76,12 @@ export default function DockerWorkspace(p:Props){
     <div className="widePageTitle"><Container size={26}/><div><h1>Docker</h1><p>Manage remote containers and inspect their logs · {p.host}</p></div>
       <span className={p.connected?"workspaceConnected":"workspaceOffline"}>{p.connected?"● Connected":"○ Disconnected"}</span></div>
     <div className="dockerMetrics">
-      <div><small>Total containers</small><strong>{p.items?.length??"—"}</strong></div>
-      <div><small>Running</small><strong className="textGood">{p.items?running:"—"}</strong></div>
-      <div><small>Stopped / other</small><strong>{p.items?stopped:"—"}</strong></div>
-      <div><small>Images in use</small><strong>{p.items?images:"—"}</strong></div>
+      <div><small><Container size={17}/> Containers</small><strong>{p.items?.length??"—"}</strong><span>Total on selected SSH host</span></div>
+      <div><small><Play size={17}/> Running</small><strong className="textGood">{p.items?running:"—"}</strong><span>{p.items?.length?Math.round(100*running/p.items.length)+"% running":"No inventory"}</span></div>
+      <div><small><Square size={17}/> Stopped</small><strong>{p.items?stopped:"—"}</strong><span>{p.items?.length?Math.round(100*stopped/p.items.length)+"% stopped":"No inventory"}</span></div>
+      <div><small><Layers size={17}/> Images in use</small><strong>{p.items?images:"—"}</strong><span>Unique container image names</span></div>
+      <div title="One read-only docker stats sample. CPU percentages are summed across running containers, not normalized to total host CPU."><small><Cpu size={17}/> Container CPU</small><strong>{totalCpu===null?"—":totalCpu.toFixed(1)+"%"}</strong><span>{p.statsError?"Stats unavailable":p.stats?"Sum of container CPU":"Sampling remote Docker…"}</span></div>
+      <div title="One read-only docker stats sample. Memory sums the container usage values, not overall server RAM."><small><HardDrive size={17}/> Container memory</small><strong>{totalMemory===null?"—":readableMemory(totalMemory)}</strong><span>{p.statsError?"Stats unavailable":p.stats?"Reported container usage":"Sampling remote Docker…"}</span></div>
     </div>
     <div className="dockerResourceTabs" role="tablist" aria-label="Docker resources">{(["containers","images","volumes","networks"] as const).map(kind=><button type="button" role="tab" aria-selected={tab===kind} className={tab===kind?"active":""} key={kind} onClick={()=>setTab(kind)}>{kind[0].toUpperCase()+kind.slice(1)} {tab===kind&&tab!=="containers"&&displayCatalog?"("+displayCatalog.length+")":""}</button>)}</div>
     {tab==="containers"?<><div className="dockerWorkspaceGrid"><section className="dockerContainersPane">
@@ -97,8 +111,10 @@ export default function DockerWorkspace(p:Props){
         </>:<div className="workspaceEmpty">Select a container to inspect its details.</div>}
       </aside>
     </div>
-    <section className="dockerLogViewer"><div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
-      <span>{p.logs?.session===p.session?p.logs.containerName:"Select a container"}</span>
+    <section className={"dockerLogViewer "+(logsFullscreen?"dockerLogsFullscreen":"")}><div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
+      <select aria-label="Container for log viewer" value={p.logs?.session===p.session?p.logs.containerId:""} onChange={e=>{const row=p.items?.find(item=>item.ID===e.target.value);if(row?.ID)p.onLogs(row.ID,row.Names||row.ID)}} disabled={!p.connected||p.logsBusy}>
+        <option value="">Select container…</option>{(p.items||[]).map(item=>item.ID?<option key={item.ID} value={item.ID}>{item.Names||item.ID.slice(0,12)}</option>:null)}
+      </select>
       <label className="filesSearch"><Search size={14}/><input value={logsSearch} onChange={e=>setLogsSearch(e.target.value)} placeholder="Find in logs" aria-label="Search Docker logs"/></label>
       <select value={level} onChange={e=>setLevel(e.target.value as typeof level)} aria-label="Log severity"><option value="all">All levels</option><option value="warn">Warnings</option><option value="error">Errors</option></select>
       <select value={p.tail} onChange={e=>p.onTail(Number(e.target.value))} aria-label="Recent log lines">{[50,100,200,500,1000].map(n=><option value={n} key={n}>{n} lines</option>)}</select>
@@ -107,6 +123,7 @@ export default function DockerWorkspace(p:Props){
       <button title="Reload selected container logs" disabled={!p.logs||p.logsBusy} onClick={()=>{if(p.logs)p.onLogs(p.logs.containerId,p.logs.containerName)}}><RefreshCw size={15}/></button>
       <button title="Copy visible logs" disabled={!logLines.length} onClick={()=>navigator.clipboard.writeText(logLines.join("\n"))}><Clipboard size={15}/></button>
       <button title="Close log viewer" disabled={!p.logs} onClick={p.onCloseLogs}>Clear</button>
+      <button title={logsFullscreen?"Exit full-screen logs":"Expand logs to full screen"} aria-label={logsFullscreen?"Exit full-screen logs":"Expand logs to full screen"} onClick={()=>setLogsFullscreen(value=>!value)}>{logsFullscreen?<Minimize2 size={15}/>:<Maximize2 size={15}/>}</button>
       <button title="Save recent logs to a local text file" disabled={!logLines.length} onClick={()=>{
         const blob=new Blob([logLines.join("\n")],{type:"text/plain;charset=utf-8"});
         const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=(p.logs?.containerName||"docker")+"-logs.txt";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -116,7 +133,7 @@ export default function DockerWorkspace(p:Props){
         {logLines.map((line,index)=><div className="dockerLogLine" key={index}><span>{index+1}</span><code className={/\berror\b|fatal|panic/i.test(line)?"logError":/\bwarn/i.test(line)?"logWarn":""}>{line}</code></div>)}
         {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}
       </>:<div className="workspaceEmpty">Select a container and click View logs. Log output is fetched through a dedicated SSH exec channel.</div>}
-    </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
+    </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines · {new Blob([logLines.join("\n")]).size.toLocaleString()} UTF-8 bytes</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
     </section></>:<section className="dockerCatalogWorkspace">
       <div className="dockerToolbar">
         <div className="filesSearch"><Search size={15}/><input value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder={"Search "+tab+"…"} aria-label={"Search Docker "+tab}/></div>
