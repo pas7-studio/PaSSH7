@@ -590,6 +590,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 }
                                             }
                                         };
+                                        let _=log_channel.close().await;
                                         let failure=match (outcome,exit_status){
                                             (Err(message),_)=>Some(message),
                                             (_,Some(code)) if code!=0=>Some(format!(
@@ -1246,6 +1247,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         }
         for (_, (stop,_,_)) in forwarders.drain() { let _=stop.send(()); }
         for (_,cancel) in transfers.drain() { let _=cancel.send(true); }
+        for (_,stop) in docker_log_streams.drain() { let _=stop.send(true); }
         let _ = channel.close().await;
         let _ = connection.disconnect(russh::Disconnect::ByApplication, "Session closed", "en").await;
         if let Ok(mut guard) = manager.channels.lock() { guard.remove(&cleanup_id); }
