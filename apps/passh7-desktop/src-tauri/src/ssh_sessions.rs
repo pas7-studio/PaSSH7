@@ -55,7 +55,7 @@ enum SessionCommand {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
-pub struct SftpEntry { pub name: String, pub is_dir: bool, pub size_bytes: Option<u64>, pub modified_at: Option<u64> }
+pub struct SftpEntry { pub name: String, pub is_dir: bool, pub size_bytes: Option<u64>, pub modified_at: Option<u64>, pub unix_permissions: Option<u32>, pub owner_id: Option<u32>, pub group_id: Option<u32> }
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct DockerLogStreamEvent{
@@ -967,7 +967,10 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 let modified_at=attrs.modified().ok()
                                                     .and_then(|date|date.duration_since(std::time::UNIX_EPOCH).ok())
                                                     .map(|duration|duration.as_secs());
-                                                result.push(SftpEntry{name,is_dir,size_bytes,modified_at});
+                                                let unix_permissions=attrs.permissions.map(|mode|mode & 0o7777);
+                                                let owner_id=attrs.uid;
+                                                let group_id=attrs.gid;
+                                                result.push(SftpEntry{name,is_dir,size_bytes,modified_at,unix_permissions,owner_id,group_id});
                                             }
                                             result.sort_by(|a,b|b.is_dir.cmp(&a.is_dir)
                                                 .then_with(||a.name.to_lowercase().cmp(&b.name.to_lowercase())));
