@@ -1,0 +1,31 @@
+name: PaSSH7 image preview verification
+on:
+  push:
+    branches:
+      - feat/dedicated-ai-agent-workspace
+permissions:
+  contents: read
+concurrency:
+  group: passh7-image-preview-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Frontend TypeScript and production build
+        working-directory: apps/passh7-desktop
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+      - name: Generate Tauri icon
+        run: python3 apps/passh7-desktop/scripts/create_icon.py
+      - name: Native Rust image preview signature and Docker allowlist tests
+        run: cargo test --manifest-path apps/passh7-desktop/src-tauri/Cargo.toml --bin passh7-desktop
