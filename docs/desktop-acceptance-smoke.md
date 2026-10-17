@@ -228,3 +228,21 @@ Headless UI keyboard and appearance test PASS: https://github.com/pas7-studio/Pa
 | DOCKER-INSPECT-05 | Inspect an image with `Config.Env`, `Config.Labels` and command arguments | Only the explicit allowlisted detail fields reach the WebView; environment/labels and commands are excluded |
 
 Underlying fix: use Docker's normal JSON array output instead of `docker inspect --format '{{json .}}'`. Parse the array and reduce to the existing allowlisted detail shape in the native SSH actor. No secrets, arbitrary shell strings or Go templates are accepted as JavaScript inputs.
+
+## Windows OpenSSH: GUI apps vs coding CLI tools
+
+| Case | Procedure | Expected |
+| --- | --- | --- |
+| AGENT-WIN-01 | Connect to a Windows 11 SSH host with cmd.exe defaultShell, run Check installed tools | Probe reports Windows and does not use Unix `$SHELL` as a false missing result |
+| AGENT-WIN-02 | Install npm CLI in the SSH user's %APPDATA%/npm outside SSH PATH | Probe finds its .cmd, shows source and safely launches via a quoted encoded absolute PowerShell path |
+| AGENT-WIN-03 | CLI on standard Windows PATH | Detected CLI and version displayed; launching remains subject to explicit permission confirmation |
+| AGENT-WIN-04 | Only Codex/Claude/OpenCode Windows GUI application installed | State says Desktop app only, launch CLI disabled and RDP guidance shown; no attempt to run a GUI via SSH |
+| AGENT-WIN-05 | Neither GUI nor CLI, or PowerShell denied | Show missing or actionable diagnostic, not green Installed; leave terminal available |
+| AGENT-WIN-06 | CLI installed under a different Windows profile | Do not infer availability from desktop app on another user account; report the actual SSH user's environment |
+| AGENT-WIN-07 | Agent path contains spaces, apostrophes or command metacharacters | Native UTF-16LE encoded command safely quotes path; shell injection rejected |
+| AGENT-WIN-08 | Check installed tools on Ubuntu/Linux | Unix login-shell version probing continues to work, with no Windows-specific false positive |
+| AGENT-WIN-09 | Start CLI in a connected PTY, then lock Vault | CLI process tied to the SSH session terminates when the session closes; no background hidden process is created |
+| AGENT-WIN-10 | User tries to run desktop app without RDP | UI states an SSH text terminal cannot render desktop windows; no fake Open App action |
+
+Automated Rust + frontend + visual evidence:
+https://github.com/pas7-studio/PaSSH7/actions/runs/39039408111
