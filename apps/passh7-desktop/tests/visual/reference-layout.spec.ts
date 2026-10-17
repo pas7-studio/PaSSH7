@@ -1,4 +1,5 @@
 import {test,expect} from "@playwright/test";
+import {runNativeAppSession} from "./native-app-session.helper";
 
 const screens=[
   {name:"connections",heading:"Connections"},
@@ -187,6 +188,10 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await page.locator(".agentCard.opencode").click();
     await expect(page.locator(".agentInstallHelp")).toContainText("CLI not found");
     await expect(page.locator(".agentInstallHelp code")).toContainText("opencode-ai");
+  });
+
+  await test.step("production App via simulated Tauri IPC: persistent SSH tabs and Docker Save As",async()=>{
+    await runNativeAppSession(page);
   });
 
   expect(failures,"uncaught React/browser errors").toEqual([]);
