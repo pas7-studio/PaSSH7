@@ -198,6 +198,13 @@ export default function ReferenceScreens(){
               diagnostic:"No CLI found for this Windows SSH account."}
           }} checking={false} error="" status=""
           context={"Host: dev-server\nTarget: deploy@192.0.2.10\nVisual fixture: no agent is launched"}
+          terminalPreview={<div className="agentDevTerminalPreview" aria-label="Development-only illustrative agent terminal">
+            <small>DEV UI FIXTURE · Not a live SSH connection</small>
+            <div>Microsoft Windows [Version 10.0.26100]</div>
+            <div>{"C:\\Users\\deploy> "+(agent==="claude"?"claude":agent==="codex"?"where codex":"where opencode")}</div>
+            <div>{agent==="claude"?"Claude Code CLI (illustrative session output)":"INFO: CLI not found for this SSH account"}</div>
+            <div>{"C:\\Users\\deploy> "}<span className="terminalCaret">▌</span></div>
+          </div>}
           onCheck={()=>{}} onLaunch={()=>{}} onTerminal={()=>choose("terminal")} onPrepareRdp={()=>choose("ports")} onSession={()=>{}}
         />:<TerminalReference/>}
       </div></aside>
