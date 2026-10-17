@@ -120,6 +120,14 @@
 .agentTerminalFrame>.terminalSessionSurface{height:100%;width:100%}
 .agentTerminalFrame .liveTerminal{height:100%;min-height:0;padding:8px}
 .agentTerminalFrame .xterm{height:100%}
+.agentDevTerminalPreview{
+  height:100%;width:100%;display:flex;flex-direction:column;align-items:flex-start;
+  gap:11px;padding:18px;color:#dbe9fa;background:#081522;
+  font:12px/1.6 "Cascadia Code",Consolas,monospace;
+}
+.agentDevTerminalPreview small{color:#7fa1c7;font:600 10px Inter,"Segoe UI",sans-serif;letter-spacing:.04em}
+.agentDevTerminalPreview .terminalCaret{color:#86c6ff}
+.shell.light .agentDevTerminalPreview{background:#f7fbff;color:#243b59}
 .agentTerminalActions{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
 .agentEmbeddedTerminal .agentHint{margin:0;color:var(--muted);font-size:11px;line-height:1.5}
 .shell.light .agentTerminalFrame{background:#f7fbff;border-color:#bad1e5}
