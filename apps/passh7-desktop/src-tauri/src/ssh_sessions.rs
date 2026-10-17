@@ -32,6 +32,9 @@ enum SessionCommand {
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerCatalog(String,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogs(String,u32,tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerLogStart(String,u32,String,tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerLogStop(String,tokio::sync::oneshot::Sender<Result<(),String>>),
+    DockerLogFinished(String),
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
@@ -53,6 +56,19 @@ enum SessionCommand {
 #[derive(Clone, Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct SftpEntry { pub name: String, pub is_dir: bool, pub size_bytes: Option<u64>, pub modified_at: Option<u64> }
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct DockerLogStreamEvent{
+    pub session_id:String,
+    pub stream_id:String,
+    pub container_id:String,
+    pub kind:&'static str,
+    pub data:Option<String>,
+    pub detail:Option<String>,
+}
+
+const DOCKER_LOG_EVENT:&str="passh7:docker-log";
+
 
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
@@ -385,6 +401,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut closure_detail: Option<String> = None;
         let mut forwarders: HashMap<u16,(tokio::sync::oneshot::Sender<()>,String,u16)> = HashMap::new();
         let mut transfers: HashMap<String,tokio::sync::watch::Sender<bool>> = HashMap::new();
+        let mut docker_log_streams: HashMap<String,tokio::sync::watch::Sender<bool>>=HashMap::new();
         loop {
             tokio::select! {
                 biased;
@@ -514,6 +531,96 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                     });
                                 }
                             }
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerLogStart(container_id,tail,stream_id,response)) => {
+                            // Establish a dedicated exec channel. The regular PTY remains
+                            // responsive; no Docker log bytes are stored in native memory.
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut log_channel=connection.channel_open_session().await
+                                    .map_err(|e|format!("Cannot open Docker live log channel: {e}"))?;
+                                let cmd=format!("docker logs --follow --tail {tail} --timestamps {container_id}");
+                                log_channel.exec(true,cmd.as_bytes()).await
+                                    .map_err(|e|format!("SSH server rejected Docker live logs: {e}"))?;
+                                Ok::<_,String>(log_channel)
+                            }).await.unwrap_or_else(|_|Err("Docker live log channel setup timed out".into()));
+                            match setup {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut log_channel)=>{
+                                    let (stop_tx,mut stop_rx)=tokio::sync::watch::channel(false);
+                                    docker_log_streams.insert(stream_id.clone(),stop_tx);
+                                    let app=app.clone();
+                                    let session_id=cleanup_id.clone();
+                                    let done=forward_sender.clone();
+                                    let task_id=stream_id.clone();
+                                    let container_id=container_id.clone();
+                                    tauri::async_runtime::spawn(async move {
+                                        let mut initial_error=Vec::new();
+                                        let mut exit_status=None;
+                                        let mut emitted_anything=false;
+                                        let outcome=loop{
+                                            tokio::select!{
+                                                changed=stop_rx.changed()=>{
+                                                    if changed.is_err()||*stop_rx.borrow(){break Ok::<(),String>(());}
+                                                },
+                                                message=log_channel.wait()=>{
+                                                    match message {
+                                                        Some(russh::ChannelMsg::Data{data})|
+                                                        Some(russh::ChannelMsg::ExtendedData{data,..})=>{
+                                                            if data.is_empty(){continue;}
+                                                            // Docker failures (permission denied, missing socket)
+                                                            // often arrive only on stderr. Retain at most 2 KiB
+                                                            // for an actionable close/error message.
+                                                            if initial_error.len()<2048 {
+                                                                let remaining=2048-initial_error.len();
+                                                                initial_error.extend_from_slice(&data.as_ref()[..data.len().min(remaining)]);
+                                                            }
+                                                            emitted_anything=true;
+                                                            let _=app.emit(DOCKER_LOG_EVENT,DockerLogStreamEvent{
+                                                                session_id:session_id.clone(),
+                                                                stream_id:task_id.clone(),
+                                                                container_id:container_id.clone(),
+                                                                kind:"data",data:Some(STANDARD.encode(data.as_ref())),detail:None
+                                                            });
+                                                        },
+                                                        Some(russh::ChannelMsg::ExitStatus{exit_status:code})=>exit_status=Some(code),
+                                                        Some(russh::ChannelMsg::Close)|None=>break Ok(()),
+                                                        _=>{}
+                                                    }
+                                                }
+                                            }
+                                        };
+                                        let failure=match (outcome,exit_status){
+                                            (Err(message),_)=>Some(message),
+                                            (_,Some(code)) if code!=0=>Some(format!(
+                                                "Remote Docker log command exited with status {code}: {}",
+                                                String::from_utf8_lossy(&initial_error).chars().take(300).collect::<String>()
+                                            )),
+                                            _=>None,
+                                        };
+                                        let _=app.emit(DOCKER_LOG_EVENT,DockerLogStreamEvent{
+                                            session_id:session_id.clone(),stream_id:task_id.clone(),
+                                            container_id,kind:if failure.is_some(){"error"}else{"closed"},
+                                            data:None,detail:failure.or_else(||if emitted_anything {
+                                                Some("Docker log channel finished".to_owned())
+                                            }else{Some("Docker log channel ended with no output".to_owned())})
+                                        });
+                                        let _=done.send(SessionCommand::DockerLogFinished(task_id)).await;
+                                    });
+                                    let _=response.send(Ok(stream_id));
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerLogStop(stream_id,response))=>{
+                            let result=if let Some(stop)=docker_log_streams.remove(&stream_id){
+                                let _=stop.send(true);Ok(())
+                            }else{Err("Docker log stream no longer exists".to_owned())};
+                            let _=response.send(result);
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerLogFinished(stream_id))=>{
+                            docker_log_streams.remove(&stream_id);
                             Ok(())
                         },
                         Some(SessionCommand::DockerLogs(container_id,tail,response)) => {
@@ -1237,6 +1344,35 @@ pub async fn ssh_session_docker_logs(id: String, container_id: String, tail: Opt
     manager.sender(&id)?.send(SessionCommand::DockerLogs(container_id,count,tx)).await
         .map_err(|_|"SSH session closed".to_owned())?;
     rx.await.map_err(|_|"Docker logs request was cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_log_start(
+    id:String,container_id:String,tail:u32,manager:State<'_,SshSessionManager>
+)->Result<String,String>{
+    if !valid_docker_container_id(&container_id){
+        return Err("Invalid Docker container ID".into());
+    }
+    if tail>1000{return Err("Live Docker log tail must be 0–1000 lines".into());}
+    let stream_id=format!("docker-log-{}",NEXT_ID.fetch_add(1,Ordering::Relaxed));
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerLogStart(container_id,tail,stream_id,tx)).await
+        .map_err(|_|"SSH session closed before starting Docker log stream")?;
+    rx.await.map_err(|_|"Docker live log setup was interrupted")?
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_log_stop(
+    id:String,stream_id:String,manager:State<'_,SshSessionManager>
+)->Result<(),String>{
+    if !stream_id.starts_with("docker-log-") || stream_id.len()>64 ||
+        !stream_id["docker-log-".len()..].bytes().all(|byte|byte.is_ascii_digit()){
+        return Err("Invalid Docker log stream ID".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerLogStop(stream_id,tx)).await
+        .map_err(|_|"SSH session closed before stopping Docker log stream")?;
+    rx.await.map_err(|_|"Docker log stream stop was interrupted")?
 }
 
 fn valid_docker_action(action:&str)->bool{
