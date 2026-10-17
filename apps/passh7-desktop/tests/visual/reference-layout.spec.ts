@@ -165,5 +165,19 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await expect(page.locator(".referenceTerminalText")).toHaveCSS("color","rgb(40, 68, 99)");
   });
 
+  await test.step("Windows SSH agent detection: desktop-only versus CLI",async()=>{
+    await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
+    await expect(page.locator(".agentInstallHelp")).toContainText("Desktop");
+    await expect(page.locator(".agentInstallHelp")).toContainText("RDP");
+    await expect(page.getByRole("button",{name:/Launch CLI in Terminal/})).toBeDisabled();
+    await page.locator(".agentCard.claude").click();
+    await expect(page.locator(".agentDiscovery")).toContainText("User installation outside SSH PATH");
+    await expect(page.locator(".agentDiscovery")).toContainText("claude.cmd");
+    await expect(page.getByRole("button",{name:/Launch CLI in Terminal/})).toBeEnabled();
+    await page.locator(".agentCard.opencode").click();
+    await expect(page.locator(".agentInstallHelp")).toContainText("CLI not found");
+    await expect(page.locator(".agentInstallHelp code")).toContainText("opencode-ai");
+  });
+
   expect(failures,"uncaught React/browser errors").toEqual([]);
 });
