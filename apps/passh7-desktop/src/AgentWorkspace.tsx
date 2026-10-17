@@ -1,4 +1,4 @@
-import {useState} from "react";
+import {useRef,useState} from "react";
 import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
 import type {RemoteAgentAvailability} from "./backend";
@@ -18,6 +18,11 @@ type Props={
 };
 export default function AgentWorkspace(p:Props){
   const [copyFeedback,setCopyFeedback]=useState("");
+  const terminalPane=useRef<HTMLDivElement>(null);
+  const focusTerminal=()=>{
+    const input=terminalPane.current?.querySelector(".xterm-helper-textarea");
+    if(input instanceof HTMLTextAreaElement)input.focus();
+  };
   const connected=Boolean(p.sessionId&&p.vaultUnlocked);
   const selected=AGENTS.find(a=>a.kind===p.agent)!;
   const [installFeedback,setInstallFeedback]=useState("");
@@ -122,9 +127,12 @@ export default function AgentWorkspace(p:Props){
         {p.liveTerminal&&connected&&<section className="agentSection agentEmbeddedTerminal" aria-label="Live agent SSH terminal">
           <div className="agentSectionHead"><div><h2><TerminalSquare size={17}/> Interactive SSH terminal</h2>
             <p>Connected to {p.host}. Commands and agent output use your existing authenticated PTY session.</p></div>
-            <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
+            <div className="agentTerminalActions">
+              <button type="button" onClick={focusTerminal}><TerminalSquare size={14}/> Focus console</button>
+              <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
+            </div>
           </div>
-          <div className="agentTerminalFrame">
+          <div className="agentTerminalFrame" ref={terminalPane}>
             <TerminalView id={p.sessionId} active={true} onClosed={p.onSessionClosed||(()=>{})}/>
           </div>
           <p className="agentHint">Type directly in this terminal. Select another SSH session above to change the active console. Nothing is executed without your action.</p>
