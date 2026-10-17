@@ -188,13 +188,13 @@ export async function runNativeAppSession(page:Page){
       .__mockSshBridge.pendingSftp()
   )).toBeGreaterThan(0);
   await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
-  await expect(page.locator(".filesTableScroll")).toContainText("from-windows.txt");
+  await expect(page.locator(".filesTableWrap")).toContainText("from-windows.txt");
   await page.evaluate(()=>{
     (window as unknown as {__mockSshBridge:{releaseSftp:()=>void}})
       .__mockSshBridge.releaseSftp();
   });
-  await expect(page.locator(".filesTableScroll")).not.toContainText("from-linux.txt");
-  await expect(page.locator(".filesTableScroll")).toContainText("from-windows.txt");
+  await expect(page.locator(".filesTableWrap")).not.toContainText("from-linux.txt");
+  await expect(page.locator(".filesTableWrap")).toContainText("from-windows.txt");
   await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
   await page.locator(".workspaceNav button").filter({hasText:"Docker"}).click();
 
