@@ -43,6 +43,18 @@ export default function App(){
   const sshTabsRef=useRef(sshTabs);
   useEffect(()=>{sshTabsRef.current=sshTabs},[sshTabs]);
   const [activeSsh,setActiveSsh]=useState("");
+  // Host selection and active native SSH tab must always describe the same
+  // session. Merely changing the highlighted host previously left activeSsh
+  // pointing at a different server, disabling SFTP/Docker actions despite a
+  // green Connected indicator for the newly selected host.
+  useEffect(()=>{
+    const candidates=sshTabs.filter(session=>session.alias===selected);
+    const current=sshTabs.find(session=>session.id===activeSsh);
+    if(current?.alias===selected)return;
+    const next=candidates[0]?.id||"";
+    if(activeSsh!==next)setActiveSsh(next);
+  },[selected,sshTabs,activeSsh]);
+
   const [sshBusy,setSshBusy]=useState(false);
   const [loginOpen,setLoginOpen]=useState(false);
   const [tofuCandidate,setTofuCandidate]=useState<{alias:string;fingerprint:string}|null>(null);
