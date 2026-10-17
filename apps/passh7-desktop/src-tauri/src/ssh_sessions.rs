@@ -645,16 +645,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             }
                                         };
                                         let _=log_channel.close().await;
-                                        let failure=match (outcome,exit_status){
-                                            (Err(message),_)=>Some(message),
-                                            (_,Some(code)) if code!=0&&!stopped_by_user=>Some(format!(
-                                                "Remote Docker log command exited with status {code}: {}",
-                                                String::from_utf8_lossy(&initial_error).chars().take(300).collect::<String>()
-                                            )),
-                                            (_,None) if !stopped_by_user=>Some(
-                                                "Docker live log SSH channel closed without an exit status. Check Docker permissions and reconnect if SSH was interrupted.".to_owned()
-                                            ),
-                                            _=>None,
+                                        let failure=match outcome{
+                                            Err(message)=>Some(message),
+                                            Ok(())=>docker_log_exit_failure(exit_status,stopped_by_user,&initial_error),
                                         };
                                         let _=app.emit(DOCKER_LOG_EVENT,DockerLogStreamEvent{
                                             session_id:session_id.clone(),stream_id:task_id.clone(),
@@ -1741,6 +1734,41 @@ pub async fn ssh_session_docker_log_stop(
     manager.sender(&id)?.send(SessionCommand::DockerLogStop(stream_id,tx)).await
         .map_err(|_|"SSH session closed before stopping Docker log stream")?;
     rx.await.map_err(|_|"Docker log stream stop was interrupted")?
+}
+
+/// Interpret remote exit evidence without confusing an explicit user
+/// Stop with an unexpected dropped SSH exec channel. The retained diagnostic
+/// is bounded: Docker often prints permission/daemon errors on stderr.
+fn docker_log_exit_failure(code:Option<u32>,stopped_by_user:bool,detail:&[u8])->Option<String>{
+    if stopped_by_user{return None;}
+    match code{
+        Some(0)=>None,
+        Some(status)=>Some(format!(
+            "Remote Docker log command exited with status {status}: {}",
+            String::from_utf8_lossy(detail).chars().take(300).collect::<String>()
+        )),
+        None=>Some("Docker live log SSH channel closed without an exit status. Check Docker permissions and reconnect if SSH was interrupted.".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod docker_log_exit_tests{
+    use super::docker_log_exit_failure;
+    #[test]
+    fn distinguishes_idle_follow_stop_and_remote_failure(){
+        assert!(docker_log_exit_failure(Some(0),false,b"").is_none());
+        assert!(docker_log_exit_failure(None,true,b"").is_none());
+        assert!(docker_log_exit_failure(Some(137),true,b"").is_none());
+        assert!(docker_log_exit_failure(None,false,b"").unwrap().contains("without an exit status"));
+        let error=docker_log_exit_failure(Some(1),false,b"permission denied").unwrap();
+        assert!(error.contains("status 1"));
+        assert!(error.contains("permission denied"));
+    }
+    #[test]
+    fn diagnostic_does_not_repeat_unbounded_stderr(){
+        let huge=vec![b'Z';30_000];
+        assert!(docker_log_exit_failure(Some(1),false,&huge).unwrap().len()<450);
+    }
 }
 
 fn valid_docker_action(action:&str)->bool{
