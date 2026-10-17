@@ -608,10 +608,14 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                         let mut initial_error=Vec::new();
                                         let mut exit_status=None;
                                         let mut emitted_anything=false;
+                                        let mut stopped_by_user=false;
                                         let outcome=loop{
                                             tokio::select!{
                                                 changed=stop_rx.changed()=>{
-                                                    if changed.is_err()||*stop_rx.borrow(){break Ok::<(),String>(());}
+                                                    if changed.is_err()||*stop_rx.borrow(){
+                                                        stopped_by_user=true;
+                                                        break Ok::<(),String>(());
+                                                    }
                                                 },
                                                 message=log_channel.wait()=>{
                                                     match message {
@@ -643,10 +647,13 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                         let _=log_channel.close().await;
                                         let failure=match (outcome,exit_status){
                                             (Err(message),_)=>Some(message),
-                                            (_,Some(code)) if code!=0=>Some(format!(
+                                            (_,Some(code)) if code!=0&&!stopped_by_user=>Some(format!(
                                                 "Remote Docker log command exited with status {code}: {}",
                                                 String::from_utf8_lossy(&initial_error).chars().take(300).collect::<String>()
                                             )),
+                                            (_,None) if !stopped_by_user=>Some(
+                                                "Docker live log SSH channel closed without an exit status. Check Docker permissions and reconnect if SSH was interrupted.".to_owned()
+                                            ),
                                             _=>None,
                                         };
                                         let _=app.emit(DOCKER_LOG_EVENT,DockerLogStreamEvent{
@@ -749,8 +756,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 }
                                             }
                                             let message=String::from_utf8_lossy(&output).into_owned();
-                                            if exit_status.is_some_and(|code|code!=0){
-                                                return Err(format!("Docker logs failed: {}",message.chars().take(700).collect::<String>()));
+                                            if exit_status!=Some(0){
+                                                return Err(format!("Docker logs failed (SSH exit {:?}): {}",
+                                                    exit_status,message.chars().take(700).collect::<String>()));
                                             }
                                             Ok::<String,String>(message)
                                         }).await.unwrap_or_else(|_|Err("Docker logs timed out; try fewer lines or check remote Docker service".into()));
