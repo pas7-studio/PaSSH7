@@ -1,4 +1,4 @@
-import {useRef,useState} from "react";
+import {useEffect,useRef,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
 import {cancelSftpTransfer,downloadSftpFile,uploadSftpFile,type SftpTransferEvent} from "./backend";
 
@@ -16,8 +16,10 @@ const PENDING_LIMIT=40;
  * prevents overwrites, and owns cancellation. Jobs are UI history only: no local
  * absolute upload/download paths, credentials, file content or secrets are saved.
  */
-export default function useSftpTransferQueue(onUploadComplete:(session:string,directory:string)=>void){
+export default function useSftpTransferQueue(onUploadComplete:(session:string,directory:string)=>void,liveSessionIds:string[]){
   const jobsRef=useRef<TransferJob[]>([]);
+  const liveSessionsRef=useRef(new Set(liveSessionIds));
+  liveSessionsRef.current=new Set(liveSessionIds);
   const [jobs,setJobs]=useState<TransferJob[]>([]);
   const [paused,setPaused]=useState(false);
   const pausedRef=useRef(false);
@@ -28,6 +30,9 @@ export default function useSftpTransferQueue(onUploadComplete:(session:string,di
   };
   const processNext=async()=>{
     if(busyRef.current||pausedRef.current)return;
+    // Never open a local file picker for a host whose SSH session has closed.
+    const stale=jobsRef.current.filter(job=>job.status==="queued"&&!liveSessionsRef.current.has(job.session));
+    for(const job of stale)update(job.id,{status:"cancelled",result:"SSH session disconnected before transfer began."});
     const next=jobsRef.current.find(job=>job.status==="queued");
     if(!next)return;
     busyRef.current=true;
@@ -65,6 +70,13 @@ export default function useSftpTransferQueue(onUploadComplete:(session:string,di
     if(!input.session||!input.paths.length)return 0;
     const unique=[...new Set(input.paths.filter(Boolean))].slice(0,PENDING_LIMIT);
     const pending=jobsRef.current.filter(j=>["queued","selecting","running","cancelling"].includes(j.status)).length;
+    if(jobsRef.current.length>=MAX_JOBS){
+      // Retain unfinished tasks and newest history, discarding only old finished entries.
+      const older=jobsRef.current.filter(job=>["completed","failed","cancelled"].includes(job.status));
+      const removable=Math.min(older.length,Math.max(0,jobsRef.current.length-(MAX_JOBS-PENDING_LIMIT)));
+      const removeIds=new Set(older.slice(0,removable).map(job=>job.id));
+      jobsRef.current=jobsRef.current.filter(job=>!removeIds.has(job.id));
+    }
     const allowed=Math.max(0,Math.min(unique.length,PENDING_LIMIT-pending,MAX_JOBS-jobsRef.current.length));
     if(!allowed)return 0;
     const fresh=unique.slice(0,allowed).map(path=>({
@@ -91,6 +103,21 @@ export default function useSftpTransferQueue(onUploadComplete:(session:string,di
     // New transfer ID is required: native SFTP transfer IDs are single-use.
     enqueue({session:job.session,host:job.host,direction:job.direction,paths:[job.path]});
   };
+  // A disconnected session's queued jobs are invalid; native transport will
+  // cancel the active transfer independently. Avoid accidentally showing a
+  // new file picker for an SSH session that no longer exists.
+  const sessionKey=liveSessionIds.join("|");
+  useEffect(()=>{
+    let changed=false;
+    jobsRef.current=jobsRef.current.map(job=>{
+      if(job.status==="queued"&&!liveSessionsRef.current.has(job.session)){
+        changed=true;
+        return {...job,status:"cancelled" as const,result:"SSH session disconnected before transfer began."};
+      }
+      return job;
+    });
+    if(changed)publish();
+  },[sessionKey]);
   const clearFinished=()=>{
     jobsRef.current=jobsRef.current.filter(job=>!["completed","failed","cancelled"].includes(job.status));
     publish();
