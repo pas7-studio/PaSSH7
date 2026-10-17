@@ -1,0 +1,27 @@
+name: PaSSH7 trusted UI branch validation
+on:
+  push:
+    branches:
+      - feat/dedicated-ai-agent-workspace
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: passh7-trusted-ui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  frontend:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Frontend typecheck and Vite build
+        working-directory: apps/passh7-desktop
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
