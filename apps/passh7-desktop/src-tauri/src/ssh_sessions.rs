@@ -631,12 +631,14 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::DockerInspect(container_id,response)) => {
-                            // The input is a previously selected hex Docker ID; shell tokens
-                            // and arbitrary inspection templates never come from JavaScript.
+                            // The input is a validated hex container ID. Avoid Go templates
+                            // entirely: remote PowerShell/cmd/bash quoting differs, and can
+                            // corrupt '{{json .}}' before it reaches the Docker CLI.
                             let setup=tokio::time::timeout(Duration::from_secs(10),async {
                                 let mut channel=connection.channel_open_session().await
                                     .map_err(|_|"Could not open Docker inspection channel".to_owned())?;
-                                let command=format!("docker inspect --format '{{{{json .}}}}' {container_id}");
+                                let command=docker_inspect_command(&container_id)
+                                    .ok_or("Invalid Docker container ID".to_owned())?;
                                 channel.exec(true,command.as_bytes()).await
                                     .map_err(|_|"SSH server refused Docker inspection".to_owned())?;
                                 Ok::<_,String>(channel)
@@ -665,28 +667,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             if exit_status.is_some_and(|code|code!=0){
                                                 return Err(format!("Docker inspect failed: {}",text.chars().take(400).collect::<String>()));
                                             }
-                                            let value:serde_json::Value=serde_json::from_str(text.trim())
-                                                .map_err(|_|"Docker returned invalid inspect JSON".to_owned())?;
-                                            // Deliberately omit Config.Env, Config.Labels, full command
-                                            // arguments and any other inspect data which may contain secrets.
-                                            let mounts=value.get("Mounts").and_then(|v|v.as_array())
-                                                .map(|items|items.iter().take(100).map(|item|serde_json::json!({
-                                                    "type":item.get("Type"),"source":item.get("Source"),
-                                                    "destination":item.get("Destination"),"rw":item.get("RW")
-                                                })).collect::<Vec<_>>()).unwrap_or_default();
-                                            let networks=value.pointer("/NetworkSettings/Networks")
-                                                .and_then(|v|v.as_object())
-                                                .map(|m|m.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
-                                            let safe=serde_json::json!({
-                                                "created":value.get("Created"),
-                                                "startedAt":value.pointer("/State/StartedAt"),
-                                                "finishedAt":value.pointer("/State/FinishedAt"),
-                                                "restartPolicy":value.pointer("/HostConfig/RestartPolicy/Name"),
-                                                "image":value.pointer("/Config/Image"),
-                                                "mounts":mounts,
-                                                "networks":networks
-                                            });
-                                            serde_json::to_string(&safe).map_err(|_|"Could not serialize safe Docker inspection".to_owned())
+                                            safe_docker_inspect_json(&text)
                                         }).await.unwrap_or_else(|_|Err("Docker inspection timed out".into()));
                                         let _=response.send(result);
                                     });
@@ -1454,10 +1435,90 @@ pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionMa
     rx.await.map_err(|_| "Docker request was cancelled".to_owned())?
 }
 
+/// Shell-safe read-only Docker inspection. No Go-template quoting is involved,
+/// so Linux shells, PowerShell, and cmd.exe execute the same command.
+fn docker_inspect_command(container_id:&str)->Option<String>{
+    if !valid_docker_container_id(container_id){return None;}
+    Some(format!("docker container inspect {container_id}"))
+}
+
+/// Docker's default (non-template) inspect output is a JSON array. Only a
+/// deliberately small, non-secret subset ever leaves the native SSH backend.
+fn safe_docker_inspect_json(raw:&str)->Result<String,String>{
+    let parsed:serde_json::Value=serde_json::from_str(raw.trim())
+        .map_err(|_|"Docker returned invalid inspect JSON".to_owned())?;
+    let values=parsed.as_array()
+        .ok_or("Docker returned an unexpected inspect response (expected JSON array)")?;
+    let value=values.first().filter(|value|value.is_object())
+        .ok_or("Docker returned no inspect data for this container")?;
+    let mounts=value.get("Mounts").and_then(|v|v.as_array())
+        .map(|items|items.iter().take(100).map(|item|serde_json::json!({
+            "type":item.get("Type"),"source":item.get("Source"),
+            "destination":item.get("Destination"),"rw":item.get("RW")
+        })).collect::<Vec<_>>()).unwrap_or_default();
+    let networks=value.pointer("/NetworkSettings/Networks")
+        .and_then(|v|v.as_object())
+        .map(|items|items.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
+    // NEVER forward Config.Env, Config.Labels or the container command.
+    let safe=serde_json::json!({
+        "created":value.get("Created"),
+        "startedAt":value.pointer("/State/StartedAt"),
+        "finishedAt":value.pointer("/State/FinishedAt"),
+        "restartPolicy":value.pointer("/HostConfig/RestartPolicy/Name"),
+        "image":value.pointer("/Config/Image"),
+        "mounts":mounts,
+        "networks":networks
+    });
+    serde_json::to_string(&safe)
+        .map_err(|_|"Could not serialize safe Docker inspection".to_owned())
+}
+
 // Only container IDs from the verified Docker inventory may be used.
 // Names, flags and shell input are intentionally rejected.
 fn valid_docker_container_id(id: &str) -> bool {
     (12..=64).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod docker_inspect_tests{
+    use super::{docker_inspect_command,safe_docker_inspect_json};
+    #[test]
+    fn inspect_uses_no_shell_sensitive_go_template(){
+        assert_eq!(docker_inspect_command("012345abcdef").as_deref(),
+            Some("docker container inspect 012345abcdef"));
+        assert_eq!(docker_inspect_command(&"a".repeat(64)).is_some(),true);
+        for invalid in ["","not-a-container","../foo","012345abcdef;id",
+            "012345abcdef\\nwhoami","012345abcdef'","012345abcdef--format"]{
+            assert!(docker_inspect_command(invalid).is_none());
+        }
+    }
+    #[test]
+    fn docker_array_is_reduced_to_explicit_secret_free_fields(){
+        let raw=r#"[{"Id":"012345abcdef","Created":"2026-10-17T00:00:00Z",
+            "Config":{"Image":"alpine:3","Env":["TOKEN=must_never_leak"],
+                      "Labels":{"private.password":"must_never_leak"}},
+            "State":{"StartedAt":"2026-10-17T01:00:00Z","FinishedAt":""},
+            "HostConfig":{"RestartPolicy":{"Name":"unless-stopped"}},
+            "Mounts":[{"Type":"volume","Source":"/srv/data",
+                       "Destination":"/var/lib/app","RW":true}],
+            "NetworkSettings":{"Networks":{"default":{}}},
+            "Path":"must_never_leak"}]"#;
+        let safe=safe_docker_inspect_json(raw).expect("valid Docker inspect array");
+        assert!(!safe.contains("must_never_leak"));
+        assert!(!safe.contains("Env"));
+        assert!(!safe.contains("Labels"));
+        let parsed:serde_json::Value=serde_json::from_str(&safe).unwrap();
+        assert_eq!(parsed["image"],"alpine:3");
+        assert_eq!(parsed["restartPolicy"],"unless-stopped");
+        assert_eq!(parsed["networks"][0],"default");
+        assert_eq!(parsed["mounts"][0]["destination"],"/var/lib/app");
+    }
+    #[test]
+    fn absent_or_unexpected_inspect_response_is_actionable(){
+        assert!(safe_docker_inspect_json("[]").unwrap_err().contains("no inspect data"));
+        assert!(safe_docker_inspect_json("{}").unwrap_err().contains("expected JSON array"));
+        assert!(safe_docker_inspect_json("not json").unwrap_err().contains("invalid inspect JSON"));
+    }
 }
 
 #[tauri::command]
