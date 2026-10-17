@@ -34,7 +34,7 @@ Migration layer: apps/passh7-desktop/src/reference-ui.css, loaded after legacy s
 
 | Workstream | Implemented in redesign branch | Remaining |
 | --- | --- | --- |
-| AppShell | single left rail, true active-host header, page navigation | comprehensive keyboard/accessibility and screenshot audit |
+| AppShell | single left rail, active-host header, page navigation, persistent sidebar visibility | interactive Windows WebView2 and full accessibility audit |
 | Settings | 12 sections with functional collapsible cards, remembered category, live xterm font/cursor controls, inspector rail, import/export and pane reset | native config/log folders and advanced backend settings |
 | Remote Files | lazy SFTP tree with active-path reveal, text preview and bounded raster image preview (PNG/JPEG/GIF/WebP ≤768 KiB), history, resizable tree/inspector, multiselect, serial transfer queue (pause pending, cancel, retry, progress/history) and Vault backups | multi-file native upload picker, pause/resume active transfer, large files |
 | Docker | resource tabs, native KPIs, CPU/RAM sortable inventory, sanitized inspector, live/fullscreen logs, split sizes, confirmed container shell, read-only Compose project discovery and project-container listing | Compose service controls, mutations, richer metrics and Windows live verification |
@@ -69,3 +69,29 @@ Migration layer: apps/passh7-desktop/src/reference-ui.css, loaded after legacy s
 8. Terminal input remains responsive while Docker and SFTP inspect asynchronously.
 
 Do not claim release readiness or exact pixel parity based on CI alone; Windows interactive acceptance remains mandatory.
+
+## Repeatable visual screenshot smoke (2026-10-17)
+
+The approved Settings / Remote Files / Docker mockups remain the canonical visual target.
+The actual workspace React components have a **development-only** deterministic fixture at
+`?__reference=1&screen=settings|files|docker`. It is watermarked and does not
+connect to SSH, Vault or Docker. The CI build gate checks that `DEV UI FIXTURE`
+is absent from the production Vite bundle.
+
+`.github/workflows/reference-ui-screenshots.yml` is manual (`workflow_dispatch`)
+on the existing self-hosted runner. It uses Chromium bundled with an isolated
+npm test dependency, not the blocked Playwright CDN, AWS, or hosted Actions runners.
+
+Last green visual evidence: https://github.com/pas7-studio/PaSSH7/actions/runs/39031809762
+- Nine screenshots: three workspaces at 1440x900, 1920x1080 and 900x720.
+- Viewport overflow, required layout elements, resize keyboard, accordion and Docker search checks.
+- Actual offline App sidebar persistence across reload and header restore.
+- Screenshot artifact: `PaSSH7-reference-UI-screenshots`.
+
+This evidence checks the real React layout using synthetic data. It does NOT prove
+pixel-perfect parity or native Windows WebView2 behavior. Windows interactive
+acceptance with pinned SSH test hosts remains a separate release gate.
+
+For local reference screenshots: install desktop npm dependencies, run Vite on
+127.0.0.1:4187, open `http://127.0.0.1:4187/?__reference=1&screen=settings`,
+and use `apps/passh7-desktop/tests/visual` for isolated Playwright tests.
