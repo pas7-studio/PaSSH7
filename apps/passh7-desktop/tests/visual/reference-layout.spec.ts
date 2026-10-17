@@ -170,6 +170,9 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await expect(page.locator(".agentInstallHelp")).toContainText("Desktop");
     await expect(page.locator(".agentInstallHelp")).toContainText("RDP");
     await expect(page.getByRole("button",{name:/Launch CLI in Terminal/})).toBeDisabled();
+    await page.getByRole("button",{name:/Prepare RDP tunnel/}).click();
+    await expect(page.locator(".widePageTitle h1")).toHaveText("Port Forwarding");
+    await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
     await page.locator(".agentCard.claude").click();
     await expect(page.locator(".agentDiscovery")).toContainText("User installation outside SSH PATH");
     await expect(page.locator(".agentDiscovery")).toContainText("claude.cmd");
