@@ -309,3 +309,25 @@
 .shell.light .forwardForm label{color:#39506b}
 .shell.light .forwardTips{background:#f4f8ff}
 .shell.light .filesVaultSection .vaultBackupCard{background:#fff}
+
+
+/* Real container inspector driven by sanitized native docker inspect. */
+.dockerInspector .inspectorActions{padding:12px;gap:7px;border-bottom:1px solid var(--border)}
+.dockerInspector .inspectorActions button{white-space:nowrap}
+.dockerInspectTabs{display:flex;align-items:center;gap:3px;border-bottom:1px solid var(--border);padding:7px 10px}
+.dockerInspectTabs button{background:transparent;border:0;border-radius:4px;flex:1;padding:9px 6px;font-size:10.5px;color:var(--muted)}
+.dockerInspectTabs button.active{background:#1d5eb1;color:white}
+.dockerInspector>.workspaceError{margin:12px;font-size:11px}
+.dockerInspector dl{padding:12px}
+.dockerInspector dl dt,.dockerInspector dl dd{padding-bottom:2px}
+.dockerInspector .prefInfo{padding:8px 12px 16px}
+.dockerMounts,.dockerNetworks{display:grid;gap:7px;padding:12px;overflow:auto}
+.dockerMounts>div,.dockerNetworks>div{display:grid;gap:6px;background:#132a43;border:1px solid var(--border);padding:10px;border-radius:6px;font-size:11px}
+.dockerMounts strong{overflow-wrap:anywhere}
+.dockerMounts small{color:var(--muted);overflow-wrap:anywhere}
+.dockerMounts span{color:#91b8e6;font-size:10px}
+.dockerNetworks>div{display:flex;align-items:center;gap:7px;color:#cddff5}
+.dockerNetworks svg{color:#58acff}
+.dockerMounts p,.dockerNetworks p{font-size:11px;color:var(--muted);line-height:1.6}
+.shell.light .dockerMounts>div,.shell.light .dockerNetworks>div{background:#f3f8ff;border-color:#d0dfed}
+.shell.light .dockerNetworks>div{color:#3c5671}
