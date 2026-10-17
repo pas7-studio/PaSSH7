@@ -77,7 +77,7 @@
 .dockerMetrics strong{font-size:23px;line-height:1.15}
 .dockerResourceTabs{gap:7px}
 .dockerResourceTabs button.active{background:#1b67c8;color:#fff;border-color:#287bf1}
-.dockerWorkspaceGrid{grid-template-columns:minmax(0,1fr) minmax(245px,24%);height:clamp(325px,43vh,550px);gap:11px}
+.dockerWorkspaceGrid{grid-template-columns:minmax(0,1fr) minmax(265px,26.5%);height:clamp(325px,43vh,550px);gap:11px}
 .dockerLogViewer{height:clamp(240px,30vh,380px);min-height:240px;overflow:hidden}
 .dockerLogToolbar{gap:9px}
 .dockerLogsBody{background:#081522;scrollbar-width:thin}
@@ -87,7 +87,7 @@
 .dockerLogsBody .logWarn{color:#f5c565}
 .dockerStatus.running{background:#0b4e35;color:#53ee9a}
 .dockerStatus.stopped{background:#4d2233;color:#ffa2a7}
-.filesGrid{grid-template-columns:minmax(150px,20%) minmax(0,1fr) minmax(240px,25%);gap:11px;height:clamp(370px,49vh,635px)}
+.filesGrid{grid-template-columns:minmax(150px,19%) minmax(0,1fr) minmax(260px,26.5%);gap:11px;height:clamp(370px,49vh,635px)}
 .filesFolders{padding:8px}
 .filesFolders .paneTitle{padding:10px}
 .filesFolders button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;justify-content:flex-start}
@@ -103,7 +103,7 @@
 .agentPage .agentCard{background:#13273e}
 .agentPage .agentCard.active{background:#17447d}
 .agentContextPreview,.agentLaunchCommand{background:#081728}
-.settingsPage .settingsLayout{grid-template-columns:minmax(190px,220px) minmax(0,1fr) minmax(230px,280px);gap:12px}
+.settingsPage .settingsLayout{grid-template-columns:minmax(190px,220px) minmax(0,1fr) minmax(270px,310px);gap:12px}
 .settingsPage .settingsNav{border:1px solid #2a405a;border-radius:9px;background:#0d1e30;padding:7px;align-self:start;gap:3px}
 .settingsPage .settingsNav button{text-align:left;align-items:center;gap:11px;padding:10px;border-radius:6px;min-height:54px;border:1px solid transparent;background:transparent}
 .settingsPage .settingsNav button.selected{background:linear-gradient(105deg,#1959b8,#2678ed);border-color:#2e81f3;color:#fff}
@@ -331,3 +331,10 @@
 .dockerMounts p,.dockerNetworks p{font-size:11px;color:var(--muted);line-height:1.6}
 .shell.light .dockerMounts>div,.shell.light .dockerNetworks>div{background:#f3f8ff;border-color:#d0dfed}
 .shell.light .dockerNetworks>div{color:#3c5671}
+
+/* Reference host list uses status dot and concise alias, with full target in active-host header. */
+.sidebar section .host{padding-left:42px}
+.sidebar section .host>svg{display:none}
+.sidebar .hostText small{display:none}
+@media(max-width:900px){.sidebar section .host{padding-left:17px}}
+@media(max-width:680px){.sidebar section .host{padding-left:8px}}
