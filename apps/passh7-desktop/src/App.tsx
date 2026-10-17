@@ -1465,6 +1465,7 @@ export default function App(){
         panel==="settings"?<SettingsWorkspace
  preferences={preferences} onChange={updatePreferences}
  buildInfo={buildInfo} vaultUnlocked={vaultUnlocked}
+ host={active.label} session={connected?activeSsh:""} connected={connected}
  onLock={()=>void lockVault()}
  onExport={()=>void exportVaultBackup()}
  onRestore={()=>{setPanel("files");void inspectVaultRestore()}}
