@@ -143,7 +143,8 @@ export default function ReferenceScreens(){
       </aside>
       <aside className="context fullContext"><div className="contextBody">
         {screen==="settings"?<SettingsWorkspace preferences={preferences} onChange={setPreferences}
-          buildInfo={build} vaultUnlocked={true} onLock={()=>{}} onExport={()=>{}} onRestore={()=>{}}/>:
+          buildInfo={build} vaultUnlocked={true} host="dev-server" session="" connected={false}
+          onLock={()=>{}} onExport={()=>{}} onRestore={()=>{}}/>:
         screen==="files"?<RemoteFilesWorkspace
           session="visual-fixture" host="dev-server" connected={true}
           pathInput={path} setPathInput={setPath}
