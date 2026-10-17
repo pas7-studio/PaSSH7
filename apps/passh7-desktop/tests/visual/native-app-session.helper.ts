@@ -141,5 +141,26 @@ export async function runNativeAppSession(page:Page){
     (window as unknown as {__mockSshBridge:{exports:Array<{containerName:string;contents:string}>}}).__mockSshBridge.exports
   );
   expect(saved).toEqual([{containerName:"api-test",contents:"2026-10-17 ERROR warning"}]);
+
+  // Switch host while Docker has logs from the prior host: no cross-host
+  // log output, then simulate an unsolicited SSH close from the native event
+  // bridge. The recovery action must be visible outside hidden Terminal.
+  await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
+  await expect(page.locator(".topHostIdentity strong")).toHaveText("win-test");
+  await expect(page.locator(".dockerLogsBody")).not.toContainText("ERROR warning");
+  await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
+  await expect(page.locator(".agentTerminalFrame .terminalSessionSurface")).toHaveAttribute("data-ssh-session","session-c");
+  await page.evaluate(()=>{
+    const bridge=(window as unknown as {__mockSshBridge:{emit:(event:string,payload:unknown)=>void}}).__mockSshBridge;
+    bridge.emit("passh7:ssh-session",{
+      id:"session-c",kind:"closed",detail:"Native SSH channel closed unexpectedly"
+    });
+  });
+  await expect(page.locator(".globalSessionNotice")).toContainText("win-test");
+  await expect(page.locator(".globalSessionNotice")).toContainText("Native SSH channel closed unexpectedly");
+  await expect(page.locator(".agentConnectNotice")).toBeVisible();
+  await expect(page.locator(".terminalSessionSurface .xterm")).toHaveCount(2);
+  await page.getByRole("button",{name:"Dismiss session notice"}).click();
+  await expect(page.locator(".globalSessionNotice")).toHaveCount(0);
   expect(browserErrors).toEqual([]);
 }
