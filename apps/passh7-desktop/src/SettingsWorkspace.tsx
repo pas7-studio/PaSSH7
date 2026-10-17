@@ -175,8 +175,6 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
             {infoRow("Docker inspector / logs","Saved inspector width and log viewer height.",preferences.paneSizes.dockerInspector+" px / "+preferences.paneSizes.dockerLogs+" px")}
             <div className="settingsActions"><button type="button" onClick={()=>{onChange({...preferences,paneSizes:{...defaultPaneSizes}});setNotice("Panel sizes restored to defaults.");}}><RefreshCw size={14}/> Reset all panel sizes</button></div>
           </>)}
-
-          </>)}
         </>}
         {section==="shortcuts"&&<>
           {sectionCard("Available keyboard shortcuts",<>
