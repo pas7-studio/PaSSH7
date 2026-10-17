@@ -15,6 +15,10 @@ export type AppPreferences={
   density:"comfortable"|"compact";
   terminalFontSize:number;
   terminalScrollback:number;
+  terminalFontFamily:"cascadia"|"consolas"|"jetbrains"|"monospace";
+  terminalCursorStyle:"block"|"underline"|"bar";
+  terminalCursorBlink:boolean;
+  terminalLineHeight:number;
   dockerTail:number;
   dockerAutoRefresh:boolean;
   dockerFollowLogs:boolean;
@@ -26,6 +30,7 @@ export type AppPreferences={
 };
 export const defaultPreferences:AppPreferences={
   theme:"dark",density:"comfortable",terminalFontSize:13,terminalScrollback:5000,
+  terminalFontFamily:"cascadia",terminalCursorStyle:"block",terminalCursorBlink:true,terminalLineHeight:1.15,
   dockerTail:200,dockerAutoRefresh:false,dockerFollowLogs:false,
   sftpShowHidden:true,sftpSort:"folders",confirmTransfer:true,
   rememberWorkspace:true,paneSizes:{...defaultPaneSizes}
@@ -44,6 +49,10 @@ export function validatePreferences(source:unknown):AppPreferences{
     density:data.density==="compact"?"compact":"comfortable",
     terminalFontSize:typeof data.terminalFontSize==="number"&&Number.isInteger(data.terminalFontSize)&&data.terminalFontSize>=10&&data.terminalFontSize<=22?data.terminalFontSize:13,
     terminalScrollback:[1000,5000,10000,20000].includes(data.terminalScrollback??0)?data.terminalScrollback!:5000,
+    terminalFontFamily:["cascadia","consolas","jetbrains","monospace"].includes(data.terminalFontFamily??"")?data.terminalFontFamily!:"cascadia",
+    terminalCursorStyle:["block","underline","bar"].includes(data.terminalCursorStyle??"")?data.terminalCursorStyle!:"block",
+    terminalCursorBlink:data.terminalCursorBlink!==false,
+    terminalLineHeight:[1,1.1,1.15,1.2,1.3,1.5].includes(data.terminalLineHeight??0)?data.terminalLineHeight!:1.15,
     dockerTail:[50,100,200,500,1000].includes(data.dockerTail??0)?data.dockerTail!:200,
     dockerAutoRefresh:data.dockerAutoRefresh===true,
     dockerFollowLogs:data.dockerFollowLogs===true,
