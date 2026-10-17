@@ -1,4 +1,5 @@
 import {defineConfig} from "@playwright/test";
+import chromiumBinary from "@sparticuz/chromium";
 
 export default defineConfig({
   testDir: ".",
@@ -14,6 +15,10 @@ export default defineConfig({
     browserName: "chromium",
     colorScheme: "dark",
     reducedMotion: "reduce",
+    launchOptions: {
+      executablePath: await chromiumBinary.executablePath(),
+      args: chromiumBinary.args
+    },
     screenshot: "off"
   },
   outputDir: "./test-results"
