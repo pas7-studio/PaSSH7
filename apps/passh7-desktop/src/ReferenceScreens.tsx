@@ -184,7 +184,19 @@ export default function ReferenceScreens(){
         />:screen==="agent"?<AgentWorkspace host="dev-server" address="192.0.2.10"
           username="deploy" port={22} route="Direct SSH" sessionId="visual-fixture"
           sessions={[{id:"visual-fixture",alias:"dev-server"}]} vaultUnlocked={true}
-          agent={agent} onAgent={setAgent} availability={{}} checking={false} error="" status=""
+          agent={agent} onAgent={setAgent}
+          availability={{
+            codex:{session:"visual-fixture",installed:false,platform:"windows",version:null,
+              source:null,location:null,desktopApp:"Codex",launchCommand:null,
+              diagnostic:"Desktop app installed; no SSH terminal CLI found."},
+            claude:{session:"visual-fixture",installed:true,platform:"windows",version:"claude 2.1.0",
+              source:"User installation outside SSH PATH",location:"C:\\Users\\deploy\\AppData\\Roaming\\npm\\claude.cmd",
+              desktopApp:null,launchCommand:"powershell.exe -NoProfile -EncodedCommand FAKE_VISUAL_ONLY",
+              diagnostic:"CLI detected outside the SSH PATH."},
+            opencode:{session:"visual-fixture",installed:false,platform:"windows",version:null,
+              source:null,location:null,desktopApp:null,launchCommand:null,
+              diagnostic:"No CLI found for this Windows SSH account."}
+          }} checking={false} error="" status=""
           context={"Host: dev-server\nTarget: deploy@192.0.2.10\nVisual fixture: no agent is launched"}
           onCheck={()=>{}} onLaunch={()=>{}} onTerminal={()=>choose("terminal")} onSession={()=>{}}
         />:<TerminalReference/>}
