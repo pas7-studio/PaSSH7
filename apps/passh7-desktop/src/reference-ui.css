@@ -1062,3 +1062,21 @@
 .dockerActionableError small{font-size:12px;line-height:1.55;max-width:90ch}
 .dockerActionableError button{border:1px solid currentColor;border-radius:6px;padding:6px 12px;font-weight:600;background:transparent}
 .dockerActionableError button:hover:not(:disabled){opacity:.8}
+
+/* Read-only per-host capability diagnostics embedded in Settings. */
+.remoteHealth{display:flex;flex-direction:column;gap:13px;min-width:0}
+.remoteHealthHeader{display:flex;gap:20px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.remoteHealthHeader>div{flex:1 1 290px}
+.remoteHealthHeader strong{display:inline-flex;align-items:center;gap:8px;font-weight:650}
+.remoteHealthHeader .prefInfo{margin:8px 0 0}
+.remoteHealthHeader>button{flex-shrink:0;display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line, #3a4f61);border-radius:8px;background:transparent;color:inherit;padding:9px 14px;font-size:12px;font-weight:650;cursor:pointer}
+.remoteHealthHeader>button:disabled{opacity:.48;cursor:default}
+.remoteHealthChecks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px}
+.remoteHealthRow{display:flex;gap:10px;align-items:flex-start;min-width:0;padding:12px 13px;border:1px solid var(--line, #314458);border-radius:10px;background:rgba(120,150,190,.04)}
+.remoteHealthStatus{width:23px;height:23px;display:grid;place-items:center;border:1px solid currentColor;border-radius:50%;flex-shrink:0;font-size:12px;font-weight:750;color:var(--muted,#a7b6c6)}
+.remoteHealthStatus.pass{color:#279c69}
+.remoteHealthStatus.fail{color:#d76b65}
+.remoteHealthStatus.checking{color:#629de9}
+.remoteHealthRow>span:last-child{display:flex;flex-direction:column;gap:5px;min-width:0}
+.remoteHealthRow strong{font-size:12px;line-height:1.35}
+.remoteHealthRow small{font-size:11px;line-height:1.5;color:var(--muted,#93a8bf);overflow-wrap:anywhere}
