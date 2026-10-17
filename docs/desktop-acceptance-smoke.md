@@ -29,6 +29,9 @@ during this checklist. Use a throwaway identity and Docker container.
 | DOCKER-LIVE-02 | Switch container, host or workspace while following, or lock Vault | Old remote `docker logs --follow` SSH channel is cancelled, no late lines render for another container; normal SSH terminal continues |
 | DOCKER-LIVE-03 | Docker daemon permission denied, invalid container, stopped container with no new logs, and failed SSH exec | UI shows actionable error/closed state; no misleading Connected/Streaming state and no silent infinite loader |
 | DOCKER-LIVE-04 | Click Follow off, refresh recent logs, then follow again | No duplicate or leaked background Docker log streams; manual static tail continues to work |
+| SSH-SELECT-01 | Connect two hosts A/B, select A with the sidebar, open Files/Docker, then select B using sidebar/command palette | Active native SSH session ID changes to the selected host's authenticated session; no SFTP/Docker request accidentally uses a different server |
+| SSH-SELECT-02 | Select a disconnected saved host while other SSH sessions remain open | Selected host displays disconnected, activeSsh no longer refers to a session from another host, buttons reflect actual availability |
+| SSH-SELECT-03 | Open multiple SSH tabs on one host and close its active tab | An existing tab for that same host becomes active, while sessions for other hosts are unaffected |
 | SSH-01 | Unlock vault with correct password; list hosts | Saved hosts/identities appear, no secrets are rendered |
 | SSH-01A | Create a new Windows/Linux host using **Password only** with no generated or imported SSH identity | Host saves, independent host-key pin is verified, password login opens PTY and works |
 | SSH-01B | Generate/import a key after initial password login, install PUBLIC key remotely, attach it to the existing host | Host keeps same alias; key-based or key+password authentication works without creating a duplicate profile |
