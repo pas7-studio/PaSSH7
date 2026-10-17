@@ -23,6 +23,8 @@ export async function runNativeAppSession(page:Page){
     const exports:Array<{containerName:string;contents:string}>=[];
     const delayedSftp:Array<()=>void>=[];
     const agentProbes:Array<{id:string;agent:string}>=[];
+    const delayedForwards:Array<()=>void>=[];
+    const forwards=new Map<string,Array<{localPort:number;targetHost:string;remotePort:number}>>();
     const file=(name:string)=>({name,isDir:false,sizeBytes:100,modifiedAt:null,
       unixPermissions:null,ownerId:null,groupId:null});
     const sessions=[{id:"session-a",alias:"linux-test"},{id:"session-b",alias:"linux-test"},{id:"session-c",alias:"win-test"}];
@@ -41,7 +43,19 @@ export async function runNativeAppSession(page:Page){
         case "vault_list_hosts":return hosts;
         case "vault_list_identities":return [];
         case "ssh_session_list":return sessions;
-        case "ssh_session_forward_list":return [];
+        case "ssh_session_forward_list":return forwards.get(String(args.id))||[];
+        case "ssh_session_forward_start": {
+          const id=String(args.id),port=Number(args.localPort);
+          if(port===19001)await new Promise<void>(resolve=>delayedForwards.push(resolve));
+          forwards.set(id,[...(forwards.get(id)||[]),{localPort:port,
+            targetHost:String(args.targetHost),remotePort:Number(args.remotePort)}]);
+          return null;
+        }
+        case "ssh_session_forward_stop": {
+          const id=String(args.id);
+          forwards.set(id,(forwards.get(id)||[]).filter(item=>item.localPort!==Number(args.localPort)));
+          return null;
+        }
         case "ssh_session_sftp_list":
           if(args.id==="session-b")return new Promise(resolve=>{
             delayedSftp.push(()=>resolve([file("from-linux.txt")]));
@@ -113,6 +127,8 @@ export async function runNativeAppSession(page:Page){
       writes,resized,ready,exports,agentProbes,
       localTouches(){return localTouches;},
       failDockerList(message:string){dockerListFailure=message;},
+      pendingForwards(){return delayedForwards.length;},
+      releaseForwards(){for(const done of delayedForwards.splice(0))done();},
       pendingWrites(){return delayedWrites.length;},
       releaseWrites(){for(const done of delayedWrites.splice(0))done();},
       pendingSftp(){return delayedSftp.length;},
@@ -293,6 +309,35 @@ export async function runNativeAppSession(page:Page){
   await expect(remotePath).toHaveValue(".");
   await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
   await expect(remotePath).toHaveValue("/srv/code");
+  // SSH tunnel start on Linux can be delayed while Windows starts a separate
+  // tunnel. The stale A operation must not disable B, steal B's forwards or
+  // show an A-only error on B. Display both Linux PTY tunnels on the same host.
+  await page.locator(".workspaceNav button").filter({hasText:"Ports"}).click();
+  await page.getByRole("spinbutton",{name:"Local TCP port"}).fill("19001");
+  await page.getByRole("button",{name:"Start forwarding"}).click();
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{pendingForwards:()=>number}})
+      .__mockSshBridge.pendingForwards()
+  )).toBe(1);
+  await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
+  await expect(page.getByRole("button",{name:"Start forwarding"})).toBeEnabled();
+  await page.getByRole("spinbutton",{name:"Local TCP port"}).fill("19002");
+  await page.getByRole("button",{name:"Start forwarding"}).click();
+  await expect(page.locator(".forwardTableWrap")).toContainText("127.0.0.1:19002");
+  await page.evaluate(()=>{
+    (window as unknown as {__mockSshBridge:{releaseForwards:()=>void}})
+      .__mockSshBridge.releaseForwards();
+  });
+  await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
+  await expect(page.locator(".forwardTableWrap")).toContainText("127.0.0.1:19001");
+  await expect(page.locator(".forwardTableWrap")).not.toContainText("19002");
+  await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
+  await page.locator(".sshTab").filter({hasText:"linux-test"}).first().click();
+  await page.locator(".workspaceNav button").filter({hasText:"Ports"}).click();
+  await page.getByRole("spinbutton",{name:"Local TCP port"}).fill("19003");
+  await page.getByRole("button",{name:"Start forwarding"}).click();
+  await expect(page.locator(".forwardTableWrap")).toContainText("127.0.0.1:19003");
+  await expect(page.locator(".forwardTableWrap")).toContainText("127.0.0.1:19001");
   await page.locator(".workspaceNav button").filter({hasText:"Docker"}).click();
 
   // Switch host while Docker has logs from the prior host: no cross-host
