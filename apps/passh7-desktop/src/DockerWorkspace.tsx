@@ -1,6 +1,6 @@
 import {useEffect,useMemo,useRef,useState} from "react";
 import {WorkspaceHeader} from "./WorkspaceChrome";
-import {listDockerCatalog,listComposeProjectContainers,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
+import {listDockerCatalog,listComposeProjectContainers,saveVisibleDockerLogs,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
 import PaneResizeHandle from "./PaneResizeHandle";
 import {defaultPaneSizes,type PaneSizes} from "./preferences";
 import {Clipboard,Container,Cpu,Download,HardDrive,Layers,Maximize2,Minimize2,Network,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
@@ -38,6 +38,12 @@ const parseMemoryBytes=(text:string)=>{
 const readableMemory=(bytes:number)=>bytes>=1024**3?(bytes/1024**3).toFixed(2)+" GiB":(bytes/1024**2).toFixed(1)+" MiB";
 export default function DockerWorkspace(p:Props){
   const [search,setSearch]=useState("");
+  const [savingLogs,setSavingLogs]=useState(false);
+  const [saveLogsNotice,setSaveLogsNotice]=useState("");
+  const [saveLogsError,setSaveLogsError]=useState("");
+  const saveTarget=useRef({session:p.session,containerId:p.logs?.containerId});
+  saveTarget.current={session:p.session,containerId:p.logs?.containerId};
+  useEffect(()=>{setSaveLogsNotice("");setSaveLogsError("")},[p.session,p.logs?.containerId]);
   const [tab,setTab]=useState<"containers"|DockerCatalogKind>("containers");
   const [catalog,setCatalog]=useState<{session:string;kind:DockerCatalogKind;rows:Record<string,string>[]} |null>(null);
   const [catalogBusy,setCatalogBusy]=useState(false);
@@ -146,6 +152,21 @@ export default function DockerWorkspace(p:Props){
     .filter(Boolean).filter(line=>line.toLowerCase().includes(logsSearch.toLowerCase()))
     .filter(line=>level==="all"||(level==="error"?/\berror\b|\bfatal\b|\bpanic\b/i.test(line):/\bwarn(ing)?\b/i.test(line)))
     .slice(-2000),[p.logs,p.session,logsSearch,level]);
+  const saveCurrentLogs=async()=>{
+    const current=p.logs;
+    if(!current||current.session!==p.session||!logLines.length||savingLogs)return;
+    const session=current.session,containerId=current.containerId;
+    const visible=logLines.join("\n");
+    setSavingLogs(true);setSaveLogsNotice("");setSaveLogsError("");
+    try{
+      const saved=await saveVisibleDockerLogs(current.containerName,visible);
+      if(saveTarget.current.session===session&&saveTarget.current.containerId===containerId)
+        setSaveLogsNotice(saved||"Save cancelled. No file was changed.");
+    }catch(error){
+      if(saveTarget.current.session===session&&saveTarget.current.containerId===containerId)
+        setSaveLogsError("Could not save Docker logs: "+String(error));
+    }finally{setSavingLogs(false)}
+  };
   return <div className="widePage dockerPage">
     <WorkspaceHeader icon={Container} title="Docker"
       description={"Inspect and manage remote containers, Compose projects and logs · "+p.host}
@@ -247,11 +268,11 @@ export default function DockerWorkspace(p:Props){
       <button title="Copy visible logs" disabled={!logLines.length} onClick={()=>navigator.clipboard.writeText(logLines.join("\n"))}><Clipboard size={15}/></button>
       <button title="Close log viewer" disabled={!p.logs} onClick={p.onCloseLogs}>Clear</button>
       <button title={logsFullscreen?"Exit full-screen logs":"Expand logs to full screen"} aria-label={logsFullscreen?"Exit full-screen logs":"Expand logs to full screen"} onClick={()=>setLogsFullscreen(value=>!value)}>{logsFullscreen?<Minimize2 size={15}/>:<Maximize2 size={15}/>}</button>
-      <button title="Save recent logs to a local text file" disabled={!logLines.length} onClick={()=>{
-        const blob=new Blob([logLines.join("\n")],{type:"text/plain;charset=utf-8"});
-        const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=(p.logs?.containerName||"docker")+"-logs.txt";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-      }}><Download size={15}/></button>
-    </div>{p.logsError&&<div className="workspaceError" role="alert">{p.logsError} <button type="button" disabled={p.logsBusy||!chosen?.ID} onClick={()=>{if(chosen?.ID)p.onLogs(chosen.ID,chosen.Names||chosen.ID)}}>Retry logs</button></div>}<div className={"dockerLogsBody "+(wrap?"wrapped":"")}>
+      <button title="Save visible filtered logs using the native Save As dialog (never overwrite existing files)" aria-label="Save visible logs" disabled={!logLines.length||savingLogs}
+        onClick={()=>void saveCurrentLogs()}><Download size={15}/>{savingLogs?"Saving…":"Save As"}</button>
+    </div>{saveLogsNotice&&<p className="workspaceNotice" role="status">{saveLogsNotice}</p>}
+      {saveLogsError&&<div className="workspaceError" role="alert">{saveLogsError}</div>}
+      {p.logsError&&<div className="workspaceError" role="alert">{p.logsError} <button type="button" disabled={p.logsBusy||!chosen?.ID} onClick={()=>{if(chosen?.ID)p.onLogs(chosen.ID,chosen.Names||chosen.ID)}}>Retry logs</button></div>}<div className={"dockerLogsBody "+(wrap?"wrapped":"")}>
       {p.logs?.session===p.session?<>{p.logsBusy&&<div className="logsLoading">Refreshing latest Docker logs…</div>}
         {logLines.map((line,index)=><div className="dockerLogLine" key={index}><span>{index+1}</span><code className={/\berror\b|fatal|panic/i.test(line)?"logError":/\bwarn/i.test(line)?"logWarn":""}>{line}</code></div>)}
         {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}
