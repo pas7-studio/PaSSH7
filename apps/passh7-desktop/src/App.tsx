@@ -890,6 +890,17 @@ export default function App(){
     loginOpen?"ssh-login":tofuCandidate?"host-trust":accessOpen?"windows-access":
     vaultDialog?"vault":deleteTarget?"confirm-delete":addOpen?"host-wizard":null;
   useModalFocus(topDialog);
+  useEffect(()=>{
+    const globalShortcut=(event:KeyboardEvent)=>{
+      if(!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=="k"||event.repeat)return;
+      if(topDialog)return; // Never open a new palette over SSH auth or Vault dialogs.
+      event.preventDefault();
+      event.stopPropagation();
+      setCommandOpen(true);
+    };
+    document.addEventListener("keydown",globalShortcut,true);
+    return()=>document.removeEventListener("keydown",globalShortcut,true);
+  },[topDialog]);
 
   const [theme,setTheme]=useState<"dark"|"light">(()=>loadPreferences().theme);
   const [buildInfo,setBuildInfo]=useState<BuildInfo|null>(null);
@@ -1056,7 +1067,7 @@ export default function App(){
   const activeConnections=sshTabs.filter(t=>t.alias===active.id).length;
   const connected=activeConnections>0;
   const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: "+(connected?`connected (${activeConnections} SSH session${activeConnections===1?"":"s"})`:"disconnected")+"\nVault: "+(vaultUnlocked?"unlocked":"locked")+"\nPermissions: "+(connected?"Remote SSH account privileges (not sandboxed)":"No active SSH account")+"\nSelected resources: none"+"\nSSH route: "+(active.jumpAlias?"via "+active.jumpAlias+" (gateway LAN → "+active.address+":"+active.port+")":"direct");
-  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if(e.key==="Escape"){setCommandOpen(false);}}}>
+  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")}>
     <header className="topbar">
       <div className="brand"><div className="brandicon"><TerminalSquare size={16}/></div><strong>PaSSH7</strong></div>
       <div className="topHost">
