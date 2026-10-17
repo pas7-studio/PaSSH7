@@ -4,18 +4,19 @@ import {WorkspaceEmpty,WorkspaceHeader,WorkspaceMetric} from "./WorkspaceChrome"
 
 export type Forward={session:string;localPort:number;targetHost:string;remotePort:number};
 type Props={
-  host:string;connected:boolean;session:string;forwards:Forward[];busy:boolean;error:string;
+  host:string;connected:boolean;session:string;sessions:string[];
+  forwards:Forward[];busy:boolean;busySessions:string[];error:string;
   localPort:number;remoteHost:string;remotePort:number;
   onLocalPort:(port:number)=>void;onRemoteHost:(host:string)=>void;onRemotePort:(port:number)=>void;
   onStart:()=>void;onRefresh:()=>void;onStop:(session:string,localPort:number)=>void;onTerminal:()=>void;
 };
 export default function PortForwardingWorkspace(p:Props){
-  const [selected,setSelected]=useState<number|null>(null);
+  const [selected,setSelected]=useState<string|null>(null);
   const [notice,setNotice]=useState("");
   const valid=p.localPort>=1&&p.localPort<=65535&&p.remotePort>=1&&p.remotePort<=65535
     &&p.remoteHost.trim().length>0&&p.remoteHost.length<=253&&!/[\r\n\s"';&|$<>]/.test(p.remoteHost);
-  const current=p.forwards.filter(t=>t.session===p.session);
-  const chosen=current.find(t=>t.localPort===selected)||current[0];
+  const current=p.forwards.filter(t=>p.sessions.includes(t.session));
+  const chosen=current.find(t=>t.session+":"+t.localPort===selected)||current[0];
   const copy=async(text:string)=>{
     try{await navigator.clipboard.writeText(text);setNotice("Local address copied.")}
     catch{setNotice("Clipboard unavailable; select and copy the address manually.")}
@@ -25,7 +26,7 @@ export default function PortForwardingWorkspace(p:Props){
       description="Local SSH tunnels for remote TCP services, always bound to loopback."
       status={p.connected?"connected":"offline"} statusText={p.connected?p.host+" connected":"No SSH connection"}/>
     <div className="forwardMetrics workspaceMetrics">
-      <WorkspaceMetric icon={Activity} label="Active forwards" value={current.length} detail="On current SSH session" intent="good"/>
+      <WorkspaceMetric icon={Activity} label="Active forwards" value={current.length} detail={"Across "+p.sessions.length+" SSH session(s) of this host"} intent="good"/>
       <WorkspaceMetric icon={ShieldCheck} label="Binding policy" value="127.0.0.1" detail="Accessible only from this computer"/>
     </div>
     <div className="forwardGrid">
@@ -52,29 +53,30 @@ export default function PortForwardingWorkspace(p:Props){
           <button onClick={p.onRefresh} disabled={!p.connected||p.busy}><RefreshCw size={14}/> Refresh</button>
         </div>
         <div className="forwardTableWrap"><table className="workspaceTable">
-          <thead><tr><th>Local endpoint</th><th>Remote destination</th><th>Protocol</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Local endpoint</th><th>Remote destination</th><th>SSH session</th><th>Actions</th></tr></thead>
           <tbody>{current.map(t=><tr key={t.session+":"+t.localPort} tabIndex={0}
-            className={chosen?.localPort===t.localPort?"selected":""}
-            onClick={()=>setSelected(t.localPort)}
-            onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setSelected(t.localPort)}}}>
+            className={chosen?.session===t.session&&chosen.localPort===t.localPort?"selected":""}
+            onClick={()=>setSelected(t.session+":"+t.localPort)}
+            onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setSelected(t.session+":"+t.localPort)}}}>
             <td><code>127.0.0.1:{t.localPort}</code></td><td>{t.targetHost}:{t.remotePort}</td>
-            <td><span className="forwardSecure"><ShieldCheck size={13}/> SSH</span></td>
+            <td title={t.session}><span className="forwardSecure"><ShieldCheck size={13}/> {t.session===p.session?"Selected PTY":"Other PTY"}</span></td>
             <td><div className="forwardRowActions">
               <button aria-label={"Copy local address for port "+t.localPort} title="Copy local address"
                 onClick={()=>void copy("127.0.0.1:"+t.localPort)}><Clipboard size={14}/></button>
               <button aria-label={"Stop forward on port "+t.localPort} title="Stop local forward"
-                className="dangerButton" disabled={p.busy} onClick={()=>p.onStop(t.session,t.localPort)}>
+                className="dangerButton" disabled={p.busySessions.includes(t.session)} onClick={()=>p.onStop(t.session,t.localPort)}>
                 <Square size={14}/> Stop</button>
             </div></td>
           </tr>)}</tbody></table>
           {current.length===0&&<WorkspaceEmpty icon={p.connected?Network:WifiOff}
             title={p.connected?"No active forwards":"SSH session required"}
-            description={p.connected?"Create a local forward using the form. It will appear here after the native tunnel starts.":"Connect in Terminal to view or create local port forwards."}
+            description={p.connected?"Create a local forward using the form. This view includes tunnels from every live SSH session on the selected host.":"Connect in Terminal to view or create local port forwards."}
             action={!p.connected?<button onClick={p.onTerminal}><TerminalSquare size={14}/> Open terminal</button>:undefined}/>}
         </div>
         {chosen&&<section className="forwardDetail" aria-label="Selected forward details">
           <div><small>SELECTED TUNNEL</small><strong>127.0.0.1:{chosen.localPort}</strong></div>
           <div><small>REMOTE ENDPOINT</small><strong>{chosen.targetHost}:{chosen.remotePort}</strong></div>
+          <div><small>SSH SESSION</small><strong>{chosen.session===p.session?"Selected terminal":"Another connected terminal"}</strong></div>
           <button title="Copy local endpoint" onClick={()=>void copy("127.0.0.1:"+chosen.localPort)}>
             <Clipboard size={14}/> Copy address</button>
         </section>}
