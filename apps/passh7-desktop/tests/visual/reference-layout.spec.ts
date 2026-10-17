@@ -128,6 +128,9 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
 
   await test.step("real offline App command palette: keyboard search and workspace switch",async()=>{
     await page.goto("/",{waitUntil:"domcontentloaded"});
+    // Vite serves the HTML before React is mounted; wait for the real shell
+    // and its installed shortcut listeners instead of racing initial hydration.
+    await expect(page.getByRole("button",{name:"Quick switch"})).toBeVisible();
     await page.keyboard.press("Control+k");
     const palette=page.getByRole("dialog",{name:"Quick switch"});
     await expect(palette).toBeVisible();
