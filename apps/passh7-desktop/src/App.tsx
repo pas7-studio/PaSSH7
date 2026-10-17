@@ -309,17 +309,21 @@ export default function App(){
   const [sftpPreviewBusy,setSftpPreviewBusy]=useState(false);
   const transferSessionRef=useRef(activeSsh);
   transferSessionRef.current=activeSsh;
+  const transferFolderRef=useRef({session:activeSsh,path:sftpEntries?.session===activeSsh?sftpEntries.path:sftpPath});
+  transferFolderRef.current={session:activeSsh,path:sftpEntries?.session===activeSsh?sftpEntries.path:sftpPath};
   const transferQueue=useSftpTransferQueue((session,directory)=>{
-    // A finished upload must not replace another host's directory listing.
+    // A completed background upload must not navigate the user away from a
+    // newer folder or an unrelated SSH host.
     void listSftpDirectory(session,directory).then(items=>{
-      if(transferSessionRef.current===session){
+      if(transferFolderRef.current.session===session&&transferFolderRef.current.path===directory){
         setSftpEntries({session,path:directory,items});
         setSftpPath(directory);
       }
     }).catch(error=>{
-      if(transferSessionRef.current===session)setSftpError("Upload succeeded; could not refresh folder: "+String(error));
+      if(transferFolderRef.current.session===session&&transferFolderRef.current.path===directory)
+        setSftpError("Upload succeeded; could not refresh folder: "+String(error));
     });
-  });
+  },sshTabs.map(tab=>tab.id));
   const sftpTransferBusy=transferQueue.active;
   const [vaultSnapshotHistory,setVaultSnapshotHistory]=useState<{
     session:string;directory:string;entries:SftpEntry[]
