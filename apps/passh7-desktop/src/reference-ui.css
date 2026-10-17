@@ -185,7 +185,7 @@
 .dockerLogToolbar>select[aria-label="Container for log viewer"]{max-width:180px;min-width:100px}
 .dockerLogFooter{font-size:10px}
 .dockerLogsBody{overflow-x:auto}
-@media(max-width:1530px){.dockerMetrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1210px){.dockerMetrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:980px){.dockerMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.settingsPage .settingsNav{max-height:unset}}
 @media(max-width:700px){.dockerMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.topactions .lock{padding:8px}.topactions .lock span{display:none}}
 
@@ -269,3 +269,43 @@
 .forwardNotice button{justify-self:start}
 @media(max-width:1150px){.forwardGrid{grid-template-columns:1fr}}
 @media(max-width:710px){.forwardMetrics{grid-template-columns:1fr}}
+
+
+/* Preserve contrast when the user selects the existing supported light theme. */
+.shell.light .workspaceNav button{color:#334b65}
+.shell.light .workspaceNav button.active{color:white}
+.shell.light .sidebar .host{color:#375370}
+.shell.light .sidebar .host.selected{background:#d6e8fe;color:#1b3856}
+.shell.light .sidebar .groupLabel{color:#536a82}
+.shell.light .sidebar .search,.shell.light .filesCrumbs{background:#f4f8ff;border-color:#c8d7e9}
+.shell.light .topHost .hostSelectIcon{background:#e0edff;color:#276fc9;border-color:#a8caee}
+.shell.light .widePage button,.shell.light .widePage select,.shell.light .widePage input{background:#f6f9ff;border-color:#c5d4e6;color:#203752}
+.shell.light .widePage button:hover:not(:disabled){background:#e5effd}
+.shell.light .widePage .workspacePrimary,.shell.light .widePage .agentCard.active,.shell.light .workspaceNav button.active{color:white;background:#2573d9;border-color:#2573d9}
+.shell.light .workspaceTable{color:#273e57}
+.shell.light .workspaceTable thead th{background:#e9f1fb;color:#344d67;border-color:#c5d4e6}
+.shell.light .workspaceTable tbody td{border-color:#dce5f0}
+.shell.light .workspaceTable tbody tr:hover{background:#e2f0ff}
+.shell.light .workspaceTable tbody tr:nth-child(2n):not(.selected){background:#f3f7fd}
+.shell.light .workspaceTable tbody tr.selected{background:#d5e9ff;color:#172e49}
+.shell.light .filesFolders,.shell.light .filesTablePane,.shell.light .filesInspector,.shell.light .dockerContainersPane,.shell.light .dockerInspector,.shell.light .dockerLogViewer,.shell.light .settingsCard,.shell.light .dockerCatalogWorkspace,.shell.light .connectionsList,.shell.light .connectionsInspector,.shell.light .snippetsCatalog,.shell.light .snippetsRunner,.shell.light .forwardForm,.shell.light .forwardList,.shell.light .forwardTips,.shell.light .agentHero,.shell.light .agentSection{background:var(--panel);border-color:#cbd9ea}
+.shell.light .dockerMetrics>div,.shell.light .connectionsMetrics>div,.shell.light .forwardMetrics>div{background:#fff;border-color:#ccdcec}
+.shell.light .dockerMetrics small,.shell.light .dockerMetrics span,.shell.light .widePageTitle p{color:#5c738d}
+.shell.light .settingsPage .settingsNav{background:#fff;border-color:#cad8e9}
+.shell.light .settingsPage .settingsNav button{color:#344c68}
+.shell.light .settingsPage .settingsNav button.selected{color:white;background:#2573d9}
+.shell.light .settingsPage .settingsNav button.selected small{color:#f0f6ff}
+.shell.light .settingsPage .settingsNav small,.shell.light .prefRow small{color:#5d718b}
+.shell.light .prefReadonly{color:#39516b;background:#f4f8ff;border-color:#c5d4e6}
+.shell.light .remoteTreeFolder{color:#304c6d}
+.shell.light .remoteTreeRow .remoteTreeFolder{color:#304c6d}
+.shell.light .remoteTreeRow.selected{background:#d4e8ff}
+.shell.light .remoteTreeRow:hover{background:#e8f3ff}
+.shell.light .agentPage .agentCard,.shell.light .snippetsGrid .snippetCard{background:#f2f7fd;border-color:#ceddec}
+.shell.light .agentPage .agentCard.active,.shell.light .snippetsGrid .snippetCard.selected{background:#dcecff;color:#173c6a;border-color:#488cda}
+.shell.light .agentContextPreview,.shell.light .agentLaunchCommand,.shell.light .snippetCard code,.shell.light .snippetsRunner textarea{background:#f1f6fd;border-color:#c8d9e9;color:#273e58}
+.shell.light .connectionTrust.good,.shell.light .forwardSecure{color:#188457}
+.shell.light .connectionsInspector .connectionPreview svg{color:#246fd1}
+.shell.light .forwardForm label{color:#39506b}
+.shell.light .forwardTips{background:#f4f8ff}
+.shell.light .filesVaultSection .vaultBackupCard{background:#fff}
