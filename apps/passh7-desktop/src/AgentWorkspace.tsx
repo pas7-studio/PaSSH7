@@ -105,7 +105,7 @@ export default function AgentWorkspace(p:Props){
             <a href={installation[p.agent].url} target="_blank" rel="noreferrer">{installation[p.agent].label} <ExternalLink size={12}/></a>
             <p>The install command is never executed automatically. Reconnect SSH or re-check CLI detection after installation.</p>
           </div>}
-          {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>
+          {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>}
           {p.status&&<p role="status" className="workspaceNotice">{p.status}</p>}
         </section>
         <section className="agentSection">
