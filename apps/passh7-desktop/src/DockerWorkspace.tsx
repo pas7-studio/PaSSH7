@@ -1,4 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from "react";
+import {WorkspaceHeader} from "./WorkspaceChrome";
 import {listDockerCatalog,listComposeProjectContainers,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
 import PaneResizeHandle from "./PaneResizeHandle";
 import {defaultPaneSizes,type PaneSizes} from "./preferences";
@@ -146,8 +147,9 @@ export default function DockerWorkspace(p:Props){
     .filter(line=>level==="all"||(level==="error"?/\berror\b|\bfatal\b|\bpanic\b/i.test(line):/\bwarn(ing)?\b/i.test(line)))
     .slice(-2000),[p.logs,p.session,logsSearch,level]);
   return <div className="widePage dockerPage">
-    <div className="widePageTitle"><Container size={26}/><div><h1>Docker</h1><p>Manage remote containers and inspect their logs · {p.host}</p></div>
-      <span className={p.connected?"workspaceConnected":"workspaceOffline"}>{p.connected?"● Connected":"○ Disconnected"}</span></div>
+    <WorkspaceHeader icon={Container} title="Docker"
+      description={"Inspect and manage remote containers, Compose projects and logs · "+p.host}
+      status={p.connected?"connected":"offline"} statusText={p.connected?"SSH connected":"SSH disconnected"}/>
     <div className="dockerMetrics">
       <div><small><Container size={17}/> Containers</small><strong>{p.items?.length??"—"}</strong><span>Total on selected SSH host</span></div>
       <div><small><Play size={17}/> Running</small><strong className="textGood">{p.items?running:"—"}</strong><span>{p.items?.length?Math.round(100*running/p.items.length)+"% running":"No inventory"}</span></div>
