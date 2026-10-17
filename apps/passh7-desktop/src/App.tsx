@@ -14,7 +14,7 @@ import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -47,6 +47,19 @@ export default function App(){
   const [selected,setSelected]=useState("dev");
   const [sshTabs,setSshTabs]=useState<{id:string;alias:string}[]>([]);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
+  const lastLocalVaultActivity=useRef(Number.NEGATIVE_INFINITY);
+  const noteLocalVaultActivity=()=>{
+    if(!vaultUnlocked||!desktopAvailable())return;
+    const now=performance.now();
+    // Protect against IPC floods while preserving a 15-minute idle TTL.
+    // Only actual DOM interaction (keyboard/pointer), not SSH output or
+    // recurring polls, is permitted to refresh unlocked credentials.
+    if(now-lastLocalVaultActivity.current<60_000)return;
+    lastLocalVaultActivity.current=now;
+    void touchVaultActivity().then(active=>{
+      if(!active){setVaultUnlocked(false);setHosts([]);setSelected("");}
+    }).catch(()=>{/* Existing vault_status poll independently enforces expiry. */});
+  };
   // Native session events use a stable callback; its owner map stays fresh.
   const sshTabsRef=useRef(sshTabs);
   useEffect(()=>{sshTabsRef.current=sshTabs},[sshTabs]);
@@ -1233,7 +1246,8 @@ export default function App(){
   const activeConnections=sshTabs.filter(t=>t.alias===active.id).length;
   const connected=activeConnections>0;
   const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: "+(connected?`connected (${activeConnections} SSH session${activeConnections===1?"":"s"})`:"disconnected")+"\nVault: "+(vaultUnlocked?"unlocked":"locked")+"\nPermissions: "+(connected?"Remote SSH account privileges (not sandboxed)":"No active SSH account")+"\nSelected resources: none"+"\nSSH route: "+(active.jumpAlias?"via "+active.jumpAlias+" (gateway LAN → "+active.address+":"+active.port+")":"direct");
-  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")}>
+  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")}
+    onKeyDownCapture={noteLocalVaultActivity} onPointerDownCapture={noteLocalVaultActivity}>
     <header className="topbar">
       <div className="brand"><div className="brandicon"><TerminalSquare size={16}/></div><strong>PaSSH7</strong></div>
       <div className="topHost">
