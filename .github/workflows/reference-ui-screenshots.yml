@@ -1,8 +1,5 @@
 name: PaSSH7 reference UI screenshot smoke
 on:
-  push:
-    branches:
-      - feat/dedicated-ai-agent-workspace
   workflow_dispatch:
 permissions:
   contents: read
