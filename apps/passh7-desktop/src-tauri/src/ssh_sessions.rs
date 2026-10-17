@@ -1725,7 +1725,8 @@ fn windows_agent_launch_command(path:&str)->Option<String>{
         ![".exe",".cmd",".bat",".ps1"].iter().any(|ext|path.to_ascii_lowercase().ends_with(ext)) ||
         !(path.contains(":\\")||path.starts_with("\\\\")){return None;}
     let script=format!("& '{}'",path.replace('\'',"''"));
-    Some(powershell_encoded(&script))
+    // Launch is interactive: do not set -NonInteractive on this child shell.
+    Some(powershell_encoded(&script).replace(" -NonInteractive", ""))
 }
 
 fn parse_windows_agent_probe(output:&str)->Option<WindowsAgentProbe>{
@@ -2110,6 +2111,38 @@ mod tests {
         assert!(safe_sftp_filename(".env"));
         assert!(safe_sftp_filename("new folder"));
         assert_eq!(join_sftp_path("/home/test/","sub"),"/home/test/sub");
+    }
+
+
+    #[test]
+    fn windows_probe_names_are_strict_and_encoded(){
+        for kind in ["codex","claude","opencode"] {
+            let command=windows_agent_probe_command(kind).expect("allowlisted");
+            assert!(command.starts_with("powershell.exe -NoProfile -NonInteractive -EncodedCommand "));
+            assert!(!command.contains(";"));
+            assert!(!command.contains("Get-StartApps"));
+        }
+        for kind in ["claude;echo bad","cmd.exe","","../../../bin/bash"] {
+            assert!(windows_agent_probe_command(kind).is_none());
+        }
+    }
+    #[test]
+    fn windows_cli_launch_only_uses_safe_absolute_paths(){
+        let command=windows_agent_launch_command(r"C:\Users\nazar\AppData\Roaming\npm\claude.cmd").unwrap();
+        assert!(command.starts_with("powershell.exe -NoProfile -EncodedCommand "));
+        assert!(!command.contains("-NonInteractive"));
+        assert!(!command.contains("claude.cmd"));
+        assert!(windows_agent_launch_command("claude").is_none());
+        assert!(windows_agent_launch_command("C:\\Users\\foo\\bin\\hack.cmd\nquit").is_none());
+        assert!(windows_agent_launch_command("C:\\bad\\payload.txt").is_none());
+    }
+    #[test]
+    fn windows_probe_json_is_not_confused_with_shell_noise(){
+        let content="Windows OpenSSH banner\n{\"installed\":true,\"path\":\"C:\\\\Users\\\\nazar\\\\AppData\\\\Roaming\\\\npm\\\\codex.cmd\",\"source\":\"User installation outside SSH PATH\",\"version\":\"codex 0.2\",\"desktopApp\":null}\n";
+        let found=parse_windows_agent_probe(content).unwrap();
+        assert!(found.installed);
+        assert!(found.path.unwrap().ends_with("codex.cmd"));
+        assert!(parse_windows_agent_probe("The term powershell.exe is not recognized").is_none());
     }
 
     #[test]
