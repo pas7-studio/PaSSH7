@@ -36,6 +36,7 @@ type Props={
 };
 export default function RemoteFilesWorkspace(p:Props){
   const [selected,setSelected]=useState<string>("");
+  const [fileMenu,setFileMenu]=useState<{name:string;x:number;y:number}|null>(null);
   const [treeWidth,setTreeWidth]=useState(p.paneSizes.filesTree);
   const [inspectorWidth,setInspectorWidth]=useState(p.paneSizes.filesInspector);
   useEffect(()=>setTreeWidth(p.paneSizes.filesTree),[p.paneSizes.filesTree]);
@@ -48,7 +49,7 @@ export default function RemoteFilesWorkspace(p:Props){
   useEffect(()=>{setSelected("");setHistory([]);setHistoryIndex(-1);},[p.session]);
   useEffect(()=>{setVisibleLimit(250);},[p.session,path,p.filter,p.sort,p.showHidden]);
   const open=(next:string)=>{
-    setSelected("");
+    setSelected("");setFileMenu(null);
     if(next!==path){
       // Include the initial folder so Back can return to it.
       const previous=historyIndex>=0?history.slice(0,historyIndex+1):[path];
@@ -71,7 +72,25 @@ export default function RemoteFilesWorkspace(p:Props){
   const renderedItems=items.slice(0,visibleLimit);
   const selectedPath=selected?full(path,selected):"";
   const preview=p.preview?.session===p.session&&p.preview.path===selectedPath?p.preview:null;
-  return <div className="widePage remoteFilesPage">
+  const renameFile=(item:SftpEntry)=>{
+    setFileMenu(null);
+    if(!p.connected||p.mutationBusy||p.busy)return;
+    const requested=window.prompt("Rename "+item.name+" to:",item.name);
+    const next=requested?.trim();
+    if(!next||next===item.name)return;
+    if(window.confirm("Rename "+JSON.stringify(item.name)+" to "+JSON.stringify(next)+"?\n\nExisting destinations are checked, but concurrent server-side changes may race.")){
+      p.onRename(item.name,next,item.isDir);
+    }
+  };
+  const deleteFile=(item:SftpEntry)=>{
+    setFileMenu(null);
+    if(!p.connected||p.mutationBusy||p.busy)return;
+    if(window.confirm("Delete "+(item.isDir?"the empty directory ":"the file ")+JSON.stringify(item.name)+" from "+path+"?\n\nThis cannot be undone. Nonempty directories will not be removed.")){
+      p.onDelete(item.name,item.isDir);
+    }
+  };
+
+  return <div className="widePage remoteFilesPage" onKeyDown={e=>{if(e.key==="Escape")setFileMenu(null)}}>
     <div className="widePageTitle"><FolderClosed size={25}/><div><h1>Remote Files</h1><p>Browse, preview and transfer files securely over SFTP · {p.host}</p></div>
       <span className={p.connected?"workspaceConnected":"workspaceOffline"}>{p.connected?"● Connected":"○ Disconnected"}</span></div>
     <div className="filesPathBar">
@@ -93,22 +112,8 @@ export default function RemoteFilesWorkspace(p:Props){
         if(!name)return;
         p.onMkdir(name);
       }}><FolderPlus size={16}/> New folder</button>
-      <button disabled={!p.connected||!selectedItem||p.mutationBusy||p.busy} onClick={()=>{
-        if(!selectedItem)return;
-        const requested=window.prompt("Rename "+selectedItem.name+" to:",selectedItem.name);
-        const next=requested?.trim();
-        if(!next||next===selectedItem.name)return;
-        if(window.confirm("Rename "+JSON.stringify(selectedItem.name)+" to "+JSON.stringify(next)+"?\n\nExisting destinations are checked, but concurrent server-side changes may race. Ensure nobody else is renaming into the same name.")){
-          p.onRename(selectedItem.name,next,selectedItem.isDir);
-        }
-      }}><Pencil size={16}/> Rename</button>
-      <button className="dangerButton" disabled={!p.connected||!selectedItem||p.mutationBusy||p.busy} onClick={()=>{
-        if(!selectedItem)return;
-        if(window.confirm("Delete "+(selectedItem.isDir?"the empty directory ":"the file ")+
-          JSON.stringify(selectedItem.name)+" from "+path+"?\n\nThis cannot be undone. Nonempty directories will not be removed.")){
-          p.onDelete(selectedItem.name,selectedItem.isDir);
-        }
-      }}><Trash2 size={16}/> Delete</button>
+      <button disabled={!p.connected||!selectedItem||p.mutationBusy||p.busy} onClick={()=>{if(selectedItem)renameFile(selectedItem)}}><Pencil size={16}/> Rename</button>
+      <button className="dangerButton" disabled={!p.connected||!selectedItem||p.mutationBusy||p.busy} onClick={()=>{if(selectedItem)deleteFile(selectedItem)}}><Trash2 size={16}/> Delete</button>
       <div className="filesToolbarSpacer"/>
       <label className="filesSearch"><Search size={15}/><input value={p.filter} onChange={e=>p.setFilter(e.target.value)} placeholder="Search in folder" aria-label="Filter files"/></label>
       <select value={p.sort} onChange={e=>p.setSort(e.target.value as Props["sort"])} aria-label="File sorting"><option value="folders">Folders first</option><option value="name">By name</option><option value="size">Largest first</option><option value="modified">Newest first</option></select>
@@ -124,7 +129,8 @@ export default function RemoteFilesWorkspace(p:Props){
       <div className="filesTablePane"><div className="paneTitle">{path} <span>{dir?Math.min(items.length,visibleLimit)+" of "+items.length+" entries":"Not loaded"}</span></div>
         <div className="filesTableWrap"><table className="workspaceTable"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Permissions</th><th>Type</th></tr></thead><tbody>
           {renderedItems.map(item=><tr key={item.name} tabIndex={0} role="row" aria-selected={item.name===selected} className={item.name===selected?"selected":""}
-            onClick={()=>setSelected(item.name)}
+            onClick={()=>{setSelected(item.name);setFileMenu(null)}}
+            onContextMenu={e=>{e.preventDefault();setSelected(item.name);setFileMenu({name:item.name,x:Math.max(8,Math.min(e.clientX,window.innerWidth-216)),y:Math.max(8,Math.min(e.clientY,window.innerHeight-260))})}}
             onDoubleClick={()=>item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
             onKeyDown={e=>{
               if(e.key==="Enter"){e.preventDefault();setSelected(item.name);item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
@@ -140,6 +146,8 @@ export default function RemoteFilesWorkspace(p:Props){
                   target?.focus();target?.scrollIntoView({block:"nearest"});
                 }
               }
+              else if(e.key==="F2"){e.preventDefault();renameFile(item)}
+              else if(e.key==="Delete"){e.preventDefault();deleteFile(item)}
               else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="c"){e.preventDefault();void navigator.clipboard.writeText(full(path,item.name))}
             }}>
             <td><span className="fileName">{item.isDir?<FolderClosed size={15}/>:<FileText size={15}/>} {item.name}</span></td>
@@ -166,6 +174,22 @@ export default function RemoteFilesWorkspace(p:Props){
         </>:<div className="workspaceEmpty">Select a file to see details and preview its contents.</div>}
       </aside>
     </div>
+    {fileMenu&&items.some(item=>item.name===fileMenu.name)&&<div className="fileContextMenu" role="menu" aria-label={"Actions for "+fileMenu.name}
+      style={{left:fileMenu.x,top:fileMenu.y}} onClick={e=>e.stopPropagation()}>
+      {(()=>{
+        const item=items.find(item=>item.name===fileMenu.name)!;
+        const target=full(path,item.name);
+        return <>
+          <div className="fileMenuTitle" title={item.name}>{item.name}</div>
+          <button role="menuitem" onClick={()=>{setFileMenu(null);item.isDir?open(target):p.readPreview(target)}}><FileText size={15}/>{item.isDir?"Open folder":"Preview file"}</button>
+          <button role="menuitem" disabled={item.isDir||p.transferBusy} onClick={()=>{setFileMenu(null);p.download(target)}}><Download size={15}/>Download</button>
+          <button role="menuitem" onClick={()=>{setFileMenu(null);void navigator.clipboard.writeText(target)}}><Clipboard size={15}/>Copy path</button>
+          <div className="fileMenuDivider"/>
+          <button role="menuitem" disabled={p.mutationBusy||p.busy} onClick={()=>renameFile(item)}><Pencil size={15}/>Rename <span>F2</span></button>
+          <button role="menuitem" className="dangerItem" disabled={p.mutationBusy||p.busy} onClick={()=>deleteFile(item)}><Trash2 size={15}/>Delete <span>Del</span></button>
+        </>;
+      })()}
+    </div>}
     <div className="wideTransferQueue"><strong>Transfer queue</strong>
       {p.transferProgress?.session===p.session&&<div className="transferRow"><span>{p.transferProgress.direction==="upload"?"Uploading":"Downloading"} · {p.transferProgress.stage}</span><span>{size(p.transferProgress.bytes)} / {size(p.transferProgress.totalBytes)}</span>
         <progress value={p.transferProgress.bytes} max={Math.max(1,p.transferProgress.totalBytes||1)}/><button onClick={p.cancelTransfer} disabled={p.transferProgress.stage==="cancelling"}>Cancel</button></div>}
