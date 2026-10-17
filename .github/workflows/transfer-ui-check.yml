@@ -1,0 +1,26 @@
+name: PaSSH7 SFTP UI validation
+on:
+  push:
+    branches:
+      - feat/dedicated-ai-agent-workspace
+permissions:
+  contents: read
+concurrency:
+  group: passh7-transfer-ui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  frontend:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: TypeScript and Vite build
+        working-directory: apps/passh7-desktop
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
