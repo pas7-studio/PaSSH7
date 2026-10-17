@@ -1161,6 +1161,12 @@ export default function App(){
  onCheck={()=>void checkRemoteAgents()}
  onLaunch={()=>void launchRemoteAgent()}
  onTerminal={()=>setPanel("terminal")}
+ onPrepareRdp={()=>{
+   setTunnelLocalPort(13389);
+   setTunnelRemoteHost("127.0.0.1");
+   setTunnelRemotePort(3389);
+   setPanel("ports");
+ }}
  onSession={id=>{if(sshTabs.some(t=>t.id===id&&t.alias===active.id))setActiveSsh(id)}}
  />:
          panel==="files"?<RemoteFilesWorkspace
