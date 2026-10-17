@@ -13,7 +13,7 @@ import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -598,16 +598,16 @@ export default function App(){
   const [agentStatus,setAgentStatus]=useState("");
   const [agentProbeBusy,setAgentProbeBusy]=useState(false);
   const [agentProbeError,setAgentProbeError]=useState("");
-  const [agentAvailability,setAgentAvailability]=useState<Partial<Record<AgentKind,{
-    session:string;installed:boolean;version:string|null
-  }>>>({});
+  const [agentAvailability,setAgentAvailability]=useState<Partial<Record<AgentKind,
+    RemoteAgentAvailability&{session:string}
+  >>>({});
   const checkRemoteAgents=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentProbeError("Connect to this host before checking installed tools.");return}
     if(agentProbeBusy)return;
     setAgentProbeBusy(true);setAgentProbeError("");
     const checks=await Promise.allSettled(AGENTS.map(a=>probeRemoteAgent(session.id,a.kind)));
-    const discovered:Partial<Record<AgentKind,{session:string;installed:boolean;version:string|null}>>={};
+    const discovered:Partial<Record<AgentKind,RemoteAgentAvailability&{session:string}>>={};
     const failures:string[]=[];
     checks.forEach((check,index)=>{
       const kind=AGENTS[index].kind;
@@ -617,6 +617,7 @@ export default function App(){
         failures.push(AGENTS[index].name+": "+String(check.reason));
       }
     });
+    // Never let an old host's background probe update the selected host.
     setAgentAvailability(prev=>({...prev,...discovered}));
     if(failures.length)setAgentProbeError(failures.join("; "));
     setAgentProbeBusy(false);
@@ -624,16 +625,26 @@ export default function App(){
   const launchRemoteAgent=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentStatus("Connect to this host first.");return}
-    const cli:Record<AgentKind,string>={codex:"codex",claude:"claude",opencode:"opencode"};
     const name=AGENTS.find(a=>a.kind===agent)?.name||agent;
-    // Exec probes can miss binaries loaded by custom interactive shell startup.
-    // Never block an explicit user-triggered interactive launch on a probe.
-    if(!window.confirm("Run "+name+" on "+session.alias+" in the existing SSH terminal? This CLI runs with your full SSH account privileges, NOT in a PaSSH7 sandbox. It must already be installed and configured on the remote host."))return;
+    const probed=agentAvailability[agent]?.session===session.id?agentAvailability[agent]:null;
+    if(probed?.platform==="windows"&&!probed.installed){
+      setAgentStatus(probed.desktopApp
+        ?name+" Desktop is a GUI application. It cannot render in an SSH terminal. Use Windows Remote Desktop (RDP), or install its separate CLI."
+        :name+" CLI was not found for this Windows SSH account. Use Check installed tools, then install the CLI or repair its PATH.");
+      return;
+    }
+    // The native backend provides a safely encoded PowerShell invocation of a
+    // probed absolute Windows .exe/.cmd/.ps1 path. Do not use a GUI app's path.
+    const command=probed?.installed&&probed.launchCommand?probed.launchCommand:agent;
+    if(command.length>2048||/[\r\n]/.test(command)){
+      setAgentStatus("Unsafe agent launch command rejected. Run Check installed tools again.");return;
+    }
+    if(!window.confirm("Run "+name+" on "+session.alias+" in your existing SSH terminal? This agent runs with the FULL permissions of the remote SSH account, not inside a PaSSH7 sandbox."))return;
     try{
-      await writeSshSession(session.id,cli[agent]+"\r");
-      setAgentStatus("Launch command sent to the SSH terminal. Check terminal output to confirm "+name+" started.");
+      await writeSshSession(session.id,command+"\r");
+      setAgentStatus("Launch command sent to "+session.alias+". Check terminal output to confirm the CLI started.");
       setPanel("terminal");
-    }catch(e){setAgentStatus("Could not launch agent: "+String(e))}
+    }catch(error){setAgentStatus("Could not send agent launch command: "+String(error))}
   };
   const [error,setError]=useState("");
   const [query,setQuery]=useState("");
