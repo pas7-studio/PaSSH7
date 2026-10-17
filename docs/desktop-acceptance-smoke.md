@@ -116,6 +116,10 @@ during this checklist. Use a throwaway identity and Docker container.
 | AGENT-UI-10 | Start Check installed tools on host A, then switch immediately to host B before the native probe completes | Host B never displays A's errors, versions or completion notice; A's stale request cannot leave B's Check installed tools button busy; fresh B probe succeeds |
 | AGENT-UI-11 | Initiate CLI launch on host A, quickly change selected host before SSH write resolves | No misleading A launch success or failure banner is shown on B. The original SSH command is never retargeted to B |
 | SSH-DISCONNECT-UI-01 | While viewing Docker or AI Agents, terminate the selected SSH connection unexpectedly | A persistent, accessible host-labelled banner appears outside the hidden Terminal panel, with Reconnect (when Vault remains unlocked) and Dismiss; other hosts' PTYs, logs and connections remain unaffected |
+| SSH-DISCONNECT-UI-02 | Keep two SSH sessions open on host A; select its second shell, switch to host B, then return to A | The second shell remains selected and receives typed commands; UI never falls back to another PTY silently |
+| SSH-DISCONNECT-UI-03 | Force native `ssh_session_close` to reject and leave the target session in `ssh_session_list` | PTY, scrollback and selected session stay visible, with global "could not confirm disconnect" banner; do not offer Reconnect until loss is confirmed |
+| SSH-LONG-IDLE-01 | Leave Claude/Codex/OpenCode SSH terminal idle for longer than 10 minutes, including when minimized; then interact | Native SSH keepalive probes every 30 s, not injected shell keystrokes. Healthy SSH stays connected; unresponsive peer is closed after three unanswered keepalives, then global recovery banner is shown |
+
 | AGENT-UI-06 | Have two sessions for the same host and select one in AI Agent | Launch targets the explicitly selected session; no command is written to a different host |
 | AGENT-UI-07 | Copy SSH context; inspect remote terminal and settings | Context contains non-secret host and route information only; no passwords, private keys or Vault secrets are copied or supplied to the agent |
 
