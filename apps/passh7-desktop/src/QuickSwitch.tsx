@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from "react";
-import {ArrowRight,Check,Command,FolderClosed,Server,Search,ShieldCheck,TerminalSquare,X,Container,Network,Code2,Bot,Settings2} from "lucide-react";
+import {ArrowRight,Check,FolderClosed,Server,Search,ShieldCheck,TerminalSquare,X,Container,Network,Code2,Bot,Settings2} from "lucide-react";
 
 export type WorkspaceRoute="connections"|"terminal"|"files"|"docker"|"agent"|"snippets"|"ports"|"settings";
 type HostItem={id:string;label:string;address:string;user:string;group:string;fingerprint:boolean};
