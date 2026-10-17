@@ -47,6 +47,11 @@ during this checklist. Use a throwaway identity and Docker container.
 | SSH-06A | Type a 60-character command normally in a responsive SSH shell; compare with system OpenSSH client on the same host | Characters appear smoothly, in order; no bursts of late letters or duplicated characters; 3 ms maximum intentional input batch delay |
 | SSH-06B | Hold an arrow key, run `vim`/`nano` and an interactive Codex/Claude/OpenCode CLI | Escape sequences, control keys, password/no-echo prompts and full-screen TUI remain correct, without speculative local echo |
 | SSH-06C | Paste UTF-8 text longer than 64 KiB, run fast terminal output, open SFTP/Docker panels concurrently | No reordered keyboard input, truncated Unicode surrogate pairs or frozen terminal; normal CLI output and prompts remain usable |
+| SSH-INPUT-01 | Type a partial command in xterm, click outside it and immediately launch an AI CLI or a saved snippet | Pending keystrokes flush before the button-generated command. Native PTY receives exact FIFO bytes, not interleaved sequences |
+| SSH-INPUT-02 | Hold the first write on one SSH session, queue a second command to that same PTY and type in a different connected terminal | Second write for the first session waits in FIFO; independent session input continues immediately, with no global serial bottleneck |
+| DOCKER-FAILURE-01 | Deny remote account access to the Docker daemon, use a host without Docker CLI, then retry after repair | UI distinguishes permissions, missing CLI, unavailable daemon and SSH interruption with clear remediation; successful retry restores inventory without changing hosts |
+| DOCKER-LOG-FAILURE-01 | Stop Docker daemon or sever remote SSH while static tail / live Follow is running | Missing exit status is not reported as a successful empty log result. Follow reports an error rather than “stream finished normally”; manually stopping a stream remains non-error |
+
 | SSH-07 | Abruptly stop remote sshd / disconnect VPN | Disconnected status and reason after reconnect/poll; stale tunnels cleaned |
 | SSH-08 | Remove a saved host with active SSH and forward | Only that host's sessions and tunnels close |
 | SSH-09 | Browse a slow SFTP directory and load Docker inventory/logs while running interactive commands | Terminal input and output stay responsive; slow inspections time out independently |
