@@ -16,7 +16,8 @@ type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|nu
   liveStatus:"off"|"connecting"|"streaming"|"closed"|"error";
   onFollow:(value:boolean)=>void;onTail:(value:number)=>void;
   onRefresh:()=>void;onAction:(id:string,name:string,action:"start"|"stop"|"restart")=>void;
-  onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;};
+  onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;
+  onShell:(id:string,name:string)=>void;};
 const isRunning=(item:ContainerRow)=>(item.State||"").toLowerCase()==="running";
 const parseMemoryBytes=(text:string)=>{
   const match=text.split("/")[0]?.trim().match(/^([\d.]+)\s*([KMGT]?i?B|B)$/i);
@@ -127,6 +128,8 @@ export default function DockerWorkspace(p:Props){
             {isRunning(chosen)?<><button className="dangerButton" disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"stop")}><Square size={14}/> Stop</button>
               <button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"restart")}><RefreshCw size={14}/> Restart</button></>:<button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"start")}><Play size={14}/> Start</button>}
             <button disabled={p.logsBusy} onClick={()=>p.onLogs(chosen.ID!,chosen.Names||chosen.ID!)}><TerminalSquare size={14}/> {p.logsBusy?"Loading…":"View logs"}</button>
+            {isRunning(chosen)&&<button onClick={()=>p.onShell(chosen.ID!,chosen.Names||chosen.ID!)}><TerminalSquare size={14}/> Open shell</button>}
+            <button onClick={()=>void navigator.clipboard.writeText("docker inspect "+chosen.ID)}><Clipboard size={14}/> Copy command</button>
           </div>
           <div className="dockerInspectTabs" role="tablist" aria-label="Container details tabs">
             {(["details","mounts","network"] as const).map(kind=><button key={kind} role="tab" aria-selected={inspectorTab===kind}
