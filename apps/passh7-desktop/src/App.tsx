@@ -668,6 +668,8 @@ export default function App(){
   const [dockerActionStatus,setDockerActionStatus]=useState<{session:string;text:string}|null>(null);
   const [dockerLogs,setDockerLogs]=useState<{session:string;containerId:string;containerName:string;text:string}|null>(null);
   const [dockerLogsError,setDockerLogsError]=useState<{session:string;message:string}|null>(null);
+  const dockerLogsRequestRef=useRef(0);
+  useEffect(()=>{dockerLogsRequestRef.current++},[activeSsh,selected]);
   const [dockerLiveStatus,setDockerLiveStatus]=useState<"off"|"connecting"|"streaming"|"closed"|"error">("off");
   const [dockerError,setDockerError]=useState("");
   const runDockerAction=async(containerId:string,containerName:string,action:"start"|"stop"|"restart")=>{
@@ -693,14 +695,20 @@ export default function App(){
   const viewDockerLogs=async(containerId:string,containerName:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setDockerError("Select a connected SSH session to read Docker logs.");return}
+    const request=++dockerLogsRequestRef.current;
     setDockerLogsBusy(true);setDockerLogsError(null);setDockerError("");
     // A new selection must never display stale log data from another container.
     setDockerLogs(previous=>previous?.session===session.id&&previous.containerId===containerId?previous:null);
     try{
       const text=await readDockerLogs(session.id,containerId,preferences.dockerTail);
-      setDockerLogs({session:session.id,containerId,containerName,text});
-    }catch(e){setDockerLogsError({session:session.id,message:"Could not read Docker logs: "+String(e)})}
-    finally{setDockerLogsBusy(false)}
+      if(request===dockerLogsRequestRef.current)
+        setDockerLogs({session:session.id,containerId,containerName,text});
+    }catch(e){
+      if(request===dockerLogsRequestRef.current)
+        setDockerLogsError({session:session.id,message:"Could not read Docker logs: "+String(e)});
+    }finally{
+      if(request===dockerLogsRequestRef.current)setDockerLogsBusy(false);
+    }
   };
   const refreshDocker=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -730,6 +738,7 @@ export default function App(){
     const sessionId=activeSsh;
     const containerId=dockerLogs.containerId;
     let disposed=false;
+    let finished=false;
     let streamId="";
     let unsubscribe:(()=>void)|undefined;
     let flushTimer:number|undefined;
@@ -757,6 +766,7 @@ export default function App(){
           if(pending.length>64*1024)flush();
           else if(flushTimer===undefined)flushTimer=window.setTimeout(flush,80);
         }else{
+          finished=true;
           pending+=decoder.decode();
           flush();
           if(data.kind==="error"){
@@ -770,7 +780,7 @@ export default function App(){
       streamId=opened;
       if(disposed){
         void stopDockerLogStream(sessionId,opened).catch(()=>{});
-      }else setDockerLiveStatus("streaming");
+      }else if(!finished)setDockerLiveStatus("streaming");
     })().catch(error=>{
       if(!disposed){
         setDockerLiveStatus("error");
@@ -1098,7 +1108,7 @@ export default function App(){
  onRefresh={()=>void refreshDocker()}
  onAction={(id,name,action)=>void runDockerAction(id,name,action)}
  onLogs={(id,name)=>void viewDockerLogs(id,name)}
- onCloseLogs={()=>{setDockerLogs(null);setDockerLogsError(null)}}
+ onCloseLogs={()=>{dockerLogsRequestRef.current++;setDockerLogs(null);setDockerLogsError(null)}}
  />:
         panel==="settings"?<SettingsWorkspace
  preferences={preferences} onChange={updatePreferences}
