@@ -17,9 +17,9 @@ function visibleFocusTargets(dialog:HTMLElement):HTMLElement[]{
  * Escape dispatches the dialog's own Close/Cancel handler so in-flight SSH,
  * Vault or import tasks still honor disabled close buttons.
  */
-export default function useModalFocus(open:boolean){
+export default function useModalFocus(activeDialog:string|null){
   useEffect(()=>{
-    if(!open)return;
+    if(!activeDialog)return;
     const dialogs=Array.from(document.querySelectorAll<HTMLElement>(".overlay [role='dialog']"));
     const dialog=dialogs.at(-1);
     if(!dialog)return;
@@ -72,5 +72,5 @@ export default function useModalFocus(open:boolean){
         previous.focus({preventScroll:true});
       }
     };
-  },[open]);
+  },[activeDialog]);
 }
