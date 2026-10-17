@@ -1,5 +1,5 @@
 import {useCallback,useRef,useState} from "react";
-import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
+import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Maximize2, Minimize2, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
 import type {RemoteAgentAvailability} from "./backend";
 import {WorkspaceHeader,WorkspaceStatus} from "./WorkspaceChrome";
@@ -17,6 +17,7 @@ type Props={
 };
 export default function AgentWorkspace(p:Props){
   const [copyFeedback,setCopyFeedback]=useState("");
+  const [expandedConsole,setExpandedConsole]=useState(false);
   const terminalPane=useRef<HTMLDivElement>(null);
   const setDock=useCallback((node:HTMLDivElement|null)=>{
     terminalPane.current=node;
@@ -132,10 +133,14 @@ export default function AgentWorkspace(p:Props){
             <p>Connected to {p.host}. Commands and agent output use your existing authenticated PTY session.</p></div>
             <div className="agentTerminalActions">
               <button type="button" onClick={focusTerminal}><TerminalSquare size={14}/> Focus console</button>
+              <button type="button" aria-pressed={expandedConsole} onClick={()=>setExpandedConsole(open=>!open)}>
+                {expandedConsole?<Minimize2 size={14}/>:<Maximize2 size={14}/>}
+                {expandedConsole?"Compact console":"Expand console"}
+              </button>
               <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
             </div>
           </div>
-          <div className="agentTerminalFrame" ref={setDock}/>
+          <div className={"agentTerminalFrame"+(expandedConsole?" expanded":"")} ref={setDock}/>
           <p className="agentHint">Type directly in this terminal. Select another SSH session above to change the active console. Nothing is executed without your action.</p>
         </section>}
         <section className="agentSection">
