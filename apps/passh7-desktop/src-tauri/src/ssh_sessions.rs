@@ -12,6 +12,36 @@ const EVENT: &str = "passh7:ssh-session";
 const MAX_TRANSFER: u64 = 64 * 1024 * 1024;
 const SFTP_EVENT: &str = "passh7:sftp-transfer";
 
+type NativeForward=(tokio::sync::oneshot::Sender<()>,String,u16,u64);
+
+/// Ignore stale completion messages from an earlier listener that used the
+/// same local port. Only the current listener instance can remove itself.
+fn remove_finished_forward(forwarders:&mut HashMap<u16,NativeForward>,port:u16,instance:u64)->bool{
+    if !forwarders.get(&port).is_some_and(|entry|entry.3==instance){return false;}
+    forwarders.remove(&port);
+    true
+}
+
+#[cfg(test)]
+mod forward_lifecycle_tests{
+    use super::*;
+    #[test]
+    fn completion_from_old_listener_must_not_remove_new_forward(){
+        let mut forwards=HashMap::<u16,NativeForward>::new();
+        let (old,_old_rx)=tokio::sync::oneshot::channel();
+        forwards.insert(18080,(old,"127.0.0.1".into(),8080,41));
+        assert!(!remove_finished_forward(&mut forwards,18080,40));
+        assert!(forwards.contains_key(&18080));
+        let (replacement,_replacement_rx)=tokio::sync::oneshot::channel();
+        forwards.insert(18080,(replacement,"127.0.0.1".into(),9090,42));
+        assert!(!remove_finished_forward(&mut forwards,18080,41));
+        assert_eq!(forwards.get(&18080).map(|value|value.2),Some(9090));
+        assert!(remove_finished_forward(&mut forwards,18080,42));
+        assert!(!forwards.contains_key(&18080));
+        assert!(!remove_finished_forward(&mut forwards,18080,42));
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct SshSessionManager {
     channels: Arc<Mutex<HashMap<String, ManagedSession>>>,
@@ -429,7 +459,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut buffered = 0usize;
         let mut overflowed = false;
         let mut closure_detail: Option<String> = None;
-        let mut forwarders: HashMap<u16,(tokio::sync::oneshot::Sender<()>,String,u16,u64)> = HashMap::new();
+        let mut forwarders: HashMap<u16,NativeForward> = HashMap::new();
         let mut transfers: HashMap<String,tokio::sync::watch::Sender<bool>> = HashMap::new();
         let mut docker_log_streams: HashMap<String,tokio::sync::watch::Sender<bool>>=HashMap::new();
         loop {
@@ -1352,9 +1382,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::ForwardFinished(port,instance))=>{
-                            if forwarders.get(&port).is_some_and(|entry|entry.3==instance){
-                                forwarders.remove(&port);
-                            }
+                            remove_finished_forward(&mut forwarders,port,instance);
                             Ok(())
                         },
                         Some(SessionCommand::ForwardList(response)) => {
