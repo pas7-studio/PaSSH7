@@ -72,6 +72,10 @@ during this checklist. Use a throwaway identity and Docker container.
 | SFTP-META-02 | Browse a folder containing 5,000 entries and search for an item near the end | Initial DOM renders at most 250 file rows; filtering matches all fetched entries and Load 250 more increments predictably |
 | SFTP-META-03 | Focus a file row and press Enter, Space, Ctrl/Cmd+C; switch to another SSH host | Keyboard opens/previews/selects/copies the correct path; selection/history reset on host change, no stale destructive operations |
 | SFTP-01 | Browse multiple folders, use breadcrumbs and parent directory, filter/sort by name, size and modified date, read UTF-8 file | Correct remote entries, local timestamps and readable size; unrelated session not used |
+| SFTP-HOST-01 | Open a slow folder on host A, switch to host B and load its directory, then allow A's response to finish | B's listing, path, loading state and errors remain B-specific. Late results from A do not replace the visible directory |
+| SFTP-HOST-02 | Browse a nested folder on host A, switch to host B and navigate elsewhere, then switch back to A while both SSH PTYs remain open | Each SSH session remembers its last successfully browsed path, without leaking another host's path or restarting at an unrelated directory |
+| SFTP-HOST-03 | Trigger a slow file preview on host A, switch to B, then let A's preview finish | Preview body, error and busy states are scoped to the originating SSH session and do not appear on B |
+
 | SFTP-02 | Preview a binary file | Helpful UTF-8/binary error, no corruption |
 | SFTP-03 | Upload test binary file via native file picker | New file present on remote host; matching SHA-256 checksum |
 | SFTP-04 | Download same binary via native Save As dialog | Matching SHA-256 checksum and byte size locally |
