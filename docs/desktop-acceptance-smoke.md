@@ -82,6 +82,11 @@ during this checklist. Use a throwaway identity and Docker container.
 | SFTP-09 | Select an existing local destination (or race a second writer creating it before completion) | Existing local bytes remain unchanged; download publish fails instead of clobbering |
 | DOCKER-R1 | Open the Docker workspace and switch between Containers, Images, Volumes and Networks | Each tab shows its own real resource inventory and search; no resource is modified |
 | DOCKER-R2 | Disconnect SSH while a catalog request is active, then reconnect and refresh | Catalog errors are clearly shown; cached data from another SSH session is not presented as current |
+| DOCKER-JSON-01 | On Linux SSH, refresh Containers, Images, Volumes, Networks, CPU/memory stats and Compose projects | All supported inventory commands use Docker's literal `--format json` mode with no Go-template braces, quoted templates or shell-dependent escaping; UI receives only projected fields |
+| DOCKER-JSON-02 | Repeat Docker inventories over Windows OpenSSH (PowerShell and cmd default-shell variants) | JSON lines parse without `template parsing error: unclosed action`; container list is populated with real states; stale/unsupported Docker CLI versions produce actionable errors |
+| DOCKER-JSON-03 | Add test canaries to container labels, command arguments and unrelated Docker JSON fields | Rust strips non-allowlisted fields before native IPC. Canary strings do not enter the WebView, console diagnostics or copied inventory data |
+| DOCKER-JSON-04 | Docker process fails or remote SSH exec does not report successful exit status | UI shows Docker execution error, not a misleading empty inventory or successful listing |
+
 | DOCKER-01 | Refresh containers; inspect logs | Real `docker ps -a` inventory; logs capped at 200 lines and 512 KiB |
 | DOCKER-02 | Start/stop/restart throwaway container | Per-operation confirmation, expected state shown after refresh |
 | DOCKER-03 | Reject action confirmation; use SSH user lacking Docker permission | No action when cancelled; explicit permission error when rejected |
