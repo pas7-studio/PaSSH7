@@ -196,6 +196,13 @@ export async function listDockerCatalog(sessionId:string,kind:DockerCatalogKind)
   }
   return raw.split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line) as Record<string,string>);
 }
+/** Read-only Compose project member lookup by validated Docker label. Never reads compose files. */
+export async function listComposeProjectContainers(sessionId:string,projectName:string):Promise<Record<string,string>[]>{
+  if(!/^[a-z][a-z0-9_-]{0,127}$/.test(projectName))throw Error("Invalid Docker Compose project name.");
+  const raw=await invoke<string>("ssh_session_docker_catalog",{id:sessionId,kind:"compose-project:"+projectName});
+  return raw.split(/\r?\n/).filter(Boolean).slice(0,500)
+    .map(line=>JSON.parse(line) as Record<string,string>);
+}
 export type DockerLogEvent={
   sessionId:string;streamId:string;containerId:string;
   kind:"data"|"closed"|"error";data:string|null;detail:string|null;
