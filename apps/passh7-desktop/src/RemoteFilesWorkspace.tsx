@@ -120,6 +120,11 @@ export default function RemoteFilesWorkspace(p:Props){
 
   useEffect(()=>{
     if(!selectedItem||selectedItem.isDir||!p.connected||!p.session||!selectedPath)return;
+    // Sensitive/hidden files are never read just by selecting a row.
+    // Manual Preview remains possible when the user explicitly requests it.
+    const sensitive=selectedItem.name.startsWith(".")||
+      /(^|[_.-])(env|secrets?|credentials?|tokens?|passwords?|private|keys?|pem|p12|pfx)([_.-]|$)/i.test(selectedItem.name);
+    if(sensitive)return;
     const image=/\.(png|jpe?g|gif|webp)$/i.test(selectedItem.name);
     const text=/(\.(json|jsonl|md|txt|log|ya?ml|toml|ini|conf|xml|csv|ts|tsx|js|jsx|mjs|cjs|css|html|sh|bash|py|rs|go|java|kt|c|h|cpp|hpp|sql|dockerfile|gitignore)|^(\.env.*|Dockerfile|Makefile|README))$/i.test(selectedItem.name);
     const maximum=image?768*1024:256*1024;
