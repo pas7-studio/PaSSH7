@@ -44,7 +44,7 @@ test("production App retains one xterm per SSH session while docking and exports
         case "ssh_session_docker_inspect":return JSON.stringify({
           image:"api:latest",created:null,startedAt:null,finishedAt:null,restartPolicy:null,mounts:[],networks:[]
         });
-        case "ssh_session_docker_logs":return "2026-10-17 INFO hello\\n2026-10-17 ERROR warning\\n";
+        case "ssh_session_docker_logs":return "2026-10-17 INFO hello\n2026-10-17 ERROR warning\n";
         case "docker_save_visible_logs":
           exports.push({containerName:String(args.containerName),contents:String(args.contents)});
           return "Saved filtered logs in native dialog (IPC simulator)";
@@ -136,7 +136,7 @@ test("production App retains one xterm per SSH session while docking and exports
   await expect(page.locator(".dockerLogsBody")).toContainText("ERROR warning");
   await page.getByRole("textbox",{name:"Search Docker logs"}).fill("ERROR");
   await page.getByRole("button",{name:"Save visible logs"}).click();
-  await expect(page.getByRole("status")).toContainText("Saved filtered logs in native dialog");
+  await expect(page.locator(".dockerLogViewer .workspaceNotice")).toContainText("Saved filtered logs in native dialog");
   const saved=await page.evaluate(()=>
     (window as unknown as {__mockSshBridge:{exports:Array<{containerName:string;contents:string}>}}).__mockSshBridge.exports
   );
