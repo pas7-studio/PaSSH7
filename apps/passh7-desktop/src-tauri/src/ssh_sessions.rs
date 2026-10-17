@@ -40,6 +40,7 @@ enum SessionCommand {
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
+    SftpImage(String, tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpMutate(String,String,String,Option<String>,bool,tokio::sync::oneshot::Sender<Result<(),String>>),
     SftpDownload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
     SftpUpload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
@@ -1083,6 +1084,44 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
+                        Some(SessionCommand::SftpImage(path,response)) => {
+                            // Image preview is read-only, capped and does not expose SVG
+                            // or arbitrary content with active browser parsing privileges.
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open SFTP image preview channel".to_owned())?;
+                                channel.request_subsystem(true,"sftp").await
+                                    .map_err(|_|"SFTP image preview subsystem refused".to_owned())?;
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP image preview setup timed out".into()));
+                            match opened {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        use tokio::io::AsyncReadExt;
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|_|"Could not initialize SFTP image preview".to_owned())?;
+                                            let mut remote=sftp.open(path).await
+                                                .map_err(|_|"Cannot open remote image".to_owned())?;
+                                            const MAX:usize=768*1024;
+                                            let mut bytes=Vec::new();
+                                            (&mut remote).take((MAX+1) as u64).read_to_end(&mut bytes).await
+                                                .map_err(|_|"Could not read remote image".to_owned())?;
+                                            if bytes.len()>MAX{return Err("Image preview limit is 768 KiB. Download the full file instead.".into());}
+                                            let mime=if bytes.starts_with(b"\x89PNG\r\n\x1a\n"){"image/png"}
+                                                else if bytes.starts_with(b"\xff\xd8\xff"){"image/jpeg"}
+                                                else if bytes.starts_with(b"GIF87a")||bytes.starts_with(b"GIF89a"){"image/gif"}
+                                                else if bytes.len()>=12&&bytes.starts_with(b"RIFF")&&&bytes[8..12]==b"WEBP"{"image/webp"}
+                                                else{return Err("Only PNG, JPEG, GIF and WebP image previews are supported.".into())};
+                                            Ok::<String,String>(format!("data:{mime};base64,{}",STANDARD.encode(bytes)))
+                                        }).await.unwrap_or_else(|_|Err("SFTP image preview timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
                         Some(SessionCommand::SftpDownload(transfer_id,path,destination,response)) => {
                             if transfers.contains_key(&transfer_id) {
                                 let _=response.send(Err("Duplicate transfer ID".into()));
@@ -1640,6 +1679,18 @@ pub async fn ssh_session_sftp_read_text(id:String,path:String,manager:State<'_,S
         .map_err(|_|"SSH connection has closed".to_owned())?;
     rx.await.map_err(|_|"SFTP preview was cancelled".to_owned())?
 }
+
+#[tauri::command]
+pub async fn ssh_session_sftp_read_image(id:String,path:String,manager:State<'_,SshSessionManager>)->Result<String,String>{
+    if !valid_sftp_path(&path)||path.chars().any(|c|c.is_control()){
+        return Err("Invalid SFTP image preview path".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::SftpImage(path,tx)).await
+        .map_err(|_|"SSH session closed before image preview")?;
+    rx.await.map_err(|_|"SFTP image preview interrupted".to_owned())?
+}
+
 
 fn valid_transfer_id(id:&str)->bool{
     (8..=96).contains(&id.len()) &&
