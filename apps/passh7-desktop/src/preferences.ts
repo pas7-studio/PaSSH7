@@ -1,3 +1,15 @@
+export type PaneSizes={
+  filesTree:number;
+  filesInspector:number;
+  dockerInspector:number;
+  dockerLogs:number;
+};
+export const defaultPaneSizes:PaneSizes={
+  filesTree:212,filesInspector:300,dockerInspector:310,dockerLogs:310
+};
+const paneSize=(value:unknown,fallback:number,min:number,max:number)=>
+  typeof value==="number"&&Number.isFinite(value)?Math.min(max,Math.max(min,Math.round(value))):fallback;
+
 export type AppPreferences={
   theme:"dark"|"light";
   density:"comfortable"|"compact";
@@ -10,12 +22,13 @@ export type AppPreferences={
   sftpSort:"folders"|"name"|"size"|"modified";
   confirmTransfer:boolean;
   rememberWorkspace:boolean;
+  paneSizes:PaneSizes;
 };
 export const defaultPreferences:AppPreferences={
   theme:"dark",density:"comfortable",terminalFontSize:13,terminalScrollback:5000,
   dockerTail:200,dockerAutoRefresh:false,dockerFollowLogs:false,
   sftpShowHidden:true,sftpSort:"folders",confirmTransfer:true,
-  rememberWorkspace:true
+  rememberWorkspace:true,paneSizes:{...defaultPaneSizes}
 };
 const KEY="passh7.preferences.v1";
 // This is non-secret UI configuration only. SSH keys, passwords and host pins
@@ -25,6 +38,7 @@ export function validatePreferences(source:unknown):AppPreferences{
     return {...defaultPreferences};
   }
   const data=source as Partial<AppPreferences>;
+  const layout=data.paneSizes;
   return {
     theme:data.theme==="light"?"light":"dark",
     density:data.density==="compact"?"compact":"comfortable",
@@ -36,7 +50,13 @@ export function validatePreferences(source:unknown):AppPreferences{
     sftpShowHidden:data.sftpShowHidden!==false,
     sftpSort:["folders","name","size","modified"].includes(data.sftpSort??"")?data.sftpSort!:"folders",
     confirmTransfer:data.confirmTransfer!==false,
-    rememberWorkspace:data.rememberWorkspace!==false
+    rememberWorkspace:data.rememberWorkspace!==false,
+    paneSizes:{
+      filesTree:paneSize(layout?.filesTree,defaultPaneSizes.filesTree,150,360),
+      filesInspector:paneSize(layout?.filesInspector,defaultPaneSizes.filesInspector,245,500),
+      dockerInspector:paneSize(layout?.dockerInspector,defaultPaneSizes.dockerInspector,265,520),
+      dockerLogs:paneSize(layout?.dockerLogs,defaultPaneSizes.dockerLogs,240,620)
+    }
   };
 }
 export function loadPreferences():AppPreferences{
