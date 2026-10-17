@@ -23,6 +23,11 @@ export async function unlockVault(masterPassword:string):Promise<void>{
 }
 export async function lockVault():Promise<void>{await invoke("vault_lock")}
 export async function vaultStatus():Promise<boolean>{return invoke<boolean>("vault_status")}
+/** Refresh decrypted-Vault idle TTL only in response to local human input.
+ * Never use this for remote PTY output, heartbeats, polling or timers. */
+export async function touchVaultActivity():Promise<boolean>{
+  return invoke<boolean>("vault_touch");
+}
 export type VaultBackupResult={remotePath:string;bytes:number;verified:boolean};
 export type VaultBackupBatchTarget={id:string;alias:string;directory:string};
 export type VaultBackupBatchOutcome={alias:string;remotePath:string|null;error:string|null};
