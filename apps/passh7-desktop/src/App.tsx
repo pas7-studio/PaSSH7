@@ -10,7 +10,7 @@ import PortForwardingWorkspace from "./PortForwardingWorkspace";
 import {loadPreferences,savePreferences,type AppPreferences} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -670,6 +670,21 @@ export default function App(){
   const [dockerBusy,setDockerBusy]=useState(false);
   const [dockerStats,setDockerStats]=useState<{session:string;items:DockerRuntimeStats[]}|null>(null);
   const [dockerStatsError,setDockerStatsError]=useState<{session:string;message:string}|null>(null);
+  const [dockerDetails,setDockerDetails]=useState<{session:string;containerId:string;data:DockerDetails}|null>(null);
+  const [dockerDetailsError,setDockerDetailsError]=useState<{session:string;containerId:string;message:string}|null>(null);
+  const dockerDetailsRequestRef=useRef(0);
+  const readDockerDetails=async(containerId:string)=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session)return;
+    const request=++dockerDetailsRequestRef.current;
+    setDockerDetailsError(null);setDockerDetails(null);
+    try{
+      const data=await inspectDockerContainer(session.id,containerId);
+      if(request===dockerDetailsRequestRef.current)setDockerDetails({session:session.id,containerId,data});
+    }catch(error){
+      if(request===dockerDetailsRequestRef.current)setDockerDetailsError({session:session.id,containerId,message:String(error)});
+    }
+  };
   const dockerStatsRequestRef=useRef(0);
   const [dockerLogsBusy,setDockerLogsBusy]=useState(false);
   const [dockerActionBusy,setDockerActionBusy]=useState("");
@@ -1172,6 +1187,9 @@ export default function App(){
  items={dockerInventory?.session===activeSsh?dockerInventory.items:null}
  stats={dockerStats?.session===activeSsh?dockerStats.items:null}
  statsError={dockerStatsError?.session===activeSsh?dockerStatsError.message:""}
+ details={dockerDetails?.session===activeSsh?dockerDetails:null}
+ detailsError={dockerDetailsError?.session===activeSsh?dockerDetailsError:null}
+ onInspect={id=>void readDockerDetails(id)}
  loading={dockerBusy} error={dockerError}
  actionStatus={dockerActionStatus?.session===activeSsh?dockerActionStatus.text:null}
  actionBusy={dockerActionBusy} logs={dockerLogs} logsBusy={dockerLogsBusy}
