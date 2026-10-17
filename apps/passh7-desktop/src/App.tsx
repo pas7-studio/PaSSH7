@@ -51,6 +51,10 @@ export default function App(){
   const sshTabsRef=useRef(sshTabs);
   useEffect(()=>{sshTabsRef.current=sshTabs},[sshTabs]);
   const [activeSsh,setActiveSsh]=useState("");
+  // Remember the user's selected terminal per host. With multiple SSH shells
+  // open on the same machine, switching away and back must NOT silently
+  // change the CLI/PTY that receives subsequent keyboard input.
+  const preferredSessionByHost=useRef(new Map<string,string>());
   // One persistent xterm and event subscriber per native SSH session.
   // Reparent its DOM surface between Terminal and AI Agents; never remount
   // the renderer or attach a second PTY viewer when changing workspaces.
@@ -100,9 +104,15 @@ export default function App(){
   const [loginMode,setLoginMode]=useState<"key"|"password"|"key-password">("key-password");
   useEffect(()=>{
     const current=sshTabs.find(t=>t.id===activeSsh);
-    if(current?.alias===selected)return;
-    // The side panel must never operate on a different server than YOUR HOSTS.
-    const matching=sshTabs.find(t=>t.alias===selected);
+    if(current?.alias===selected){
+      preferredSessionByHost.current.set(selected,current.id);
+      return;
+    }
+    // Preserve the previously selected PTY on this host, if still live.
+    // Fall back to another session of this host only after disconnection.
+    const preferred=preferredSessionByHost.current.get(selected);
+    const matching=sshTabs.find(t=>t.alias===selected&&t.id===preferred)
+      ||sshTabs.find(t=>t.alias===selected);
     setActiveSsh(matching?.id??"");
   },[sshTabs,activeSsh,selected]);
   const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
