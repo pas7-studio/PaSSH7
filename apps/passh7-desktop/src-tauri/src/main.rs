@@ -117,6 +117,19 @@ impl SessionStore {
         *self.0.lock().map_err(|_| "Vault session unavailable")? = None;
         Ok(())
     }
+    // Only genuine local user interaction calls this command. Background SSH
+    // heartbeats and agent output must NOT extend the lifetime of decrypted
+    // credentials. Expired sessions are never silently reactivated.
+    fn touch_if_live(&self)->Result<bool,String>{
+        let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
+        let Some(session)=guard.as_mut() else{return Ok(false)};
+        if session.last_used.elapsed()>=IDLE_TIMEOUT{
+            *guard=None;
+            return Ok(false);
+        }
+        session.last_used=Instant::now();
+        Ok(true)
+    }
 }
 
 #[derive(Serialize)]
@@ -449,6 +462,13 @@ fn vault_restore_commit(
     })?;
     ssh.stop_all(); // All sessions may reference replaced credentials.
     Ok(())
+}
+
+#[tauri::command]
+fn vault_touch(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool,String>{
+    let active=sessions.touch_if_live()?;
+    if !active{ssh.stop_all();}
+    Ok(active)
 }
 
 #[tauri::command]
@@ -1109,7 +1129,7 @@ fn main() {
         .manage(PendingVaultRestore::default())
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
