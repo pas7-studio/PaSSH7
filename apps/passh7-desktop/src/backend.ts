@@ -203,7 +203,7 @@ export async function pinSshHostKey(alias:string,fingerprint:string):Promise<voi
   return invoke("vault_pin_host_key",{alias,fingerprint});
 }
 
-export type SftpEntry={name:string;isDir:boolean;sizeBytes:number|null;modifiedAt:number|null};
+export type SftpEntry={name:string;isDir:boolean;sizeBytes:number|null;modifiedAt:number|null;unixPermissions:number|null;ownerId:number|null;groupId:number|null};
 export async function mutateSftpFile(sessionId:string,operation:"mkdir"|"delete"|"rename",directory:string,name:string,isDirectory=false,newName?:string):Promise<void>{
   return invoke<void>("ssh_session_sftp_mutate",{id:sessionId,operation,directory,name,newName:newName??null,isDirectory});
 }

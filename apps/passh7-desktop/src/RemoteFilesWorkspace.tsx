@@ -1,9 +1,11 @@
-import {useMemo,useState,type ReactNode} from "react";
+import {useEffect,useMemo,useState,type ReactNode} from "react";
 import {ArrowLeft,ArrowRight,ArrowUp,Clipboard,Download,FileText,FolderClosed,FolderPlus,Home,Pencil,RefreshCw,Search,Trash2,Upload} from "lucide-react";
 import type {SftpEntry} from "./backend";
 
 const size=(n:number|null)=>n===null?"—":n<1024?n+" B":n<1048576?(n/1024).toFixed(1)+" KiB":(n/1048576).toFixed(2)+" MiB";
 const full=(dir:string,name:string)=>dir.replace(/\/$/,"")+"/"+name;
+const octalPermissions=(permissions:number|null):string=>
+  permissions===null?"—":(permissions&0o7777).toString(8).padStart(4,"0");
 const crumbs=(path:string)=>{
   const parts=path.replaceAll("\\","/").split("/").filter(Boolean);
   const absolute=path.startsWith("/");
@@ -30,10 +32,13 @@ type Props={
 };
 export default function RemoteFilesWorkspace(p:Props){
   const [selected,setSelected]=useState<string>("");
+  const [visibleLimit,setVisibleLimit]=useState(250);
   const [history,setHistory]=useState<string[]>([]);
   const [historyIndex,setHistoryIndex]=useState(-1);
   const dir=p.entries?.session===p.session?p.entries:null;
   const path=dir?.path||p.pathInput;
+  useEffect(()=>{setSelected("");setHistory([]);setHistoryIndex(-1);},[p.session]);
+  useEffect(()=>{setVisibleLimit(250);},[p.session,path,p.filter,p.sort,p.showHidden]);
   const open=(next:string)=>{
     setSelected("");
     if(next!==path){const nextHistory=[...history.slice(0,historyIndex+1),next].slice(-60);
@@ -50,6 +55,7 @@ export default function RemoteFilesWorkspace(p:Props){
     return a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:"base"});
   }),[dir,p.showHidden,p.filter,p.sort]);
   const selectedItem=items.find(item=>item.name===selected);
+  const renderedItems=items.slice(0,visibleLimit);
   const selectedPath=selected?full(path,selected):"";
   const preview=p.preview?.session===p.session&&p.preview.path===selectedPath?p.preview:null;
   return <div className="widePage remoteFilesPage">
@@ -103,16 +109,23 @@ export default function RemoteFilesWorkspace(p:Props){
         {dir?.items.filter(item=>item.isDir).map(item=><button key={item.name} onClick={()=>open(full(path,item.name))}><FolderClosed size={14}/> {item.name}</button>)}
         {!dir&&<p>Connect and browse to load remote folders.</p>}
       </nav>
-      <div className="filesTablePane"><div className="paneTitle">{path} <span>{dir?items.length+" entries":"Not loaded"}</span></div>
-        <div className="filesTableWrap"><table className="workspaceTable"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Type</th></tr></thead><tbody>
-          {items.map(item=><tr key={item.name} className={item.name===selected?"selected":""}
+      <div className="filesTablePane"><div className="paneTitle">{path} <span>{dir?Math.min(items.length,visibleLimit)+" of "+items.length+" entries":"Not loaded"}</span></div>
+        <div className="filesTableWrap"><table className="workspaceTable"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Permissions</th><th>Type</th></tr></thead><tbody>
+          {renderedItems.map(item=><tr key={item.name} tabIndex={0} role="row" aria-selected={item.name===selected} className={item.name===selected?"selected":""}
             onClick={()=>setSelected(item.name)}
-            onDoubleClick={()=>item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}>
+            onDoubleClick={()=>item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
+            onKeyDown={e=>{
+              if(e.key==="Enter"){e.preventDefault();setSelected(item.name);item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
+              else if(e.key===" "){e.preventDefault();setSelected(item.name)}
+              else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="c"){e.preventDefault();void navigator.clipboard.writeText(full(path,item.name))}
+            }}>
             <td><span className="fileName">{item.isDir?<FolderClosed size={15}/>:<FileText size={15}/>} {item.name}</span></td>
             <td>{item.isDir?"—":size(item.sizeBytes)}</td>
             <td>{item.modifiedAt!==null?new Date(item.modifiedAt*1000).toLocaleString():"—"}</td>
+            <td><code title="Remote POSIX mode (not always supplied by SFTP server)">{octalPermissions(item.unixPermissions)}</code></td>
             <td>{item.isDir?"Folder":(item.name.split(".").at(-1)||"File").toUpperCase()}</td></tr>)}
         </tbody></table>
+        {items.length>visibleLimit&&<div className="filesMoreRows"><span>Showing {renderedItems.length.toLocaleString()} of {items.length.toLocaleString()} items. Narrow the search or load more.</span><button type="button" onClick={()=>setVisibleLimit(current=>Math.min(current+250,items.length))}>Load 250 more</button></div>}
         {dir&&items.length===0&&<div className="workspaceEmpty">{p.filter?"No matching files. Clear the search to see the directory.":"This directory is empty."}</div>}
         {!p.connected&&<div className="workspaceEmpty">Connect to <strong>{p.host}</strong> to browse files. Select your host and click Connect.</div>}
         {p.connected&&!dir&&<div className="workspaceEmpty">Choose a directory and click Open to load its contents.</div>}
@@ -120,7 +133,7 @@ export default function RemoteFilesWorkspace(p:Props){
       </div>
       <aside className="filesInspector"><div className="paneTitle">FILE DETAILS</div>
         {selectedItem?<><div className="inspectorFile"><FileText size={28}/><strong>{selectedItem.name}</strong><small>{selectedItem.isDir?"Directory":"Remote file"}</small></div>
-          <dl><dt>Size</dt><dd>{size(selectedItem.sizeBytes)}</dd><dt>Modified</dt><dd>{selectedItem.modifiedAt!==null?new Date(selectedItem.modifiedAt*1000).toLocaleString():"Unknown"}</dd><dt>Path</dt><dd className="filePath">{selectedPath}</dd></dl>
+          <dl><dt>Size</dt><dd>{size(selectedItem.sizeBytes)}</dd><dt>Modified</dt><dd>{selectedItem.modifiedAt!==null?new Date(selectedItem.modifiedAt*1000).toLocaleString():"Unknown"}</dd><dt>Permissions</dt><dd><code>{octalPermissions(selectedItem.unixPermissions)}</code></dd><dt>Owner ID</dt><dd>{selectedItem.ownerId??"Unknown"}</dd><dt>Group ID</dt><dd>{selectedItem.groupId??"Unknown"}</dd><dt>Path</dt><dd className="filePath">{selectedPath}</dd></dl>
           <div className="inspectorActions"><button onClick={()=>navigator.clipboard.writeText(selectedPath)}><Clipboard size={14}/> Copy path</button>
           {selectedItem.isDir?<button onClick={()=>open(selectedPath)}>Open folder</button>:<><button onClick={()=>p.readPreview(selectedPath)} disabled={p.previewBusy}>Preview</button><button onClick={()=>p.download(selectedPath)} disabled={p.transferBusy}>Download</button></>}</div>
           {!selectedItem.isDir&&<div className="fileCodePreview"><strong>READ-ONLY PREVIEW</strong>{p.previewBusy?<p>Loading preview…</p>:preview?<pre>{preview.body}</pre>:<p>Select Preview to read UTF-8 text. Binary files may not be previewable.</p>}</div>}

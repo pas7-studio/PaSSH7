@@ -63,6 +63,9 @@ during this checklist. Use a throwaway identity and Docker container.
 | VAULT-05 | Modify active Vault after recovery preview but before Restore | Commit fails with a generation/conflict error and original data remains intact |
 | VAULT-06 | Disconnect SSH or deny write permissions during remote backup; target path already exists | Operation fails without false success or overwriting another remote file; incomplete cleanup is best effort |
 | VAULT-07 | Restore on a second device with a matching master password, without access to the original device | Snapshot opens, Vault import is explicit, SSH keys/pins restored; no automatic background merge or silent sync |
+| SFTP-META-01 | Browse a directory of Linux files with varied modes/ownership and a Windows SFTP server that does not supply POSIX attrs | File table/inspector show octal mode, UID/GID where supplied; unknown metadata displays a dash/Unknown, never invented values |
+| SFTP-META-02 | Browse a folder containing 5,000 entries and search for an item near the end | Initial DOM renders at most 250 file rows; filtering matches all fetched entries and Load 250 more increments predictably |
+| SFTP-META-03 | Focus a file row and press Enter, Space, Ctrl/Cmd+C; switch to another SSH host | Keyboard opens/previews/selects/copies the correct path; selection/history reset on host change, no stale destructive operations |
 | SFTP-01 | Browse multiple folders, use breadcrumbs and parent directory, filter/sort by name, size and modified date, read UTF-8 file | Correct remote entries, local timestamps and readable size; unrelated session not used |
 | SFTP-02 | Preview a binary file | Helpful UTF-8/binary error, no corruption |
 | SFTP-03 | Upload test binary file via native file picker | New file present on remote host; matching SHA-256 checksum |
