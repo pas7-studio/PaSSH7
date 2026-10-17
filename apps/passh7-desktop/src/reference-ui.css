@@ -113,6 +113,7 @@
 }
 .agentTerminalFrame .liveTerminal{height:100%;min-height:0;padding:8px}
 .agentTerminalFrame .xterm{height:100%}
+.agentTerminalActions{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
 .agentEmbeddedTerminal .agentHint{margin:0;color:var(--muted);font-size:11px;line-height:1.5}
 .shell.light .agentTerminalFrame{background:#f7fbff;border-color:#bad1e5}
 @media(max-width:900px){.agentTerminalFrame{height:360px;min-height:300px}}
