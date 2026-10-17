@@ -1221,6 +1221,7 @@ export default function App(){
  logsError={dockerLogsError?.session===activeSsh?dockerLogsError.message:""}
  liveStatus={dockerLiveStatus}
  tail={preferences.dockerTail} follow={preferences.dockerFollowLogs}
+ autoRefresh={preferences.dockerAutoRefresh} onAutoRefresh={enabled=>updatePreferences({...preferences,dockerAutoRefresh:enabled})}
  onTail={tail=>updatePreferences({...preferences,dockerTail:tail})}
  onFollow={follow=>updatePreferences({...preferences,dockerFollowLogs:follow})}
  onRefresh={()=>void refreshDocker()}
