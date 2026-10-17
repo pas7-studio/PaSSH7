@@ -1,7 +1,9 @@
-import {useEffect,useMemo,useState,type ReactNode} from "react";
+import {useEffect,useMemo,useRef,useState,type ReactNode} from "react";
 import {ArrowLeft,ArrowRight,ArrowUp,Clipboard,Download,FileText,FolderClosed,FolderPlus,Home,Pencil,RefreshCw,Search,Trash2,Upload} from "lucide-react";
 import type {SftpEntry} from "./backend";
 import RemoteDirectoryTree from "./RemoteDirectoryTree";
+import TransferQueuePanel from "./TransferQueuePanel";
+import type {TransferJob} from "./useSftpTransferQueue";
 import PaneResizeHandle from "./PaneResizeHandle";
 import {defaultPaneSizes,type PaneSizes} from "./preferences";
 
@@ -18,7 +20,6 @@ const crumbs=(path:string)=>{
 };
 type Entries={session:string;path:string;items:SftpEntry[]}|null;
 type Preview={session:string;path:string;body:string}|null;
-type Progress={session:string;id:string;direction:"upload"|"download";stage:string;bytes:number;totalBytes:number|null}|null;
 type Props={
   session:string;host:string;connected:boolean;
   pathInput:string;setPathInput:(value:string)=>void;
@@ -26,16 +27,19 @@ type Props={
   filter:string;setFilter:(s:string)=>void;
   sort:"folders"|"name"|"size"|"modified";setSort:(s:Props["sort"])=>void;
   showHidden:boolean;navigate:(path:string)=>void;
-  upload:()=>void;download:(path:string)=>void;readPreview:(path:string)=>void;
+  upload:()=>void;download:(path:string)=>void;queueDownloads:(paths:string[])=>void;readPreview:(path:string)=>void;
   onMkdir:(name:string)=>void;onDelete:(name:string,isDirectory:boolean)=>void;
   onRename:(name:string,newName:string,isDirectory:boolean)=>void;mutationBusy:boolean;
   preview:Preview;previewBusy:boolean;
-  transferBusy:boolean;transferProgress:Progress;transferResult:string|null;
-  cancelTransfer:()=>void;backupPanel:ReactNode;
+  transferBusy:boolean;transferJobs:TransferJob[];transferPaused:boolean;
+  onPauseQueue:(value:boolean)=>void;onCancelJob:(id:string)=>void;
+  onRetryJob:(id:string)=>void;onClearFinished:()=>void;backupPanel:ReactNode;
   paneSizes:PaneSizes;onPaneSize:(key:keyof PaneSizes,value:number)=>void;
 };
 export default function RemoteFilesWorkspace(p:Props){
   const [selected,setSelected]=useState<string>("");
+  const [selectedNames,setSelectedNames]=useState<string[]>([]);
+  const selectionAnchor=useRef<string>("");
   const [fileMenu,setFileMenu]=useState<{name:string;x:number;y:number}|null>(null);
   const [treeWidth,setTreeWidth]=useState(p.paneSizes.filesTree);
   const [inspectorWidth,setInspectorWidth]=useState(p.paneSizes.filesInspector);
@@ -46,10 +50,10 @@ export default function RemoteFilesWorkspace(p:Props){
   const [historyIndex,setHistoryIndex]=useState(-1);
   const dir=p.entries?.session===p.session?p.entries:null;
   const path=dir?.path||p.pathInput;
-  useEffect(()=>{setSelected("");setHistory([]);setHistoryIndex(-1);},[p.session]);
+  useEffect(()=>{setSelected("");setSelectedNames([]);selectionAnchor.current="";setHistory([]);setHistoryIndex(-1);},[p.session]);
   useEffect(()=>{setVisibleLimit(250);},[p.session,path,p.filter,p.sort,p.showHidden]);
   const open=(next:string)=>{
-    setSelected("");setFileMenu(null);
+    setSelected("");setSelectedNames([]);setFileMenu(null);
     if(next!==path){
       // Include the initial folder so Back can return to it.
       const previous=historyIndex>=0?history.slice(0,historyIndex+1):[path];
@@ -68,6 +72,24 @@ export default function RemoteFilesWorkspace(p:Props){
     if(p.sort==="modified"&&a.modifiedAt!==b.modifiedAt)return (b.modifiedAt??-1)-(a.modifiedAt??-1);
     return a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:"base"});
   }),[dir,p.showHidden,p.filter,p.sort]);
+
+  const selectItem=(name:string,multi:boolean,range:boolean)=>{
+    const valid=items.some(item=>item.name===name);
+    if(!valid)return;
+    if(range&&selectionAnchor.current){
+      const start=items.findIndex(item=>item.name===selectionAnchor.current);
+      const end=items.findIndex(item=>item.name===name);
+      if(start>=0&&end>=0){
+        const rangeItems=items.slice(Math.min(start,end),Math.max(start,end)+1).map(item=>item.name);
+        setSelectedNames(current=>[...new Set([...current,...rangeItems])]);setSelected(name);return;
+      }
+    }
+    selectionAnchor.current=name;
+    setSelected(name);
+    if(multi)setSelectedNames(current=>current.includes(name)?current.filter(x=>x!==name):[...current,name]);
+    else setSelectedNames([name]);
+  };
+  const queuedPaths=items.filter(item=>!item.isDir&&selectedNames.includes(item.name)).map(item=>full(path,item.name));
   const selectedItem=items.find(item=>item.name===selected);
   const renderedItems=items.slice(0,visibleLimit);
   const selectedPath=selected?full(path,selected):"";
@@ -104,8 +126,10 @@ export default function RemoteFilesWorkspace(p:Props){
       <button onClick={()=>navigator.clipboard.writeText(path)} title="Copy current path"><Clipboard size={16}/></button>
     </div>
     <div className="filesActions">
-      <button className="workspacePrimary" disabled={!p.connected||p.busy||p.transferBusy} onClick={p.upload}><Upload size={16}/> Upload file</button>
-      <button disabled={!p.connected||!selectedItem||selectedItem.isDir||p.transferBusy} onClick={()=>p.download(selectedPath)}><Download size={16}/> Download</button>
+      <button className="workspacePrimary" disabled={!p.connected||p.busy} onClick={p.upload}><Upload size={16}/> Upload file</button>
+      <button disabled={!p.connected||!selectedItem||selectedItem.isDir} onClick={()=>p.download(selectedPath)}><Download size={16}/> Download</button>
+      <button disabled={!p.connected||queuedPaths.length===0} onClick={()=>p.queueDownloads(queuedPaths)}><Download size={16}/> Queue selected ({queuedPaths.length})</button>
+      {selectedNames.length>1&&<button onClick={()=>{setSelectedNames([]);setSelected("")}}>Clear selection</button>}
       <button disabled={!p.connected||p.busy} onClick={()=>open(path)}><RefreshCw size={16}/> {p.busy?"Loading…":"Refresh"}</button>
       <button disabled={!p.connected||p.busy||p.mutationBusy} onClick={()=>{
         const name=window.prompt("New folder name (created in "+path+"):");
@@ -127,10 +151,12 @@ export default function RemoteFilesWorkspace(p:Props){
       <PaneResizeHandle label="Remote folder tree width" direction="vertical" value={treeWidth} min={150} max={360}
         defaultValue={defaultPaneSizes.filesTree} onPreview={setTreeWidth} onCommit={n=>{setTreeWidth(n);p.onPaneSize("filesTree",n)}}/>
       <div className="filesTablePane"><div className="paneTitle">{path} <span>{dir?Math.min(items.length,visibleLimit)+" of "+items.length+" entries":"Not loaded"}</span></div>
-        <div className="filesTableWrap"><table className="workspaceTable"><thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Permissions</th><th>Type</th></tr></thead><tbody>
-          {renderedItems.map(item=><tr key={item.name} tabIndex={0} role="row" aria-selected={item.name===selected} className={item.name===selected?"selected":""}
-            onClick={()=>{setSelected(item.name);setFileMenu(null)}}
-            onContextMenu={e=>{e.preventDefault();setSelected(item.name);setFileMenu({name:item.name,x:Math.max(8,Math.min(e.clientX,window.innerWidth-216)),y:Math.max(8,Math.min(e.clientY,window.innerHeight-260))})}}
+        <div className="filesTableWrap"><table className="workspaceTable"><thead><tr><th className="fileSelectHeader"><input type="checkbox" aria-label="Select visible files" checked={renderedItems.length>0&&renderedItems.every(item=>selectedNames.includes(item.name))} onChange={e=>{
+        setSelectedNames(current=>e.target.checked?[...new Set([...current,...renderedItems.map(item=>item.name)])]:current.filter(name=>!renderedItems.some(item=>item.name===name)));
+      }}/></th><th>Name</th><th>Size</th><th>Modified</th><th>Permissions</th><th>Type</th></tr></thead><tbody>
+          {renderedItems.map(item=><tr key={item.name} tabIndex={0} role="row" aria-selected={selectedNames.includes(item.name)} className={selectedNames.includes(item.name)?"selected":""}
+            onClick={e=>{selectItem(item.name,e.ctrlKey||e.metaKey,e.shiftKey);setFileMenu(null)}}
+            onContextMenu={e=>{e.preventDefault();selectItem(item.name,false,false);setFileMenu({name:item.name,x:Math.max(8,Math.min(e.clientX,window.innerWidth-216)),y:Math.max(8,Math.min(e.clientY,window.innerHeight-260))})}}
             onDoubleClick={()=>item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
             onKeyDown={e=>{
               if(e.key==="Enter"){e.preventDefault();setSelected(item.name);item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
@@ -150,6 +176,7 @@ export default function RemoteFilesWorkspace(p:Props){
               else if(e.key==="Delete"){e.preventDefault();deleteFile(item)}
               else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="c"){e.preventDefault();void navigator.clipboard.writeText(full(path,item.name))}
             }}>
+            <td className="fileSelectCell"><input type="checkbox" aria-label={"Select "+item.name} checked={selectedNames.includes(item.name)} onClick={e=>e.stopPropagation()} onChange={e=>{selectItem(item.name,true,false);if(!e.target.checked&&selected===item.name)setSelected("")}}/></td>
             <td><span className="fileName">{item.isDir?<FolderClosed size={15}/>:<FileText size={15}/>} {item.name}</span></td>
             <td>{item.isDir?"—":size(item.sizeBytes)}</td>
             <td>{item.modifiedAt!==null?new Date(item.modifiedAt*1000).toLocaleString():"—"}</td>
@@ -190,12 +217,9 @@ export default function RemoteFilesWorkspace(p:Props){
         </>;
       })()}
     </div>}
-    <div className="wideTransferQueue"><strong>Transfer queue</strong>
-      {p.transferProgress?.session===p.session&&<div className="transferRow"><span>{p.transferProgress.direction==="upload"?"Uploading":"Downloading"} · {p.transferProgress.stage}</span><span>{size(p.transferProgress.bytes)} / {size(p.transferProgress.totalBytes)}</span>
-        <progress value={p.transferProgress.bytes} max={Math.max(1,p.transferProgress.totalBytes||1)}/><button onClick={p.cancelTransfer} disabled={p.transferProgress.stage==="cancelling"}>Cancel</button></div>}
-      {p.transferResult&&<p role="status">{p.transferResult}</p>}
-      {!(p.transferProgress?.session===p.session)&&!p.transferResult&&<p className="transferQueueEmpty">No active transfers. Upload and download activity will appear here.</p>}
-    </div>
+    <TransferQueuePanel jobs={p.transferJobs} paused={p.transferPaused}
+      onPause={p.onPauseQueue} onCancel={p.onCancelJob}
+      onRetry={p.onRetryJob} onClear={p.onClearFinished}/>
     <div className="filesVaultSection">{p.backupPanel}</div>
   </div>;
 }
