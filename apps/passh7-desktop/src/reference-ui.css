@@ -1041,3 +1041,15 @@
 .shell.light .agentRdpHelp>strong{color:#254869}
 .shell.light .agentRdpHelp>p,.shell.light .agentRdpHelp>small{color:#51708d}
 .shell.light .agentRdpHelp>code{color:#2466ad}
+
+
+/* Disconnects are global: a wide workspace hides Terminal's original main. */
+.globalSessionNotice{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  padding:10px 18px;border-bottom:1px solid #976144;background:#35251f;color:#ffe7d0;font-size:12px;line-height:1.55}
+.globalSessionNoticeText,.globalSessionNoticeActions{display:flex;align-items:center;gap:10px;min-width:0}
+.globalSessionNoticeText span{overflow-wrap:anywhere}
+.globalSessionNoticeActions button{border:1px solid #966749;background:#503427;color:#ffeddc;border-radius:6px;padding:6px 11px;font-weight:600}
+.globalSessionNoticeActions button:hover:not(:disabled){background:#694331}
+.shell.light .globalSessionNotice{background:#fff4e8;color:#623c23;border-color:#e3b993}
+.shell.light .globalSessionNoticeActions button{background:#fff;border-color:#d1a57d;color:#623c23}
+@media(max-width:700px){.globalSessionNotice{padding:8px 12px}.globalSessionNoticeText{flex:1 1 100%}}
