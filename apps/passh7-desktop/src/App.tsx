@@ -655,6 +655,10 @@ export default function App(){
     try{if(preferences.rememberWorkspace)localStorage.setItem("passh7.workspace.v1",panel)}catch{/* local UI preference is best effort */}
   },[panel,preferences.rememberWorkspace]);
   const [dockerInventory,setDockerInventory]=useState<{session:string;items:Array<{ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string}>}|null>(null);
+  const dockerContextRef=useRef({session:activeSsh,host:selected});
+  dockerContextRef.current={session:activeSsh,host:selected};
+  const dockerRefreshRequestRef=useRef(0);
+  const dockerCurrent=(session:string,host:string)=>dockerContextRef.current.session===session&&dockerContextRef.current.host===host;
   const [dockerBusy,setDockerBusy]=useState(false);
   const [dockerStats,setDockerStats]=useState<{session:string;items:DockerRuntimeStats[]}|null>(null);
   const [dockerStatsError,setDockerStatsError]=useState<{session:string;message:string}|null>(null);
@@ -665,12 +669,15 @@ export default function App(){
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session)return;
     const request=++dockerDetailsRequestRef.current;
+    const host=session.alias;
     setDockerDetailsError(null);setDockerDetails(null);
     try{
       const data=await inspectDockerContainer(session.id,containerId);
-      if(request===dockerDetailsRequestRef.current)setDockerDetails({session:session.id,containerId,data});
+      if(request===dockerDetailsRequestRef.current&&dockerCurrent(session.id,host))
+        setDockerDetails({session:session.id,containerId,data});
     }catch(error){
-      if(request===dockerDetailsRequestRef.current)setDockerDetailsError({session:session.id,containerId,message:String(error)});
+      if(request===dockerDetailsRequestRef.current&&dockerCurrent(session.id,host))
+        setDockerDetailsError({session:session.id,containerId,message:String(error)});
     }
   };
   const dockerStatsRequestRef=useRef(0);
@@ -680,7 +687,14 @@ export default function App(){
   const [dockerLogs,setDockerLogs]=useState<{session:string;containerId:string;containerName:string;text:string}|null>(null);
   const [dockerLogsError,setDockerLogsError]=useState<{session:string;message:string}|null>(null);
   const dockerLogsRequestRef=useRef(0);
-  useEffect(()=>{dockerLogsRequestRef.current++},[activeSsh,selected]);
+  useEffect(()=>{
+    dockerLogsRequestRef.current++;
+    dockerDetailsRequestRef.current++;
+    dockerStatsRequestRef.current++;
+    dockerRefreshRequestRef.current++;
+    setDockerLogsBusy(false);setDockerBusy(false);setDockerStatsError(null);
+    setDockerDetailsError(null);setDockerError("");setDockerLiveStatus("off");
+  },[activeSsh,selected]);
   const [dockerLiveStatus,setDockerLiveStatus]=useState<"off"|"connecting"|"streaming"|"closed"|"error">("off");
   const [dockerError,setDockerError]=useState("");
   const runDockerAction=async(containerId:string,containerName:string,action:"start"|"stop"|"restart")=>{
@@ -691,16 +705,16 @@ export default function App(){
     setDockerActionBusy(containerId);setDockerError("");setDockerActionStatus(null);
     try{
       const result=await controlDockerContainer(session.id,containerId,action);
-      setDockerActionStatus({session:session.id,text:result});
+      if(dockerCurrent(session.id,session.alias))setDockerActionStatus({session:session.id,text:result});
       try{
         const raw=await listDockerContainers(session.id);
         const items=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean)
           .map(line=>JSON.parse(line) as {ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string});
-        setDockerInventory({session:session.id,items});
+        if(dockerCurrent(session.id,session.alias))setDockerInventory({session:session.id,items});
       }catch(refreshError){
-        setDockerError("Docker "+action+" succeeded, but refreshing container state failed: "+String(refreshError));
+        if(dockerCurrent(session.id,session.alias))setDockerError("Docker "+action+" succeeded, but refreshing container state failed: "+String(refreshError));
       }
-    }catch(error){setDockerError("Docker "+action+" failed: "+String(error))}
+    }catch(error){if(dockerCurrent(session.id,session.alias))setDockerError("Docker "+action+" failed: "+String(error))}
     finally{setDockerActionBusy("")}
   };
   const openDockerShell=async(containerId:string,containerName:string)=>{
@@ -738,13 +752,14 @@ export default function App(){
   const refreshDocker=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setDockerError("Connect to and select an SSH session for this host.");return}
-    const id=session.id;setDockerBusy(true);setDockerError("");setDockerStatsError(null);
+    const id=session.id,host=session.alias,request=++dockerRefreshRequestRef.current;
+    setDockerBusy(true);setDockerError("");setDockerStatsError(null);
     const statsRequest=++dockerStatsRequestRef.current;
-    // Resource sampling is best effort and never blocks the containers inventory.
+    // CPU/RAM sampling is independent of inventory and bound to the same host.
     void listDockerStats(id).then(items=>{
-      if(statsRequest===dockerStatsRequestRef.current)setDockerStats({session:id,items});
+      if(statsRequest===dockerStatsRequestRef.current&&dockerCurrent(id,host))setDockerStats({session:id,items});
     }).catch(error=>{
-      if(statsRequest===dockerStatsRequestRef.current){
+      if(statsRequest===dockerStatsRequestRef.current&&dockerCurrent(id,host)){
         setDockerStats({session:id,items:[]});
         setDockerStatsError({session:id,message:String(error)});
       }
@@ -752,15 +767,25 @@ export default function App(){
     try{
       const raw=await listDockerContainers(id);
       const items=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>JSON.parse(line) as {ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string});
-      setDockerInventory({session:id,items});
-    }catch(e){setDockerError(String(e))}
-    finally{setDockerBusy(false)}
+      if(request===dockerRefreshRequestRef.current&&dockerCurrent(id,host))
+        setDockerInventory({session:id,items});
+    }catch(error){
+      if(request===dockerRefreshRequestRef.current&&dockerCurrent(id,host))setDockerError(String(error));
+    }finally{
+      if(request===dockerRefreshRequestRef.current&&dockerCurrent(id,host))setDockerBusy(false);
+    }
   };
+  // Opening Docker or switching hosts should load the current server immediately.
+  // Auto-refresh is an optional subsequent 15-second poll, not a prerequisite.
   useEffect(()=>{
-    if(panel!=="docker"||!preferences.dockerAutoRefresh)return;
+    if(panel==="docker"&&vaultUnlocked&&activeSsh&&sshTabs.some(tab=>tab.id===activeSsh&&tab.alias===selected))
+      void refreshDocker();
+  },[panel,activeSsh,selected,vaultUnlocked]);
+  useEffect(()=>{
+    if(panel!=="docker"||!preferences.dockerAutoRefresh||!vaultUnlocked||!activeSsh)return;
     const timer=window.setInterval(()=>{void refreshDocker()},15000);
     return ()=>window.clearInterval(timer);
-  },[panel,activeSsh,selected,preferences.dockerAutoRefresh]);
+  },[panel,activeSsh,selected,vaultUnlocked,preferences.dockerAutoRefresh]);
   // A real dedicated SSH exec channel follows Docker output. Subscribe to
   // native events before requesting the stream so its first bytes are never
   // dropped. Changing host, container, workspace or Follow closes the channel.
