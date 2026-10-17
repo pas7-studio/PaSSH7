@@ -34,10 +34,10 @@ Migration layer: apps/passh7-desktop/src/reference-ui.css, loaded after legacy s
 
 | Workstream | Implemented in redesign branch | Remaining |
 | --- | --- | --- |
-| AppShell | single left rail, true active-host header, page navigation | resize/persistence and accessibility audit |
+| AppShell | single left rail, true active-host header, page navigation | comprehensive keyboard/accessibility and screenshot audit |
 | Settings | 12 section categories, bound existing preferences, right information rail | native config/log folders and advanced backend settings |
-| Remote Files | lazy SSH SFTP tree, file metadata, preview, transfers and Vault backups | batch queue, multi-select, image preview, resizing |
-| Docker | resource tabs, state actions, six KPI cards with genuine stats sampling, sanitized lifecycle/volumes/network inspector, live searchable/fullscreen logs | Compose workflows, per-container metrics and Windows live verification |
+| Remote Files | lazy SFTP tree with active-path reveal, file metadata/preview, history, resizeable tree/inspector, context menu and Vault backups | batch queue, multi-select, image preview |
+| Docker | resource tabs, state actions, six native KPIs, sanitized inspector, live/fullscreen logs, persisted split sizes, confirmation-gated shell from selected PTY | Compose workflows, per-container metrics and Windows live verification |
 | Connections | Vault hosts, fingerprint state, connection and terminal actions | host groups/tags, favorites |
 | Snippets | command cards, user-entered command with explicit SSH confirmation | encrypted reusable user snippets, platform-aware templates |
 | Port Forwarding | standalone native SSH forwarding workspace | presets and recovery experience |
@@ -51,6 +51,11 @@ Migration layer: apps/passh7-desktop/src/reference-ui.css, loaded after legacy s
 - Docker stats is a single read-only sample collected using a fixed SSH command; CPU is aggregate container percent, not host CPU. Memory is summed reported container usage, not total host RAM.
 - Docker logs stream on a dedicated native SSH exec channel. Follow is cancelled on host/container/workspace change or Vault lock; static logs remain available for stopped containers.
 - All real connection/authentication paths require independently verified pinned host keys. No mock data can imply a live connection.
+
+### Resize and launch behaviors
+- Files tree, Files inspector, Docker inspector and Docker logs have keyboard-accessible splitters; their sizes are validated, exported and imported as non-secret local preferences. The Appearance settings screen can reset all split sizes.
+- The SFTP file table supports arrows, Enter, F2 and Delete, plus a right-click menu with shared confirmation paths for mutations.
+- The Docker "Open shell" action validates the selected inventory ID and requires explicit confirmation before writing a docker exec command to the authenticated PTY. It may affect another interactive command currently running in the PTY and therefore never executes silently.
 
 ## Required release gates
 
