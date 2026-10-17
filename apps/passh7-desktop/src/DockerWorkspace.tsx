@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from "react";
+import {useEffect,useMemo,useRef,useState} from "react";
 import {listDockerCatalog,listComposeProjectContainers,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
 import PaneResizeHandle from "./PaneResizeHandle";
 import {defaultPaneSizes,type PaneSizes} from "./preferences";
@@ -46,19 +46,35 @@ export default function DockerWorkspace(p:Props){
   const [composeMembers,setComposeMembers]=useState<{session:string;project:string;rows:Record<string,string>[]} |null>(null);
   const [composeBusy,setComposeBusy]=useState(false);
   const [composeError,setComposeError]=useState("");
+  // Results belong to a specific SSH session AND tab. A response arriving
+  // after host/tab navigation must never clear or overwrite the new view.
+  const catalogRequest=useRef(0);
+  const catalogContext=useRef({session:p.session,tab});
+  catalogContext.current={session:p.session,tab};
   const loadCatalog=async(kind:DockerCatalogKind)=>{
     if(!p.connected||!p.session)return;
+    const session=p.session, request=++catalogRequest.current;
     setCatalogBusy(true);setCatalogError("");
     try{
-      const rows=await listDockerCatalog(p.session,kind);
-      setCatalog({session:p.session,kind,rows});
-    }catch(error){setCatalogError("Could not list Docker "+kind+": "+String(error))}
-    finally{setCatalogBusy(false)}
+      const rows=await listDockerCatalog(session,kind);
+      if(request===catalogRequest.current&&catalogContext.current.session===session&&catalogContext.current.tab===kind)
+        setCatalog({session,kind,rows});
+    }catch(error){
+      if(request===catalogRequest.current&&catalogContext.current.session===session&&catalogContext.current.tab===kind)
+        setCatalogError("Could not list Docker "+kind+": "+String(error));
+    }finally{
+      if(request===catalogRequest.current)setCatalogBusy(false);
+    }
   };
   useEffect(()=>{
+    catalogRequest.current++;
+    setCatalogBusy(false);setCatalogError("");setComposeError("");
+    // Keep only the selected session's cached record; never show stale tabs.
     if(tab==="containers"||!p.connected)return;
     if(catalog?.session===p.session&&catalog.kind===tab)return;
     void loadCatalog(tab);
+    // Requests are invalidated when this tab/session is left.
+    return ()=>{catalogRequest.current++};
   },[tab,p.session,p.connected]);
   const displayCatalog=catalog?.session===p.session&&catalog.kind===tab?catalog.rows:null;
   const activeComposeProject=tab==="compose"&&displayCatalog?.some(row=>row.Name===composeSelected)
@@ -66,7 +82,7 @@ export default function DockerWorkspace(p:Props){
   useEffect(()=>{
     if(!p.connected||!p.session||!activeComposeProject)return;
     let cancelled=false;
-    setComposeBusy(true);setComposeError("");
+    setComposeBusy(true);setComposeError("");setComposeMembers(null);
     void listComposeProjectContainers(p.session,activeComposeProject).then(rows=>{
       if(!cancelled)setComposeMembers({session:p.session,project:activeComposeProject,rows});
     }).catch(error=>{if(!cancelled)setComposeError(String(error))})
@@ -84,6 +100,10 @@ export default function DockerWorkspace(p:Props){
   };
 
   const [selected,setSelected]=useState("");
+  useEffect(()=>{
+    setSelected("");setComposeSelected("");setComposeMembers(null);setComposeBusy(false);
+    setComposeError("");setCatalog(null);setCatalogBusy(false);setCatalogError("");
+  },[p.session]);
   const [filter,setFilter]=useState<"all"|"running"|"stopped">("all");
   const [sortBy,setSortBy]=useState<"name"|"cpu"|"memory">("name");
   const [descending,setDescending]=useState(false);
