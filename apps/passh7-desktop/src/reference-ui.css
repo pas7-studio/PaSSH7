@@ -389,3 +389,39 @@
 @media(prefers-reduced-motion:reduce){
   .paneResizeHandle,.paneResizeHandleGrip{transition:none}
 }
+
+
+/* Fast file actions — purpose-built context menu, not operating system shell. */
+.fileContextMenu{
+  position:fixed;z-index:70;width:204px;padding:6px;
+  display:flex;flex-direction:column;gap:2px;
+  color:var(--fg);
+  background:linear-gradient(155deg,#132a43,#0d1d31);
+  border:1px solid #456889;border-radius:9px;
+  box-shadow:0 18px 45px #0009,0 4px 12px #0006;
+}
+.fileMenuTitle{
+  padding:9px 10px;color:#b8cce2;border-bottom:1px solid #28425d;
+  font-size:11px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.fileContextMenu button{
+  display:flex;align-items:center;justify-content:flex-start;gap:10px;
+  width:100%;min-height:34px;padding:8px 9px;background:transparent;
+  color:#d8e7fa;text-align:left;border:0;border-radius:5px;font-size:11px;
+}
+.fileContextMenu button:hover:not(:disabled){background:#194775;color:white}
+.fileContextMenu button:disabled{opacity:.43}
+.fileContextMenu button>span{margin-left:auto;font-size:10px;color:#819dba}
+.fileContextMenu button.dangerItem{color:#ff9da9}
+.fileContextMenu button.dangerItem:hover:not(:disabled){background:#552336}
+.fileMenuDivider{height:1px;background:#2c4360;margin:4px 2px}
+.filesTablePane tr[tabindex="0"]:focus-visible{outline:2px solid #60aaff;outline-offset:-2px}
+.dockerInspector .inspectorActions{display:flex;flex-wrap:wrap}
+.treeLoading{animation:passh7-tree-spinner .7s linear infinite}
+@keyframes passh7-tree-spinner{to{transform:rotate(360deg)}}
+.shell.light .fileContextMenu{background:#fff;border-color:#bdcedf;color:#2d415d;box-shadow:0 12px 28px #1c35502b}
+.shell.light .fileMenuTitle{color:#3f5b7b;border-color:#d5e3f1}
+.shell.light .fileContextMenu button{color:#304a67}
+.shell.light .fileContextMenu button:hover:not(:disabled){background:#deedff;color:#20466f}
+.shell.light .fileContextMenu button.dangerItem{color:#a82542}
+@media(prefers-reduced-motion:reduce){.treeLoading{animation:none}}
