@@ -1,6 +1,7 @@
 import {useCallback,useRef} from "react";
 import TerminalView from "./TerminalView";
 import RemoteFilesWorkspace from "./RemoteFilesWorkspace";
+import useSftpTransferQueue from "./useSftpTransferQueue";
 import DockerWorkspace from "./DockerWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
 import AgentWorkspace from "./AgentWorkspace";
@@ -10,7 +11,7 @@ import PortForwardingWorkspace from "./PortForwardingWorkspace";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -305,13 +306,20 @@ export default function App(){
   const [sftpError,setSftpError]=useState("");
   const [sftpPreview,setSftpPreview]=useState<{session:string;path:string;body:string}|null>(null);
   const [sftpPreviewBusy,setSftpPreviewBusy]=useState(false);
-  const [sftpTransferBusy,setSftpTransferBusy]=useState(false);
-  const [sftpTransferProgress,setSftpTransferProgress]=useState<{
-    session:string;id:string;direction:"upload"|"download";
-    stage:"selecting"|"started"|"progress"|"cancelling";
-    bytes:number;totalBytes:number|null
-  }|null>(null);
-  const [sftpTransferResult,setSftpTransferResult]=useState<{session:string;text:string}|null>(null);
+  const transferSessionRef=useRef(activeSsh);
+  transferSessionRef.current=activeSsh;
+  const transferQueue=useSftpTransferQueue((session,directory)=>{
+    // A finished upload must not replace another host's directory listing.
+    void listSftpDirectory(session,directory).then(items=>{
+      if(transferSessionRef.current===session){
+        setSftpEntries({session,path:directory,items});
+        setSftpPath(directory);
+      }
+    }).catch(error=>{
+      if(transferSessionRef.current===session)setSftpError("Upload succeeded; could not refresh folder: "+String(error));
+    });
+  });
+  const sftpTransferBusy=transferQueue.active;
   const [vaultSnapshotHistory,setVaultSnapshotHistory]=useState<{
     session:string;directory:string;entries:SftpEntry[]
   }|null>(null);
@@ -486,65 +494,18 @@ export default function App(){
     finally{setVaultBackupBusy(false)}
   };
 
-  const cancelActiveTransfer=async()=>{
-    const current=sftpTransferProgress;
-    if(!current||current.stage==="selecting"||current.stage==="cancelling")return;
-    setSftpTransferProgress(prev=>prev?.id===current.id?{...prev,stage:"cancelling"}:prev);
-    try{await cancelSftpTransfer(current.session,current.id)}
-    catch(e){setSftpError("Could not cancel transfer: "+String(e))}
-  };
-  const transferSftp=async(direction:"upload"|"download",path?:string)=>{
+  const enqueueSftpTransfer=(direction:"upload"|"download",paths:string[]=[])=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Select a connected SSH session before transferring files.");return}
-    if(sftpTransferBusy)return;
-    if(preferences.confirmTransfer && !window.confirm(
-      direction==="upload"?"Upload a local file to "+(sftpEntries?.path||sftpPath)+" on "+session.alias+"?":
-      "Download remote file "+(path||"")+" from "+session.alias+"?"
-    ))return;
-    const transferId=crypto.randomUUID();
-    setSftpTransferBusy(true);setSftpError("");setSftpTransferResult(null);
-    setSftpTransferProgress({session:session.id,id:transferId,direction,stage:"selecting",bytes:0,totalBytes:null});
-    let unlisten:(()=>void)|null=null;
-    try{
-      // Install the progress listener before opening the native picker. This
-      // avoids missing the first event when the selected file is small.
-      unlisten=await listen<SftpTransferEvent>("passh7:sftp-transfer",event=>{
-        const value=event.payload;
-        if(value.sessionId!==session.id||value.transferId!==transferId)return;
-        setSftpTransferProgress(previous=>previous?.id===transferId&&previous.stage!=="cancelling"
-          ? {...previous,stage:value.stage,bytes:value.bytes,totalBytes:value.totalBytes}
-          :previous);
-      });
-      const targetDir=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
-      const result=direction==="download"
-        ? await downloadSftpFile(session.id,path||"",transferId)
-        : await uploadSftpFile(session.id,targetDir,transferId);
-      if(result){
-        setSftpTransferResult({session:session.id,text:result});
-        if(direction==="upload"){
-          // Upload completion is independent of a subsequent directory refresh.
-          try{
-            const items=await listSftpDirectory(session.id,targetDir);
-            setSftpEntries({session:session.id,path:targetDir,items});
-            setSftpPath(targetDir);
-          }catch(refreshError){
-            setSftpError("Upload succeeded, but directory refresh failed: "+String(refreshError));
-          }
-        }
-      }
-    }catch(e){
-      const reason=String(e);
-      if(/cancelled by user/i.test(reason)){
-        setSftpTransferResult({session:session.id,text:"Transfer cancelled. Remote partial-file cleanup is best effort."});
-      }else{
-        setSftpError((direction==="download"?"Download":"Upload")+" failed: "+reason);
-      }
-    }
-    finally{
-      unlisten?.();
-      setSftpTransferProgress(previous=>previous?.id===transferId?null:previous);
-      setSftpTransferBusy(false);
-    }
+    const targetDir=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
+    const items=direction==="download"?paths.filter(Boolean):[targetDir];
+    if(!items.length)return;
+    if(preferences.confirmTransfer&&!window.confirm(direction==="upload"
+      ?"Add a local-file upload to "+targetDir+" on "+session.alias+"?\n\nA system file picker opens when the job starts."
+      :"Queue "+items.length+" remote file(s) from "+session.alias+"?\n\nEach download will open a native Save dialog. Existing local files will not be overwritten."))return;
+    const count=transferQueue.enqueue({session:session.id,host:session.alias,direction,paths:items});
+    if(count<items.length)setSftpError("Only "+count+" of "+items.length+" transfers were queued. Finish or clear existing jobs before adding more.");
+    else setSftpError("");
   };
   const readSftpPreview=async(path:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -1133,13 +1094,16 @@ export default function App(){
  filter={sftpFilter} setFilter={setSftpFilter}
  sort={sftpOrder} setSort={setSftpOrder} showHidden={preferences.sftpShowHidden}
  navigate={path=>void browseSftp(path)}
- upload={()=>void transferSftp("upload")}
- download={path=>void transferSftp("download",path)}
+ upload={()=>enqueueSftpTransfer("upload")}
+ download={path=>enqueueSftpTransfer("download",[path])}
+ queueDownloads={paths=>enqueueSftpTransfer("download",paths)}
  readPreview={path=>void readSftpPreview(path)}
  preview={sftpPreview} previewBusy={sftpPreviewBusy}
- transferBusy={sftpTransferBusy} transferProgress={sftpTransferProgress}
- transferResult={sftpTransferResult?.session===activeSsh?sftpTransferResult.text:null}
- cancelTransfer={()=>void cancelActiveTransfer()}
+ transferBusy={sftpTransferBusy}
+ transferJobs={transferQueue.jobs} transferPaused={transferQueue.paused}
+ onPauseQueue={transferQueue.setQueuePaused}
+ onCancelJob={id=>void transferQueue.cancel(id)}
+ onRetryJob={transferQueue.retry} onClearFinished={transferQueue.clearFinished}
  mutationBusy={sftpMutationBusy}
  onMkdir={name=>void mutateRemoteSftp("mkdir",name)}
  onDelete={(name,isDir)=>void mutateRemoteSftp("delete",name,isDir)}
