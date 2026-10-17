@@ -6,7 +6,7 @@ import {closeSshSession,readySshSession,resizeSshSession,writeSshSession} from "
 import "@xterm/xterm/css/xterm.css";
 import {loadPreferences,type AppPreferences} from "./preferences";
 
-type Props={id:string;active:boolean;onClosed:(id:string,detail?:string)=>void};
+type Props={id:string;active:boolean;layoutKey?:string;onClosed:(id:string,detail?:string)=>void};
 const fontStack=(choice:AppPreferences["terminalFontFamily"]):string=>{
   switch(choice){
     case "consolas":return "Consolas, monospace";
@@ -85,7 +85,7 @@ function createInputSender(id:string,terminal:Terminal,isLive:()=>boolean){
   }};
 }
 
-export default function TerminalView({id,active,onClosed}:Props){
+export default function TerminalView({id,active,layoutKey,onClosed}:Props){
   const container=useRef<HTMLDivElement>(null);
   const fitRef=useRef<FitAddon|null>(null);
   const termRef=useRef<Terminal|null>(null);
@@ -215,6 +215,6 @@ export default function TerminalView({id,active,onClosed}:Props){
       const input=container.current.querySelector("textarea");
       if(input instanceof HTMLElement)input.focus();
     }
-  },[active,id]);
+  },[active,id,layoutKey]);
   return <div ref={container} className="liveTerminal" style={{display:active?"block":"none"}} aria-label="Interactive SSH terminal"/>;
 }
