@@ -1,9 +1,14 @@
 import {test,expect} from "@playwright/test";
 
 const screens=[
-  {name:"settings",heading:"Settings"},
+  {name:"connections",heading:"Connections"},
+  {name:"terminal",heading:"dev-server"},
   {name:"files",heading:"Remote Files"},
-  {name:"docker",heading:"Docker"}
+  {name:"docker",heading:"Docker"},
+  {name:"ports",heading:"Port Forwarding"},
+  {name:"snippets",heading:"Snippets"},
+  {name:"agent",heading:"AI Agents"},
+  {name:"settings",heading:"Settings"}
 ] as const;
 const viewports=[
   {name:"desktop-1440",width:1440,height:900},
@@ -14,8 +19,8 @@ const viewports=[
 // The npm-packaged Chromium is designed for serverless execution and can
 // occasionally fail when Playwright starts a new process for every test.
 // One browser/page traverses all fixtures, minimizing runner resource usage.
-test("reference layouts: nine screenshots and keyboard interactions",async({page},info)=>{
-  test.setTimeout(120000);
+test("reference layouts: all eight workspaces across three viewports and keyboard interactions",async({page},info)=>{
+  test.setTimeout(220000);
   const failures:string[]=[];
   page.on("pageerror",error=>failures.push(error.message));
 
@@ -25,7 +30,7 @@ test("reference layouts: nine screenshots and keyboard interactions",async({page
         await page.setViewportSize({width:viewport.width,height:viewport.height});
         await page.goto("/?__reference=1&screen="+screen.name,{waitUntil:"domcontentloaded"});
         await expect(page.locator(".referenceFixtureLabel")).toContainText("NOT A REAL SSH CONNECTION");
-        await expect(page.locator(".widePageTitle h1")).toHaveText(screen.heading);
+        await expect(page.locator(screen.name==="terminal"?".referenceTerminalMain .identity h1":".widePageTitle h1")).toHaveText(screen.heading);
         await expect(page.locator(".topHostIdentity strong")).toHaveText("dev-server");
         if(screen.name==="docker"){
           await expect(page.locator(".dockerMetrics>div")).toHaveCount(6);
@@ -37,9 +42,23 @@ test("reference layouts: nine screenshots and keyboard interactions",async({page
           await page.locator(".filesTablePane .workspaceTable tbody tr").filter({hasText:"README.md"}).click();
           await expect(page.locator(".fileCodePreview pre")).toContainText("Development-only fixture");
           await expect(page.locator(".transferQueuePanel")).toBeVisible();
-        }else{
+        }else if(screen.name==="settings"){
           await expect(page.locator(".settingsNav button")).toHaveCount(12);
           await expect(page.locator(".settingsHelp")).toBeVisible();
+        }else if(screen.name==="connections"){
+          await expect(page.locator(".connectionsTableWrap tbody tr")).toHaveCount(3);
+          await expect(page.locator(".connectionsInspector")).toBeVisible();
+        }else if(screen.name==="ports"){
+          await expect(page.locator(".forwardTableWrap tbody tr")).toHaveCount(2);
+          await expect(page.locator(".forwardRoutePreview")).toBeVisible();
+        }else if(screen.name==="snippets"){
+          await expect(page.locator(".snippetCard")).toHaveCount(9);
+          await expect(page.locator(".snippetsRunner")).toBeVisible();
+        }else if(screen.name==="agent"){
+          await expect(page.locator(".agentCard")).toHaveCount(3);
+          await expect(page.locator(".agentWorkspaceSide")).toBeVisible();
+        }else{
+          await expect(page.locator(".referenceTerminalText")).toContainText("docker ps");
         }
         const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
         expect(overflow,"viewport-level horizontal overflow").toBeLessThanOrEqual(2);
@@ -96,6 +115,15 @@ test("reference layouts: nine screenshots and keyboard interactions",async({page
     await expect(page.locator(".sidebar")).toHaveCount(0);
     await page.getByRole("button",{name:"Expand host sidebar"}).click();
     await expect(page.locator(".sidebar")).toBeVisible();
+  });
+
+  await test.step("filter saved Connections and Snippets",async()=>{
+    await page.goto("/?__reference=1&screen=connections");
+    await page.getByRole("button",{name:/Trusted/}).filter({hasText:"Trusted"}).click();
+    await expect(page.locator(".connectionsTableWrap tbody tr")).toHaveCount(2);
+    await page.goto("/?__reference=1&screen=snippets");
+    await page.getByRole("button",{name:/Docker 3/}).click();
+    await expect(page.locator(".snippetCard")).toHaveCount(3);
   });
 
   expect(failures,"uncaught React/browser errors").toEqual([]);
