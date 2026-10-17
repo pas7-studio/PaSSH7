@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState,type ReactNode} from "react";
+import {WorkspaceHeader} from "./WorkspaceChrome";
 import {Activity,Bell,Bot,ChevronDown,Clipboard,Container,Download,FolderClosed,Info,Keyboard,LockKeyhole,Monitor,Palette,RefreshCw,Settings2,ShieldCheck,TerminalSquare,Upload} from "lucide-react";
 import {type AppPreferences,defaultPreferences,defaultPaneSizes,validatePreferences} from "./preferences";
 import type {BuildInfo} from "./backend";
@@ -91,7 +92,8 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
     setNotice("Section preferences reset.");
   };
   return <div className="widePage settingsPage">
-    <div className="widePageTitle"><Settings2 size={34}/><div><h1>Settings</h1><p>Configure your SSH environment, preferences, and application settings.</p></div></div>
+    <WorkspaceHeader icon={Settings2} title="Settings"
+      description="Configure the terminal, workspaces, SSH preferences and your local application."/>
     <div className="settingsLayout">
       <nav className="settingsNav" aria-label="Settings categories">{sections.map(({id,label,hint,Icon})=>
         <button type="button" key={id} aria-current={section===id?"page":undefined} className={section===id?"selected":""} onClick={()=>{setSection(id);setNotice("")}}>
