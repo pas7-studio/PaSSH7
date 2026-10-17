@@ -1,5 +1,7 @@
 import {useEffect,useMemo,useState} from "react";
 import {listDockerCatalog,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
+import PaneResizeHandle from "./PaneResizeHandle";
+import {defaultPaneSizes,type PaneSizes} from "./preferences";
 import {Clipboard,Container,Cpu,Download,HardDrive,Layers,Maximize2,Minimize2,Network,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
 
 export type ContainerRow={ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string};
@@ -8,6 +10,7 @@ type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|nu
   details:{session:string;containerId:string;data:DockerDetails}|null;
   detailsError:{session:string;containerId:string;message:string}|null;
   onInspect:(containerId:string)=>void;
+  paneSizes:PaneSizes;onPaneSize:(key:keyof PaneSizes,value:number)=>void;
   loading:boolean;error:string;actionStatus:string|null;actionBusy:string;
   logs:Logs;logsBusy:boolean;logsError:string;tail:number;follow:boolean;
   liveStatus:"off"|"connecting"|"streaming"|"closed"|"error";
@@ -61,6 +64,10 @@ export default function DockerWorkspace(p:Props){
   const [wrap,setWrap]=useState(false);
   const [level,setLevel]=useState<"all"|"error"|"warn">("all");
   const [logsFullscreen,setLogsFullscreen]=useState(false);
+  const [inspectorWidth,setInspectorWidth]=useState(p.paneSizes.dockerInspector);
+  const [logsHeight,setLogsHeight]=useState(p.paneSizes.dockerLogs);
+  useEffect(()=>setInspectorWidth(p.paneSizes.dockerInspector),[p.paneSizes.dockerInspector]);
+  useEffect(()=>setLogsHeight(p.paneSizes.dockerLogs),[p.paneSizes.dockerLogs]);
   const [inspectorTab,setInspectorTab]=useState<"details"|"mounts"|"network">("details");
   const running=(p.items||[]).filter(isRunning).length;
   const stopped=(p.items||[]).length-running;
@@ -93,7 +100,8 @@ export default function DockerWorkspace(p:Props){
       <div title="One read-only docker stats sample. Memory sums the container usage values, not overall server RAM."><small><HardDrive size={17}/> Container memory</small><strong>{totalMemory===null?"—":readableMemory(totalMemory)}</strong><span>{p.statsError?"Stats unavailable":p.stats?"Reported container usage":"Sampling remote Docker…"}</span></div>
     </div>
     <div className="dockerResourceTabs" role="tablist" aria-label="Docker resources">{(["containers","images","volumes","networks"] as const).map(kind=><button type="button" role="tab" aria-selected={tab===kind} className={tab===kind?"active":""} key={kind} onClick={()=>setTab(kind)}>{kind[0].toUpperCase()+kind.slice(1)} {tab===kind&&tab!=="containers"&&displayCatalog?"("+displayCatalog.length+")":""}</button>)}</div>
-    {tab==="containers"?<><div className="dockerWorkspaceGrid"><section className="dockerContainersPane">
+    {tab==="containers"?<><div className="dockerWorkspaceGrid resizableDockerGrid"
+      style={{gridTemplateColumns:`minmax(250px,1fr) 7px minmax(265px,${inspectorWidth}px)`}}><section className="dockerContainersPane">
       <div className="dockerToolbar"><div className="filesSearch"><Search size={15}/><input placeholder="Search containers…" value={search} onChange={e=>setSearch(e.target.value)} aria-label="Search containers"/></div>
         <select aria-label="Container state filter" value={filter} onChange={e=>setFilter(e.target.value as typeof filter)}><option value="all">All containers</option><option value="running">Running</option><option value="stopped">Stopped / other</option></select>
         <button onClick={p.onRefresh} disabled={!p.connected||p.loading}><RefreshCw size={15}/>{p.loading?" Loading…":" Refresh"}</button>
@@ -110,6 +118,9 @@ export default function DockerWorkspace(p:Props){
       {!p.connected&&<div className="workspaceEmpty">Connect to {p.host} to inspect remote Docker.</div>}
       {p.connected&&!p.items&&<div className="workspaceEmpty">Click Refresh to load containers from the remote host. Your SSH user needs Docker permissions.</div>}
       </div></section>
+      <PaneResizeHandle label="Docker container inspector width" direction="vertical"
+        value={inspectorWidth} min={265} max={520} invert defaultValue={defaultPaneSizes.dockerInspector}
+        onPreview={setInspectorWidth} onCommit={n=>{setInspectorWidth(n);p.onPaneSize("dockerInspector",n)}}/>
       <aside className="dockerInspector"><div className="paneTitle">CONTAINER DETAILS</div>
         {chosen&&chosen.ID?<><div className="inspectorFile"><Container size={30}/><strong>{chosen.Names||chosen.ID.slice(0,12)}</strong><span className={"dockerStatus "+(isRunning(chosen)?"running":"stopped")}>{chosen.Status||chosen.State}</span></div>
           <div className="inspectorActions">
@@ -144,7 +155,11 @@ export default function DockerWorkspace(p:Props){
         </>:<div className="workspaceEmpty">Select a container to inspect its details.</div>}
       </aside>
     </div>
-    <section className={"dockerLogViewer "+(logsFullscreen?"dockerLogsFullscreen":"")}><div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
+    <PaneResizeHandle label="Container logs panel height" direction="horizontal" value={logsHeight}
+      min={240} max={620} invert defaultValue={defaultPaneSizes.dockerLogs}
+      onPreview={setLogsHeight} onCommit={n=>{setLogsHeight(n);p.onPaneSize("dockerLogs",n)}}/>
+    <section className={"dockerLogViewer "+(logsFullscreen?"dockerLogsFullscreen":"")} style={{height:logsFullscreen?undefined:logsHeight}}>
+      <div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
       <select aria-label="Container for log viewer" value={p.logs?.session===p.session?p.logs.containerId:""} onChange={e=>{const row=p.items?.find(item=>item.ID===e.target.value);if(row?.ID)p.onLogs(row.ID,row.Names||row.ID)}} disabled={!p.connected||p.logsBusy}>
         <option value="">Select container…</option>{(p.items||[]).map(item=>item.ID?<option key={item.ID} value={item.ID}>{item.Names||item.ID.slice(0,12)}</option>:null)}
       </select>
