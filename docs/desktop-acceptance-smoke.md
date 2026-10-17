@@ -105,7 +105,9 @@ during this checklist. Use a throwaway identity and Docker container.
 | AGENT-UI-02 | Lock Vault or choose an unconnected host and open AI Agent | Clearly says no active authenticated SSH session; checking and launching are disabled; Open Terminal takes user to connection flow |
 | AGENT-UI-03 | Connect to a host with Codex/Claude/OpenCode in an interactive shell; run Check installed tools | Results are scoped to the *active session*; versions are shown where available; failures are actionable, never represented as successful detection |
 | AGENT-UI-04 | Remote CLI is in interactive PATH but not found by version probe | Agent is still selectable and Launch remains possible; the UI explains the probe limitation |
-| AGENT-UI-05 | Choose an agent and press Launch; accept confirmation | Exactly the selected CLI command is written to the currently authenticated PTY; UI switches to Terminal, with no second SSH connection or fake MCP sandbox |
+| AGENT-UI-05 | Choose an agent and press Launch; accept confirmation | Exactly the selected CLI command is written to the currently authenticated PTY; AI Agents stays open and the live interactive terminal shows the result, without opening a second SSH connection or fake MCP sandbox |
+| AGENT-UI-08 | In AI Agents, type a command into the embedded console, use Focus console, switch SSH session and return to Terminal | Only the selected authenticated PTY receives input; output is interactive and ANSI/TUI-capable; switching workspaces does not close SSH, and no duplicate remote agent process is spawned |
+| AGENT-UI-09 | Lock Vault or disconnect while AI Agents embedded terminal is running | Terminal disappears, old session events cannot be routed to another host, and launch/check actions disable immediately |
 | AGENT-UI-06 | Have two sessions for the same host and select one in AI Agent | Launch targets the explicitly selected session; no command is written to a different host |
 | AGENT-UI-07 | Copy SSH context; inspect remote terminal and settings | Context contains non-secret host and route information only; no passwords, private keys or Vault secrets are copied or supplied to the agent |
 
