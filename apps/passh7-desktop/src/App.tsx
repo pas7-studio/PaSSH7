@@ -870,6 +870,11 @@ export default function App(){
     let disposed=false;
     let finished=false;
     let streamId="";
+    // The native producer may emit its first log events before start() returns.
+    // Hold them by stream ID until the acknowledgement identifies OUR stream.
+    // Old follow streams for the same container must never contaminate a new one.
+    const preAck=new Map<string,{events:DockerLogEvent[];bytes:number}>();
+    let initialTruncated=false;
     let unsubscribe:(()=>void)|undefined;
     let flushTimer:number|undefined;
     let pending="";
@@ -883,11 +888,19 @@ export default function App(){
         ?{...previous,text:(previous.text+chunk).slice(-1_500_000)}:previous);
     };
     void (async()=>{
-      unsubscribe=await listen<DockerLogEvent>("passh7:docker-log",event=>{
-        if(disposed)return;
-        const data=event.payload;
-        if(data.sessionId!==sessionId||data.containerId!==containerId||
-           (streamId&&data.streamId!==streamId))return;
+      const onDockerLog=(data:DockerLogEvent)=>{
+        if(disposed||data.sessionId!==sessionId||data.containerId!==containerId)return;
+        if(!streamId){
+          const buffered=preAck.get(data.streamId)||{events:[],bytes:0};
+          const bytes=data.data?.length||0;
+          if(buffered.events.length<256&&buffered.bytes+bytes<=256*1024){
+            buffered.events.push(data);
+            buffered.bytes+=bytes;
+            preAck.set(data.streamId,buffered);
+          }else initialTruncated=true;
+          return;
+        }
+        if(data.streamId!==streamId)return;
         if(data.kind==="data"&&data.data){
           const binary=atob(data.data);
           const bytes=new Uint8Array(binary.length);
@@ -904,10 +917,17 @@ export default function App(){
             setDockerLogsError({session:sessionId,message:data.detail||"Docker live log channel failed"});
           }else setDockerLiveStatus("closed");
         }
-      });
+      };
+      unsubscribe=await listen<DockerLogEvent>("passh7:docker-log",event=>onDockerLog(event.payload));
       if(disposed){unsubscribe();unsubscribe=undefined;return;}
       const opened=await startDockerLogStream(sessionId,containerId,0);
       streamId=opened;
+      const queued=preAck.get(opened)?.events||[];
+      preAck.clear();
+      for(const event of queued)onDockerLog(event);
+      if(initialTruncated&&queued.length){
+        setDockerLogsError({session:sessionId,message:"Some initial live log events exceeded the display buffer; refresh recent logs if needed."});
+      }
       if(disposed){
         void stopDockerLogStream(sessionId,opened).catch(()=>{});
       }else if(!finished)setDockerLiveStatus("streaming");
