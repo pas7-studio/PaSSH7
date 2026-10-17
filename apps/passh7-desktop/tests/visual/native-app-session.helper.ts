@@ -18,6 +18,9 @@ export async function runNativeAppSession(page:Page){
     const resized:Array<{id:string;cols:number;rows:number}>=[];
     const ready:string[]=[];
     const exports:Array<{containerName:string;contents:string}>=[];
+    const delayedSftp:Array<()=>void>=[];
+    const file=(name:string)=>({name,isDir:false,sizeBytes:100,modifiedAt:null,
+      unixPermissions:null,ownerId:null,groupId:null});
     const sessions=[{id:"session-a",alias:"linux-test"},{id:"session-b",alias:"linux-test"},{id:"session-c",alias:"win-test"}];
     const hosts=[
       {alias:"linux-test",hostname:"192.0.2.10",port:22,username:"tester",identityAlias:"",hostKeyPinned:true,
@@ -34,6 +37,12 @@ export async function runNativeAppSession(page:Page){
         case "vault_list_identities":return [];
         case "ssh_session_list":return sessions;
         case "ssh_session_forward_list":return [];
+        case "ssh_session_sftp_list":
+          if(args.id==="session-b")return new Promise(resolve=>{
+            delayedSftp.push(()=>resolve([file("from-linux.txt")]));
+          });
+          if(args.id==="session-c")return [file("from-windows.txt")];
+          return [file("from-first-terminal.txt")];
         case "ssh_session_close":
           // This session remains alive when the backend rejects its Close.
           if(args.id==="session-b")throw Error("SSH Close rejected by test backend");
@@ -81,6 +90,8 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
       writes,resized,ready,exports,
+      pendingSftp(){return delayedSftp.length;},
+      releaseSftp(){for(const done of delayedSftp.splice(0))done();},
       emit(event:string,payload:unknown){
         for(const [id,listener] of activeListeners){
           if(listener.event===event)callbacks.get(listener.callbackId)?.({event,id,payload});
@@ -167,6 +178,25 @@ export async function runNativeAppSession(page:Page){
     (window as unknown as {__mockSshBridge:{exports:Array<{containerName:string;contents:string}>}}).__mockSshBridge.exports
   );
   expect(saved).toEqual([{containerName:"api-test",contents:"2026-10-17 ERROR warning"}]);
+
+  // Directory enumeration can finish after switching SSH accounts. Block
+  // Linux SFTP, load the Windows folder, and release Linux responses late.
+  // The late directory results must not replace the selected Windows files.
+  await page.locator(".workspaceNav button").filter({hasText:"Remote Files"}).click();
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{pendingSftp:()=>number}})
+      .__mockSshBridge.pendingSftp()
+  )).toBeGreaterThan(0);
+  await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
+  await expect(page.locator(".filesTableScroll")).toContainText("from-windows.txt");
+  await page.evaluate(()=>{
+    (window as unknown as {__mockSshBridge:{releaseSftp:()=>void}})
+      .__mockSshBridge.releaseSftp();
+  });
+  await expect(page.locator(".filesTableScroll")).not.toContainText("from-linux.txt");
+  await expect(page.locator(".filesTableScroll")).toContainText("from-windows.txt");
+  await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
+  await page.locator(".workspaceNav button").filter({hasText:"Docker"}).click();
 
   // Switch host while Docker has logs from the prior host: no cross-host
   // log output, then simulate an unsolicited SSH close from the native event
