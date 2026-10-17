@@ -17,6 +17,7 @@ export async function runNativeAppSession(page:Page){
     const writes:Array<{id:string;data:string}>=[];
     const resized:Array<{id:string;cols:number;rows:number}>=[];
     const ready:string[]=[];
+    let localTouches=0;
     const delayedWrites:Array<()=>void>=[];
     let dockerListFailure="";
     const exports:Array<{containerName:string;contents:string}>=[];
@@ -35,6 +36,7 @@ export async function runNativeAppSession(page:Page){
     const invoke:MockInvoke=async(command,args={})=>{
       switch(command){
         case "vault_exists":case "vault_status":return true;
+        case "vault_touch":localTouches++;return true;
         case "vault_list_hosts":return hosts;
         case "vault_list_identities":return [];
         case "ssh_session_list":return sessions;
@@ -97,6 +99,7 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
       writes,resized,ready,exports,
+      localTouches(){return localTouches;},
       failDockerList(message:string){dockerListFailure=message;},
       pendingWrites(){return delayedWrites.length;},
       releaseWrites(){for(const done of delayedWrites.splice(0))done();},
@@ -112,6 +115,10 @@ export async function runNativeAppSession(page:Page){
   await page.goto("/",{waitUntil:"domcontentloaded"});
   await expect(page.locator(".workspaceNav")).toBeVisible();
   await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{localTouches:()=>number}})
+      .__mockSshBridge.localTouches()
+  )).toBeGreaterThan(0);
   await expect(page.locator(".sshTab")).toHaveCount(3);
   await expect(page.locator(".terminalDockSlot .xterm")).toHaveCount(1);
   await expect(page.locator(".terminalParked .xterm")).toHaveCount(2);
