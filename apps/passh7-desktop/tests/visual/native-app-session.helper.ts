@@ -195,7 +195,26 @@ export async function runNativeAppSession(page:Page){
   });
   await expect(page.locator(".filesTableWrap")).not.toContainText("from-linux.txt");
   await expect(page.locator(".filesTableWrap")).toContainText("from-windows.txt");
+
+  // Successful directory navigation is retained per PTY, not shared between
+  // Linux and Windows SSH hosts. The next switch restores the Linux path.
   await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
+  const remotePath=page.getByRole("textbox",{name:"Remote path"});
+  await remotePath.fill("/srv/code");
+  await remotePath.press("Enter");
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{pendingSftp:()=>number}})
+      .__mockSshBridge.pendingSftp()
+  )).toBeGreaterThan(0);
+  await page.evaluate(()=>{
+    (window as unknown as {__mockSshBridge:{releaseSftp:()=>void}})
+      .__mockSshBridge.releaseSftp();
+  });
+  await expect(page.locator(".filesTableWrap")).toContainText("from-linux.txt");
+  await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
+  await expect(remotePath).toHaveValue(".");
+  await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
+  await expect(remotePath).toHaveValue("/srv/code");
   await page.locator(".workspaceNav button").filter({hasText:"Docker"}).click();
 
   // Switch host while Docker has logs from the prior host: no cross-host
