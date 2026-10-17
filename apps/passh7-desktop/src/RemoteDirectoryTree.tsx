@@ -13,15 +13,18 @@ export default function RemoteDirectoryTree({session,connected,currentPath,onNav
   const [busy,setBusy]=useState<string[]>([]);
   const [errors,setErrors]=useState<Record<string,string>>({});
   const sessionRef=useRef(session);sessionRef.current=session;
-  useEffect(()=>{setExpanded([]);setChildren({});setBusy([]);setErrors({})},[session]);
+  const loadedRef=useRef<Set<string>>(new Set());
+  useEffect(()=>{loadedRef.current.clear();setExpanded([]);setChildren({});setBusy([]);setErrors({})},[session]);
   const load=async(path:string)=>{
-    if(!connected||!session||busy.includes(path))return;
+    if(!connected||!session||busy.includes(path)||loadedRef.current.has(path))return;
+    loadedRef.current.add(path);
     const origin=session;setBusy(previous=>[...previous,path]);setErrors(previous=>({...previous,[path]:""}));
     try{
       const entries=await listSftpDirectory(origin,path);
       if(sessionRef.current!==origin)return;
       setChildren(previous=>({...previous,[path]:entries.filter(item=>item.isDir).slice(0,600)}));
     }catch(error){
+      loadedRef.current.delete(path);
       if(sessionRef.current===origin)setErrors(previous=>({...previous,[path]:String(error)}));
     }finally{
       if(sessionRef.current===origin)setBusy(previous=>previous.filter(p=>p!==path));
@@ -33,6 +36,28 @@ export default function RemoteDirectoryTree({session,connected,currentPath,onNav
     setExpanded(current=>[...current,path]);
     if(!children[path])void load(path);
   };
+  // Reveal the currently navigated directory within the tree. The tree stays
+  // lazy: each parent is loaded once and no unrelated subtree is crawled.
+  useEffect(()=>{
+    if(!connected||!session||!currentPath.trim())return;
+    let cancelled=false;
+    const canonical=currentPath.replaceAll("\\","/").replace(/\/+$/,"")||"/";
+    const parts=canonical.split("/").filter(Boolean);
+    const chain:string[]=[rootFor(canonical)];
+    for(const part of parts.slice(0,MAX_DEPTH)){
+      const parent=chain[chain.length-1];
+      chain.push(join(parent,part));
+    }
+    setExpanded(previous=>[...new Set([...previous,...chain])]);
+    void (async()=>{
+      for(const path of chain){
+        if(cancelled||sessionRef.current!==session)return;
+        await load(path);
+      }
+    })();
+    return()=>{cancelled=true};
+  },[connected,session,currentPath]);
+
   const node=(path:string,label:string,depth:number):ReactNode=>{
     const isExpanded=expanded.includes(path);
     const isLoading=busy.includes(path);
