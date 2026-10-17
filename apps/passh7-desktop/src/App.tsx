@@ -619,6 +619,16 @@ export default function App(){
   const [agentStatus,setAgentStatus]=useState("");
   const [agentProbeBusy,setAgentProbeBusy]=useState(false);
   const [agentProbeError,setAgentProbeError]=useState("");
+  const agentProbeGeneration=useRef(0);
+  const agentContext=useRef({session:activeSsh,host:selected});
+  agentContext.current={session:activeSsh,host:selected};
+  useEffect(()=>{
+    // A response from a prior SSH session must not appear on a new host.
+    agentProbeGeneration.current++;
+    setAgentProbeBusy(false);
+    setAgentProbeError("");
+    setAgentStatus("");
+  },[activeSsh,selected]);
   const [agentAvailability,setAgentAvailability]=useState<Partial<Record<AgentKind,
     RemoteAgentAvailability&{session:string}
   >>>({});
@@ -626,8 +636,12 @@ export default function App(){
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentProbeError("Connect to this host before checking installed tools.");return}
     if(agentProbeBusy)return;
+    const generation=++agentProbeGeneration.current;
     setAgentProbeBusy(true);setAgentProbeError("");
     const checks=await Promise.allSettled(AGENTS.map(a=>probeRemoteAgent(session.id,a.kind)));
+    if(generation!==agentProbeGeneration.current
+      ||agentContext.current.session!==session.id
+      ||agentContext.current.host!==session.alias)return;
     const discovered:Partial<Record<AgentKind,RemoteAgentAvailability&{session:string}>>={};
     const failures:string[]=[];
     checks.forEach((check,index)=>{
@@ -638,7 +652,7 @@ export default function App(){
         failures.push(AGENTS[index].name+": "+String(check.reason));
       }
     });
-    // Never let an old host's background probe update the selected host.
+    // Results are scoped to the same still-active SSH session and generation.
     setAgentAvailability(prev=>({...prev,...discovered}));
     if(failures.length)setAgentProbeError(failures.join("; "));
     setAgentProbeBusy(false);
@@ -663,8 +677,12 @@ export default function App(){
     if(!window.confirm("Run "+name+" on "+session.alias+" in your existing SSH terminal? This agent runs with the FULL permissions of the remote SSH account, not inside a PaSSH7 sandbox."))return;
     try{
       await writeSshSession(session.id,command+"\r");
-      setAgentStatus("Launch command sent to "+session.alias+". Check the interactive terminal below to confirm the CLI started.");
-    }catch(error){setAgentStatus("Could not send agent launch command: "+String(error))}
+      if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
+        setAgentStatus("Launch command sent to "+session.alias+". Check the interactive terminal below to confirm the CLI started.");
+    }catch(error){
+      if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
+        setAgentStatus("Could not send agent launch command: "+String(error));
+    }
   };
   const [error,setError]=useState("");
   const [query,setQuery]=useState("");
