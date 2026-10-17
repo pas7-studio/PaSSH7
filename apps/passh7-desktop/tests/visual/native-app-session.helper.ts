@@ -34,6 +34,10 @@ export async function runNativeAppSession(page:Page){
         case "vault_list_identities":return [];
         case "ssh_session_list":return sessions;
         case "ssh_session_forward_list":return [];
+        case "ssh_session_close":
+          // This session remains alive when the backend rejects its Close.
+          if(args.id==="session-b")throw Error("SSH Close rejected by test backend");
+          return null;
         case "ssh_session_ready":ready.push(String(args.id));return null;
         case "ssh_session_resize":resized.push({id:String(args.id),cols:Number(args.cols),rows:Number(args.rows)});return null;
         case "ssh_session_write":writes.push({id:String(args.id),data:String(args.data)});return null;
@@ -128,6 +132,27 @@ export async function runNativeAppSession(page:Page){
     (window as unknown as {__mockSshBridge:{ready:string[]}}).__mockSshBridge.ready.length
   );
   expect(afterReady).toBe(initialReady);
+
+  // A host may have several active PTYs. Restore the user's last chosen PTY,
+  // rather than switching silently back to session-a on return.
+  await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
+  await page.getByRole("combobox",{name:"Choose SSH terminal for agent"}).selectOption("session-b");
+  await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
+  await expect(page.locator(".agentTerminalFrame .terminalSessionSurface"))
+    .toHaveAttribute("data-ssh-session","session-c");
+  await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
+  await expect(page.locator(".agentTerminalFrame .terminalSessionSurface"))
+    .toHaveAttribute("data-ssh-session","session-b");
+
+  // Reject Close in native IPC and then verify the frontend keeps the live
+  // xterm (including its input buffer) instead of claiming disconnection.
+  await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
+  await page.getByRole("button",{name:"Disconnect linux-test"}).last().click();
+  await expect(page.locator(".globalSessionNotice")).toContainText("Could not confirm SSH disconnect");
+  await expect(page.locator(".sshTab")).toHaveCount(3);
+  await expect(page.locator(".terminalDockSlot .terminalSessionSurface"))
+    .toHaveAttribute("data-ssh-session","session-b");
+  await page.getByRole("button",{name:"Dismiss session notice"}).click();
 
   await page.locator(".workspaceNav button").filter({hasText:"Docker"}).click();
   await expect(page.locator(".dockerTableScroll tbody tr")).toHaveCount(1);
