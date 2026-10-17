@@ -1,4 +1,4 @@
-import {useRef,useState,type ReactNode} from "react";
+import {useEffect,useRef,useState,type ReactNode} from "react";
 import {Activity,Bell,Bot,ChevronDown,Clipboard,Container,Download,FolderClosed,Info,Keyboard,LockKeyhole,Monitor,Palette,RefreshCw,Settings2,ShieldCheck,TerminalSquare,Upload} from "lucide-react";
 import {type AppPreferences,defaultPreferences,defaultPaneSizes,validatePreferences} from "./preferences";
 import type {BuildInfo} from "./backend";
@@ -21,7 +21,17 @@ const sections:{id:Section;label:string;hint:string;Icon:typeof Settings2}[]=[
 type Props={preferences:AppPreferences;onChange:(p:AppPreferences)=>void;
  buildInfo:BuildInfo|null;vaultUnlocked:boolean;onLock:()=>void;onExport:()=>void;onRestore:()=>void};
 export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultUnlocked,onLock,onExport,onRestore}:Props){
-  const [section,setSection]=useState<Section>("general");
+  const [section,setSection]=useState<Section>(()=>{
+    try{
+      const saved=localStorage.getItem("passh7.settings.section.v1");
+      return sections.find(s=>s.id===saved)?.id||"general";
+    }catch{return "general"}
+  });
+  const [collapsed,setCollapsed]=useState<Record<string,boolean>>({});
+  useEffect(()=>{
+    try{localStorage.setItem("passh7.settings.section.v1",section)}
+    catch{/* UI-only layout persistence is optional */}
+  },[section]);
   const [importError,setImportError]=useState("");
   const [notice,setNotice]=useState("");
   const fileInput=useRef<HTMLInputElement>(null);
@@ -55,9 +65,18 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
   const infoRow=(title:string,hint:string,value:string)=>(
     <div className="prefRow"><span><strong>{title}</strong><small>{hint}</small></span><span className="prefReadonly">{value}</span></div>
   );
-  const sectionCard=(title:string,children:ReactNode)=>(
-    <section className="settingsCard"><h3>{title}<ChevronDown size={15}/></h3>{children}</section>
-  );
+  const sectionCard=(title:string,children:ReactNode)=>{
+    const key=section+":"+title;
+    const closed=collapsed[key]===true;
+    const id="settings-card-"+key.toLowerCase().replace(/[^a-z0-9]+/g,"-");
+    return <section className="settingsCard" key={key}>
+      <h3><button type="button" className="settingsCardToggle" aria-expanded={!closed}
+        aria-controls={id} onClick={()=>setCollapsed(current=>({...current,[key]:!closed}))}>
+        <span>{title}</span><ChevronDown size={15} className={closed?"collapsed":""}/>
+      </button></h3>
+      {!closed&&<div className="settingsCardBody" id={id}>{children}</div>}
+    </section>;
+  };
   const resettable=["general","terminal","files","docker","appearance"].includes(section);
   const resetSection=()=>{
     if(!window.confirm("Reset "+sections.find(s=>s.id===section)?.label+" preferences to defaults?"))return;
