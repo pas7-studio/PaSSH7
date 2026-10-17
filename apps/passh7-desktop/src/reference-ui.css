@@ -338,3 +338,54 @@
 .sidebar .hostText small{display:none}
 @media(max-width:900px){.sidebar section .host{padding-left:17px}}
 @media(max-width:680px){.sidebar section .host{padding-left:8px}}
+
+
+/* Adjustable mock-aligned Files/Docker splits.
+   Splits are controlled from existing non-secret preferences; values commit after
+   pointer release or immediately from the keyboard, avoiding write-amplification. */
+.filesGrid.resizableFilesGrid,.dockerWorkspaceGrid.resizableDockerGrid{
+  display:grid;align-items:stretch;column-gap:4px;min-width:0;
+}
+.filesGrid.resizableFilesGrid>*,
+.dockerWorkspaceGrid.resizableDockerGrid>*{min-width:0}
+.paneResizeHandle{
+  position:relative;z-index:2;display:flex;align-items:center;justify-content:center;
+  border-radius:6px;touch-action:none;user-select:none;
+  background:transparent;transition:background-color .14s,border-color .14s;
+}
+.paneResizeHandle.vertical{height:100%;min-height:160px;cursor:col-resize}
+.paneResizeHandle.horizontal{height:12px;min-height:12px;cursor:row-resize;margin:-2px 1px -1px}
+.paneResizeHandleGrip{
+  display:block;border-radius:8px;background:#365575;opacity:.68;
+  transition:background-color .14s,opacity .14s;
+}
+.paneResizeHandle.vertical .paneResizeHandleGrip{width:3px;height:42px}
+.paneResizeHandle.horizontal .paneResizeHandleGrip{width:42px;height:3px}
+.paneResizeHandle:hover,.paneResizeHandle:focus-visible{background:#193b5a}
+.paneResizeHandle:hover .paneResizeHandleGrip,.paneResizeHandle:focus-visible .paneResizeHandleGrip{background:#4c9eff;opacity:1}
+.paneResizeHandle:focus-visible{outline:2px solid #66afff;outline-offset:-1px}
+.paneResizeHandle:active .paneResizeHandleGrip{background:#80bcff}
+.filesFolders,.filesTablePane,.filesInspector,.dockerContainersPane,.dockerInspector{min-width:0}
+.dockerLogViewer{flex-shrink:0}
+.shell.light .paneResizeHandle:hover,.shell.light .paneResizeHandle:focus-visible{background:#dceafa}
+.shell.light .paneResizeHandleGrip{background:#92b0d2}
+@media(max-width:1080px){
+  .filesGrid.resizableFilesGrid{grid-template-columns:minmax(145px,32%) minmax(0,1fr)!important;column-gap:10px;row-gap:10px;height:auto}
+  .filesGrid.resizableFilesGrid>.paneResizeHandle{display:none}
+  .filesGrid.resizableFilesGrid>.filesInspector{grid-column:1/-1;max-height:370px}
+}
+@media(max-width:960px){
+  .dockerWorkspaceGrid.resizableDockerGrid{grid-template-columns:minmax(0,1fr)!important;height:auto;gap:10px}
+  .dockerWorkspaceGrid.resizableDockerGrid>.paneResizeHandle{display:none}
+  .dockerWorkspaceGrid.resizableDockerGrid>.dockerInspector{min-height:280px;max-height:400px;overflow:auto}
+}
+@media(max-width:800px){
+  .dockerPage>.paneResizeHandle.horizontal{display:none}
+  .dockerPage>.dockerLogViewer:not(.dockerLogsFullscreen){height:300px!important}
+  .filesGrid.resizableFilesGrid{grid-template-columns:1fr!important}
+  .filesGrid.resizableFilesGrid>.filesFolders{max-height:250px}
+  .filesGrid.resizableFilesGrid>.filesInspector{grid-column:1;max-height:360px}
+}
+@media(prefers-reduced-motion:reduce){
+  .paneResizeHandle,.paneResizeHandleGrip{transition:none}
+}
