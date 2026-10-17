@@ -304,6 +304,7 @@ export default function App(){
     });
   },[sftpEntries,sftpFilter,sftpOrder]);
   const [sftpError,setSftpError]=useState("");
+  const [sftpNotice,setSftpNotice]=useState<{session:string;text:string}|null>(null);
   const [sftpPreview,setSftpPreview]=useState<{session:string;path:string;body:string}|null>(null);
   const [sftpPreviewBusy,setSftpPreviewBusy]=useState(false);
   const transferSessionRef=useRef(activeSsh);
@@ -525,8 +526,10 @@ export default function App(){
     try{
       await mutateSftpFile(session.id,operation,dir,name,isDirectory,newName);
       const entries=await listSftpDirectory(session.id,dir);
-      setSftpEntries({session:session.id,path:dir,items:entries});
-      setSftpTransferResult({session:session.id,text:(operation==="mkdir"?"Created folder ":operation==="rename"?"Renamed ":"Deleted ")+name+(newName?" → "+newName:"")});
+      if(transferSessionRef.current===session.id){
+        setSftpEntries({session:session.id,path:dir,items:entries});
+        setSftpNotice({session:session.id,text:(operation==="mkdir"?"Created folder ":operation==="rename"?"Renamed ":"Deleted ")+name+(newName?" → "+newName:"")});
+      }
     }catch(error){setSftpError("Remote "+operation+" failed: "+String(error))}
     finally{setSftpMutationBusy(false)}
   };
@@ -1091,6 +1094,7 @@ export default function App(){
  session={activeSsh} host={active.label} connected={connected}
  pathInput={sftpPath} setPathInput={setSftpPath}
  entries={sftpEntries} busy={sftpBusy} error={sftpError}
+ notice={sftpNotice?.session===activeSsh?sftpNotice.text:""}
  filter={sftpFilter} setFilter={setSftpFilter}
  sort={sftpOrder} setSort={setSftpOrder} showHidden={preferences.sftpShowHidden}
  navigate={path=>void browseSftp(path)}
