@@ -787,58 +787,76 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::AgentProbe(binary,response)) => {
-                            // Binary is an exact native allowlist value, not a user command.
-                            // Probe only --version; do not start an interactive AI session.
-                            let channel=tokio::time::timeout(Duration::from_secs(8),async {
+                            // Probe both Windows and Unix using independent SSH exec channels.
+                            // A desktop Start Menu app alone does not satisfy the CLI check.
+                            let windows_command=windows_agent_probe_command(&binary)
+                                .ok_or("Unsupported agent probe".to_owned())?;
+                            let unix_command=format!(
+                                "${{SHELL:-/bin/sh}} -lic 'command -v {binary} >/dev/null 2>&1 && {binary} --version' 2>/dev/null || {binary} --version"
+                            );
+                            let windows_channel=tokio::time::timeout(Duration::from_secs(8),async {
                                 let mut cmd=connection.channel_open_session().await
-                                    .map_err(|_|"Could not open remote AI detection channel".to_owned())?;
-                                // SSH exec does not inherit interactive PATH. A login+interactive
-                                // shell sources shell startup files used by nvm, volta, bun,
-                                // mise and user CLI installations. Only exact allowlisted names
-                                // enter this command; no user-controlled shell text.
-                                let command=format!(
-                                    "${{SHELL:-/bin/sh}} -lic 'command -v {binary} >/dev/null 2>&1 && {binary} --version' 2>/dev/null || {binary} --version"
-                                );
-                                cmd.exec(true,command.as_bytes()).await
-                                    .map_err(|_|"SSH server refused AI CLI version probe".to_owned())?;
+                                    .map_err(|_|"Could not open Windows probe SSH channel".to_owned())?;
+                                cmd.exec(true,windows_command.as_bytes()).await
+                                    .map_err(|_|"SSH server rejected Windows probe".to_owned())?;
                                 Ok::<_,String>(cmd)
-                            }).await.unwrap_or_else(|_|Err("AI CLI channel setup timed out".into()));
-                            match channel {
-                                Err(reason)=>{let _=response.send(Err(reason));},
-                                Ok(mut channel)=>{
-                                    tauri::async_runtime::spawn(async move {
-                                        let result=tokio::time::timeout(Duration::from_secs(12),async {
-                                            let mut output=Vec::new();
-                                            let mut exit_code=None;
-                                            while let Some(message)=channel.wait().await {
-                                                match message {
-                                                    russh::ChannelMsg::Data{data} |
-                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
-                                                        if output.len().saturating_add(data.len())>8192 {
-                                                            return Err("AI CLI version response exceeds 8 KiB".into());
-                                                        }
-                                                        output.extend_from_slice(&data);
-                                                    },
-                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_code=Some(code),
-                                                    russh::ChannelMsg::Close=>break,
-                                                    _=>{}
-                                                }
+                            }).await.unwrap_or_else(|_|Err("Windows probe setup timed out".into()));
+                            let unix_channel=tokio::time::timeout(Duration::from_secs(8),async {
+                                let mut cmd=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Unix probe SSH channel".to_owned())?;
+                                cmd.exec(true,unix_command.as_bytes()).await
+                                    .map_err(|_|"SSH server rejected Unix probe".to_owned())?;
+                                Ok::<_,String>(cmd)
+                            }).await.unwrap_or_else(|_|Err("Unix probe setup timed out".into()));
+                            tauri::async_runtime::spawn(async move {
+                                let result=tokio::time::timeout(Duration::from_secs(32),async {
+                                    if let Ok(channel)=windows_channel {
+                                        if let Ok((true,raw))=tokio::time::timeout(
+                                            Duration::from_secs(21),read_agent_probe_output(channel)
+                                        ).await.unwrap_or_else(|_|Err("Windows agent probe timed out".into())){
+                                            if let Some(found)=parse_windows_agent_probe(&raw){
+                                                let path=found.path.filter(|p|p.len()<=1024&&!p.chars().any(|c|c.is_control()));
+                                                let launch=if found.installed {
+                                                    path.as_deref().and_then(windows_agent_launch_command)
+                                                }else{None};
+                                                let installed=found.installed&&launch.is_some();
+                                                let app=found.desktop_app.map(|v|sanitize_probe_text(&v,120));
+                                                return Ok::<_,String>(AgentAvailability{
+                                                    installed,platform:"windows",
+                                                    version:found.version.map(|v|sanitize_probe_text(&v,120)),
+                                                    source:found.source.map(|v|sanitize_probe_text(&v,90)),
+                                                    location:path,
+                                                    desktop_app:app.clone(),launch_command:launch,
+                                                    diagnostic:Some(if installed{
+                                                        "Windows CLI detected; the SSH shell might have an outdated PATH. Launch can use its verified absolute path.".into()
+                                                    }else if app.is_some(){
+                                                        "A desktop app exists, but no terminal CLI was found. A Windows GUI requires Remote Desktop (RDP), not an SSH PTY.".into()
+                                                    }else{
+                                                        "No CLI found in SSH PATH, npm global bin, WinGet links or known user bins for this Windows SSH account.".into()
+                                                    })
+                                                });
                                             }
-                                            // Failed exec probes are not proof of absence: a
-                                            // human PTY may have a different PATH or rc files.
-                                            let installed=exit_code==Some(0);
-                                            let version=if installed {
-                                                String::from_utf8_lossy(&output).lines()
-                                                    .map(str::trim).find(|line|!line.is_empty())
-                                                    .map(|line|line.chars().filter(|c|!c.is_control())
-                                                        .take(120).collect::<String>())
-                                            }else{None};
-                                            Ok::<AgentAvailability,String>(AgentAvailability{installed,version})
-                                        }).await.unwrap_or_else(|_|Err("AI CLI version probe timed out after 12 seconds".into()));
-                                        let _=response.send(result);
-                                    });
-                                }
-                            }
+                                        }
+                                    }
+                                    if let Ok(channel)=unix_channel {
+                                        if let Ok((success,raw))=tokio::time::timeout(
+                                            Duration::from_secs(12),read_agent_probe_output(channel)
+                                        ).await.unwrap_or_else(|_|Err("Unix agent probe timed out".into())){
+                                            return Ok(AgentAvailability{
+                                                installed:success,
+                                                version:if success{raw.lines().map(str::trim).find(|v|!v.is_empty()).map(|v|sanitize_probe_text(v,120))}else{None},
+                                                platform:"unix",
+                                                source:if success{Some("Remote login shell PATH".into())}else{None},
+                                                location:None,desktop_app:None,
+                                                launch_command:if success{Some(binary)}else{None},
+                                                diagnostic:if success{None}else{Some("CLI not found in the Unix login shell. Check the interactive PATH or install the CLI.".into())}
+                                            });
+                                        }
+                                    }
+                                    Err("Neither Windows PowerShell nor a Unix login shell could complete agent discovery. Verify the SSH default shell.".into())
+                                }).await.unwrap_or_else(|_|Err("AI CLI discovery timed out".into()));
+                                let _=response.send(result);
+                            });
                             Ok(())
                         },
                         Some(SessionCommand::VaultRead(path,response)) => {
@@ -1613,6 +1631,26 @@ pub async fn ssh_session_docker_action(
 fn powershell_encoded(script:&str)->String{
     let bytes:Vec<u8>=script.encode_utf16().flat_map(|unit|unit.to_le_bytes()).collect();
     format!("powershell.exe -NoProfile -NonInteractive -EncodedCommand {}",STANDARD.encode(bytes))
+}
+
+fn sanitize_probe_text(value:&str,max:usize)->String{
+    value.chars().filter(|c|!c.is_control()).take(max).collect()
+}
+async fn read_agent_probe_output(mut channel:russh::Channel<russh::client::Msg>)->Result<(bool,String),String>{
+    let mut output=Vec::new();
+    let mut exit_code=None;
+    while let Some(message)=channel.wait().await{
+        match message{
+            russh::ChannelMsg::Data{data}|russh::ChannelMsg::ExtendedData{data,..}=>{
+                if output.len().saturating_add(data.len())>16384{return Err("Agent probe exceeded 16 KiB".into());}
+                output.extend_from_slice(&data);
+            },
+            russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_code=Some(code),
+            russh::ChannelMsg::Close=>break,
+            _=>{}
+        }
+    }
+    Ok((exit_code==Some(0),String::from_utf8_lossy(&output).to_string()))
 }
 
 fn windows_agent_probe_command(agent:&str)->Option<String>{
