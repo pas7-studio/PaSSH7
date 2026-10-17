@@ -1218,6 +1218,16 @@ export default function App(){
       setSessionNotice({alias,kind:"close-failed",detail:"Could not confirm SSH disconnect; session may still be active. "+String(error)});
     }
   };
+  // User-initiated host changes update the alias and its PTY in one React
+  // event. Without this, quick SFTP/Docker navigation can land between
+  // selected=newHost and activeSsh=oldHost and lose the action.
+  const selectHost=(alias:string)=>{
+    const preferred=preferredSessionByHost.current.get(alias);
+    const matching=sshTabs.find(tab=>tab.alias===alias&&tab.id===preferred)
+      ||sshTabs.find(tab=>tab.alias===alias);
+    setSelected(alias);
+    setActiveSsh(matching?.id||"");
+  };
   const active=hosts.find(h=>h.id===selected) || {id:"",label:"No host selected",address:"",user:"",port:22,group:"Workspace",fingerprint:false};
   const filtered=useMemo(()=>hosts.filter(h=>(h.label+" "+h.address+" "+h.group).toLowerCase().includes(query.trim().toLowerCase())),[hosts,query]);
   const activeConnections=sshTabs.filter(t=>t.alias===active.id).length;
@@ -1254,7 +1264,7 @@ export default function App(){
 {([["connections","Connections",Server],["terminal","Terminal",TerminalSquare],["files","Remote Files",FolderClosed],["docker","Docker",Container],["ports","Port Forwarding",Activity],["snippets","Snippets",FileText],["agent","AI Agents",Bot],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=>
 <button type="button" key={id} className={panel===id?"active":""} onClick={()=>setPanel(id)}><Icon size={16}/>{label}</button>)}
 </nav><div className="sectionHeading"><span>YOUR HOSTS</span><button className="iconbtn" title="Import hosts from local OpenSSH config" aria-label="Import SSH config" onClick={()=>void inspectLocalSshConfig()}><FileText size={15}/></button><button className="iconbtn" title="Add host" aria-label="Add host" onClick={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}><Plus size={16}/></button></div><label className="search"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hosts" aria-label="Search hosts"/><span>⌘ K</span></label>
-        {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} title={h.user+"@"+h.address+":"+h.port+(h.jumpAlias?" via "+h.jumpAlias:"")} onClick={()=>setSelected(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}{h.jumpAlias?" · via "+h.jumpAlias:""}</small></span><span className={"hostDot "+(sshTabs.some(t=>t.alias===h.id)?"connected":h.fingerprint?"trusted":"untrusted")} title={sshTabs.some(t=>t.alias===h.id)?"SSH connected ("+sshTabs.filter(t=>t.alias===h.id).length+" session(s))":h.fingerprint?"Host key pinned; SSH disconnected":"SSH disconnected; host key not pinned"}/></button>)}</section>)}
+        {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} title={h.user+"@"+h.address+":"+h.port+(h.jumpAlias?" via "+h.jumpAlias:"")} onClick={()=>selectHost(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}{h.jumpAlias?" · via "+h.jumpAlias:""}</small></span><span className={"hostDot "+(sshTabs.some(t=>t.alias===h.id)?"connected":h.fingerprint?"trusted":"untrusted")} title={sshTabs.some(t=>t.alias===h.id)?"SSH connected ("+sshTabs.filter(t=>t.alias===h.id).length+" session(s))":h.fingerprint?"Host key pinned; SSH disconnected":"SSH disconnected; host key not pinned"}/></button>)}</section>)}
         {!filtered.length&&<div className="emptySearch"><p>{!vaultUnlocked&&desktopAvailable()?"Unlock your vault to access saved hosts.":hosts.length===0?"No saved SSH hosts yet. Add your first server to get started.":query.trim()?"No hosts match your search.":"No matching hosts."}</p>{desktopAvailable()&&vaultUnlocked&&hosts.length===0&&<button type="button" className="contextAction" onClick={()=>{setAddOpen(true);setStep(0);setError("")}}><Plus size={14}/> Add your first host</button>}{desktopAvailable()&&!vaultUnlocked&&<button type="button" className="contextAction" onClick={()=>setVaultDialog(true)}><LockKeyhole size={14}/> Unlock vault</button>}</div>}
         {desktopAvailable()&&vaultUnlocked&&<section className="identityManage"><div className="groupLabel">SSH IDENTITIES</div>{identities.map(name=><div className="identityManageRow" key={name}><KeyRound size={14}/><span title={name}>{name}</span><button className="iconbtn" title={"Show public key "+name} aria-label={"Show public key "+name} onClick={async()=>{try{const pub=await getPublicIdentity(name);setGeneratedKey(pub);setKeyDialog(true);setError("")}catch(e){setError(String(e))}}}><KeyRound size={14}/></button><button className="iconbtn" title={"Remove identity "+name} aria-label={"Remove identity "+name} onClick={()=>{setError("");setDeleteTarget({kind:"identity",alias:name})}}><Trash2 size={14}/></button></div>)}{!identities.length&&<p className="emptySearch">No keys imported</p>}</section>}
         <div className="sidebottom"><span><ShieldCheck size={15}/> Local-first workspace</span><small>{desktopAvailable()?(vaultUnlocked?`${hosts.length} saved host${hosts.length===1?"":"s"} in encrypted vault`:"Unlock vault to view saved hosts"):"Example hosts only. No real credentials."}</small></div></aside>}
@@ -1268,7 +1278,7 @@ export default function App(){
 <option value={h.id} key={h.id}>Via {h.label}{sshTabs.some(t=>t.alias===h.id)?" · connected":" · connect first"}</option>)}
 </select>
 {active.jumpAlias&&<small>Route: this computer → {active.jumpAlias} (SSH) → {active.address}:{active.port} (SSH). The gateway must be connected first. Target SSH keys never leave this PC.</small>}
-{active.jumpAlias&&!sshTabs.some(t=>t.alias===active.jumpAlias)&&<button type="button" className="contextAction" onClick={()=>{setSelected(active.jumpAlias!);setProbeError("")}}>Open {active.jumpAlias} gateway to connect first →</button>}
+{active.jumpAlias&&!sshTabs.some(t=>t.alias===active.jumpAlias)&&<button type="button" className="contextAction" onClick={()=>{selectHost(active.jumpAlias!);setProbeError("")}}>Open {active.jumpAlias} gateway to connect first →</button>}
 {jumpError&&<small role="alert" className="wizardError">{jumpError}</small>}
 </div>
 <div className="identityActions">{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" title="Remove selected host" aria-label="Remove selected host" onClick={()=>{setError("");setDeleteTarget({kind:"host",alias:active.id})}}><Trash2 size={16}/></button>}<button className="primary" disabled={!desktopAvailable()||!vaultUnlocked||!active.id||sshBusy||tofuBusy} onClick={async()=>{
@@ -1300,8 +1310,8 @@ export default function App(){
       {(panel!=="terminal"||terminalDetailsOpen)&&<aside id={panel==="terminal"?"passh7-terminal-inspector":undefined} className={"context "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"fullContext":"")}><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
         {panel==="connections"?<ConnectionsWorkspace
   hosts={hosts} selected={selected} connectedAliases={sshTabs.map(t=>t.alias)} vaultUnlocked={vaultUnlocked}
-  onSelect={setSelected} onConnect={alias=>void connectFromConnections(alias)}
-  onTerminal={alias=>{setSelected(alias);setPanel("terminal")}}
+  onSelect={selectHost} onConnect={alias=>void connectFromConnections(alias)}
+  onTerminal={alias=>{selectHost(alias);setPanel("terminal")}}
   onAdd={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}
   onImport={()=>void inspectLocalSshConfig()}
  />:
