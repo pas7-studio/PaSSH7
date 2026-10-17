@@ -1,0 +1,22 @@
+name: PaSSH7 Docker Inspect regression check
+on:
+  push:
+    branches: [feat/dedicated-ai-agent-workspace]
+permissions:
+  contents: read
+concurrency:
+  group: passh7-docker-inspect-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-inspect-tests:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Generate required Tauri test icon
+        run: python3 apps/passh7-desktop/scripts/create_icon.py
+      - name: Native Docker inspect regression tests
+        run: cargo test --manifest-path apps/passh7-desktop/src-tauri/Cargo.toml --bin passh7-desktop docker_inspect_tests
