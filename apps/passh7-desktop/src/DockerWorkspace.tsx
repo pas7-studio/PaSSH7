@@ -20,6 +20,22 @@ type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|nu
   onRefresh:()=>void;onAction:(id:string,name:string,action:"start"|"stop"|"restart")=>void;
   onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;
   onShell:(id:string,name:string)=>void;};
+// Surface the likely failure stage instead of leaving users with raw SSH
+// stderr and an apparently empty Docker screen. No commands are executed by
+// this diagnostic; the target user's permissions and daemon stay unchanged.
+const dockerRecoveryAdvice=(message:string):string=>{
+  if(/permission denied|access.denied|got permission denied|unauthorized|forbidden/i.test(message))
+    return "Docker denied this SSH account. Verify its Docker permissions on the remote host, then reconnect SSH to refresh group membership.";
+  if(/not recognized|command not found|docker: not found|term 'docker'|executable file not found/i.test(message))
+    return "The remote SSH shell cannot find Docker CLI. Run docker --version in that same SSH terminal; install Docker or repair that account's PATH.";
+  if(/cannot connect to the docker daemon|daemon is not running|docker_engine|dockerdesktop|docker.sock|error during connect/i.test(message))
+    return "Docker CLI is present but its daemon/socket is unavailable. Start the remote Docker service (Linux) or Docker Desktop/Engine (Windows) and confirm this SSH user can reach it.";
+  if(/--format json|unexpected inspect response|invalid (inspect )?json|template parsing|unclosed action/i.test(message))
+    return "The remote Docker CLI returned unsupported or malformed JSON. Check docker version on the SSH host and upgrade an outdated CLI if needed.";
+  if(/ssh session|ssh channel|connection closed|disconnected/i.test(message))
+    return "The authenticated SSH transport was interrupted. Reconnect this host, then retry Docker inventory or logs.";
+  return "Verify docker ps -a in this same SSH terminal. PaSSH7 uses that account's Docker permissions; no local or other host's Docker context is used.";
+};
 const isRunning=(item:ContainerRow)=>(item.State||"").toLowerCase()==="running";
 const containerStat=(item:ContainerRow,stats:DockerRuntimeStats[]|null)=>{
   if(!stats)return null;
@@ -187,7 +203,11 @@ export default function DockerWorkspace(p:Props){
         <label className="compactToggle dockerAutoRefresh" title="Refresh container inventory automatically every 15 seconds."><input type="checkbox" checked={p.autoRefresh} onChange={e=>p.onAutoRefresh(e.target.checked)}/> Auto-refresh</label>
         <button onClick={p.onRefresh} disabled={!p.connected||p.loading}><RefreshCw size={15}/>{p.loading?" Loading…":" Refresh"}</button>
       </div>
-      {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
+      {p.error&&<div className="workspaceError dockerActionableError" role="alert">
+        <strong>Docker inventory unavailable</strong><span>{p.error}</span>
+        <small>{dockerRecoveryAdvice(p.error)}</small>
+        <button type="button" disabled={!p.connected||p.loading} onClick={p.onRefresh}>Retry inventory</button>
+      </div>}
       {p.actionStatus&&<div className="workspaceNotice" role="status">{p.actionStatus}</div>}
       <div className="dockerTableScroll"><table className="workspaceTable"><thead><tr>
         <th><button className="dockerSort" aria-label="Sort containers by name" onClick={()=>sortWith("name")}>Name {sortBy==="name"?(descending?"↓":"↑"):""}</button></th>
@@ -272,7 +292,11 @@ export default function DockerWorkspace(p:Props){
         onClick={()=>void saveCurrentLogs()}><Download size={15}/>{savingLogs?"Saving…":"Save As"}</button>
     </div>{saveLogsNotice&&<p className="workspaceNotice" role="status">{saveLogsNotice}</p>}
       {saveLogsError&&<div className="workspaceError" role="alert">{saveLogsError}</div>}
-      {p.logsError&&<div className="workspaceError" role="alert">{p.logsError} <button type="button" disabled={p.logsBusy||!chosen?.ID} onClick={()=>{if(chosen?.ID)p.onLogs(chosen.ID,chosen.Names||chosen.ID)}}>Retry logs</button></div>}<div className={"dockerLogsBody "+(wrap?"wrapped":"")}>
+      {p.logsError&&<div className="workspaceError dockerActionableError" role="alert">
+        <strong>Docker logs unavailable</strong><span>{p.logsError}</span>
+        <small>{dockerRecoveryAdvice(p.logsError)}</small>
+        <button type="button" disabled={p.logsBusy||!chosen?.ID} onClick={()=>{if(chosen?.ID)p.onLogs(chosen.ID,chosen.Names||chosen.ID)}}>Retry logs</button>
+      </div>}<div className={"dockerLogsBody "+(wrap?"wrapped":"")}>
       {p.logs?.session===p.session?<>{p.logsBusy&&<div className="logsLoading">Refreshing latest Docker logs…</div>}
         {logLines.map((line,index)=><div className="dockerLogLine" key={index}><span>{index+1}</span><code className={/\berror\b|fatal|panic/i.test(line)?"logError":/\bwarn/i.test(line)?"logWarn":""}>{line}</code></div>)}
         {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}
@@ -283,7 +307,10 @@ export default function DockerWorkspace(p:Props){
         <div className="filesSearch"><Search size={15}/><input value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder={"Search "+tab+"…"} aria-label={"Search Docker "+tab}/></div>
         <button disabled={!p.connected||catalogBusy} onClick={()=>void loadCatalog(tab)}><RefreshCw size={15}/>{catalogBusy?" Loading…":" Refresh "+tab}</button>
       </div>
-      {catalogError&&<div className="workspaceError" role="alert">{catalogError}</div>}
+      {catalogError&&<div className="workspaceError dockerActionableError" role="alert">
+        <strong>Docker {tab} unavailable</strong><span>{catalogError}</span>
+        <small>{dockerRecoveryAdvice(catalogError)}</small>
+      </div>}
       <div className="dockerTableScroll">
       <table className="workspaceTable"><thead><tr>{catalogColumns[tab].map(name=><th key={name}>{name}</th>)}</tr></thead><tbody>
         {filteredCatalog.map((row,index)=><tr key={(row.ID||row.Name||row.Repository||"")+index}
