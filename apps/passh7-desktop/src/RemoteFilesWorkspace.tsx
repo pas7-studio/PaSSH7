@@ -31,7 +31,7 @@ type Props={
   onMkdir:(name:string)=>void;onDelete:(name:string,isDirectory:boolean)=>void;
   onRename:(name:string,newName:string,isDirectory:boolean)=>void;mutationBusy:boolean;
   preview:Preview;previewBusy:boolean;
-  transferBusy:boolean;transferJobs:TransferJob[];transferPaused:boolean;
+  transferJobs:TransferJob[];transferPaused:boolean;
   onPauseQueue:(value:boolean)=>void;onCancelJob:(id:string)=>void;
   onRetryJob:(id:string)=>void;onClearFinished:()=>void;backupPanel:ReactNode;
   paneSizes:PaneSizes;onPaneSize:(key:keyof PaneSizes,value:number)=>void;
@@ -197,7 +197,7 @@ export default function RemoteFilesWorkspace(p:Props){
         {selectedItem?<><div className="inspectorFile"><FileText size={28}/><strong>{selectedItem.name}</strong><small>{selectedItem.isDir?"Directory":"Remote file"}</small></div>
           <dl><dt>Size</dt><dd>{size(selectedItem.sizeBytes)}</dd><dt>Modified</dt><dd>{selectedItem.modifiedAt!==null?new Date(selectedItem.modifiedAt*1000).toLocaleString():"Unknown"}</dd><dt>Permissions</dt><dd><code>{octalPermissions(selectedItem.unixPermissions)}</code></dd><dt>Owner ID</dt><dd>{selectedItem.ownerId??"Unknown"}</dd><dt>Group ID</dt><dd>{selectedItem.groupId??"Unknown"}</dd><dt>Path</dt><dd className="filePath">{selectedPath}</dd></dl>
           <div className="inspectorActions"><button onClick={()=>navigator.clipboard.writeText(selectedPath)}><Clipboard size={14}/> Copy path</button>
-          {selectedItem.isDir?<button onClick={()=>open(selectedPath)}>Open folder</button>:<><button onClick={()=>p.readPreview(selectedPath)} disabled={p.previewBusy}>Preview</button><button onClick={()=>p.download(selectedPath)} disabled={p.transferBusy}>Download</button></>}</div>
+          {selectedItem.isDir?<button onClick={()=>open(selectedPath)}>Open folder</button>:<><button onClick={()=>p.readPreview(selectedPath)} disabled={p.previewBusy}>Preview</button><button onClick={()=>p.download(selectedPath)}>Download</button></>}</div>
           {!selectedItem.isDir&&<div className="fileCodePreview"><strong>READ-ONLY PREVIEW</strong>{p.previewBusy?<p>Loading preview…</p>:preview?<pre>{preview.body}</pre>:<p>Select Preview to read UTF-8 text. Binary files may not be previewable.</p>}</div>}
         </>:<div className="workspaceEmpty">Select a file to see details and preview its contents.</div>}
       </aside>
@@ -210,7 +210,7 @@ export default function RemoteFilesWorkspace(p:Props){
         return <>
           <div className="fileMenuTitle" title={item.name}>{item.name}</div>
           <button role="menuitem" onClick={()=>{setFileMenu(null);item.isDir?open(target):p.readPreview(target)}}><FileText size={15}/>{item.isDir?"Open folder":"Preview file"}</button>
-          <button role="menuitem" disabled={item.isDir||p.transferBusy} onClick={()=>{setFileMenu(null);p.download(target)}}><Download size={15}/>Download</button>
+          <button role="menuitem" disabled={item.isDir} onClick={()=>{setFileMenu(null);p.download(target)}}><Download size={15}/>Download</button>
           <button role="menuitem" onClick={()=>{setFileMenu(null);void navigator.clipboard.writeText(target)}}><Clipboard size={15}/>Copy path</button>
           <div className="fileMenuDivider"/>
           <button role="menuitem" disabled={p.mutationBusy||p.busy} onClick={()=>renameFile(item)}><Pencil size={15}/>Rename <span>F2</span></button>
