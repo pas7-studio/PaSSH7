@@ -1,9 +1,10 @@
 import {useState} from "react";
 import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
+import type {RemoteAgentAvailability} from "./backend";
 import {WorkspaceHeader,WorkspaceStatus} from "./WorkspaceChrome";
 
-export type AgentProbeState={session:string;installed:boolean;version:string|null};
+export type AgentProbeState=RemoteAgentAvailability&{session:string};
 type Props={
   host:string;address:string;username:string;port:number;route:string;
   sessionId:string;sessions:{id:string;alias:string}[];vaultUnlocked:boolean;
@@ -16,7 +17,23 @@ export default function AgentWorkspace(p:Props){
   const [copyFeedback,setCopyFeedback]=useState("");
   const connected=Boolean(p.sessionId&&p.vaultUnlocked);
   const selected=AGENTS.find(a=>a.kind===p.agent)!;
+  const [installFeedback,setInstallFeedback]=useState("");
   const probe=p.availability[p.agent]?.session===p.sessionId?p.availability[p.agent]:null;
+  const installation:Record<AgentKind,{command:string;url:string;label:string}>={
+    codex:{command:"npm install -g @openai/codex",url:"https://github.com/openai/codex",label:"Codex CLI installation"},
+    claude:{command:"npm install -g @anthropic-ai/claude-code",url:"https://docs.anthropic.com/en/docs/claude-code/getting-started",label:"Claude Code setup"},
+    opencode:{command:"npm install -g opencode-ai",url:"https://opencode.ai/docs/",label:"OpenCode CLI installation"}
+  };
+  const cliStatus=(state:AgentProbeState|null)=>{
+    if(!state)return "Not checked";
+    if(state.installed)return "CLI detected";
+    if(state.desktopApp)return "Desktop app only";
+    return "CLI missing";
+  };
+  const copyInstall=async()=>{
+    try{await navigator.clipboard.writeText(installation[p.agent].command);setInstallFeedback("Install command copied. Review it before running on the remote host.")}
+    catch(error){setInstallFeedback("Clipboard unavailable: "+String(error))}
+  };
   const copyContext=async()=>{
     try{await navigator.clipboard.writeText(p.context);setCopyFeedback("Context copied (no secrets included).")}
     catch(error){setCopyFeedback("Could not copy context: "+String(error))}
@@ -55,7 +72,7 @@ export default function AgentWorkspace(p:Props){
                 <strong>{a.name}</strong>
                 <small>{a.description}</small>
                 <span className="agentDetection"><WorkspaceStatus kind={detected?.installed?"connected":detected?"warning":"offline"}>
-                  {detected?.installed?"Installed":detected?"Not found":"Not checked"}
+                  {cliStatus(detected)}
                 </WorkspaceStatus></span>
                 {detected?.installed&&detected.version&&<span className="agentVersion" title={detected.version}>{detected.version}</span>}
               </button>;
@@ -64,10 +81,31 @@ export default function AgentWorkspace(p:Props){
           {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
         </section>
         <section className="agentSection agentLaunch">
-          <div className="agentSectionHead"><div><h2>Launch {selected.name}</h2><p>Launch directly in your existing SSH terminal, with no extra installation or connection step.</p></div></div>
-          <div className="agentLaunchRow"><div className="agentLaunchCommand"><span>REMOTE SHELL</span><code>{p.agent}</code></div>
-            <button type="button" className="workspacePrimary" disabled={!connected} onClick={p.onLaunch}><Play size={16}/> Launch {selected.name} in Terminal</button></div>
-          <p className="agentHint">{probe?.installed?"This CLI was detected in the remote shell.":"If the CLI uses a custom interactive shell PATH, detection can miss it. You can still launch it manually."} The current terminal must be at a shell prompt; running commands within another interactive program may have a different effect.</p>
+          <div className="agentSectionHead"><div><h2>Launch {selected.name}</h2>
+              <p>Run the remote CLI in your selected authenticated terminal. Desktop apps cannot display through an SSH PTY.</p>
+            </div></div>
+          <div className="agentLaunchRow"><div className="agentLaunchCommand"><span>{probe?.platform==="windows"?"WINDOWS REMOTE CLI":"REMOTE SHELL"}</span>
+              <code>{probe?.installed&&probe.platform==="windows"?"Detected CLI path":p.agent}</code></div>
+            <button type="button" className="workspacePrimary"
+              disabled={!connected||(probe?.platform==="windows"&&!probe.installed)}
+              onClick={p.onLaunch}><Play size={16}/> Launch CLI in Terminal</button></div>
+          <p className="agentHint">{probe?.installed?"PaSSH7 detected a CLI for this SSH account.":"CLI detection distinguishes shell commands from graphical Windows apps."} Ensure the terminal is at a shell prompt before launching an agent.</p>
+          {probe&&<div className="agentDiscovery" aria-label="Remote CLI discovery">
+            <div><strong>Detected platform</strong><span>{probe.platform==="windows"?"Windows SSH":probe.platform==="unix"?"Unix SSH":"Unknown"}</span></div>
+            <div><strong>CLI availability</strong><span>{cliStatus(probe)}</span></div>
+            {probe.source&&<div><strong>Discovery source</strong><span>{probe.source}</span></div>}
+            {probe.location&&<div><strong>CLI executable</strong><code title={probe.location}>{probe.location}</code></div>}
+            {probe.desktopApp&&<div><strong>GUI application</strong><span>{probe.desktopApp} · Windows desktop / RDP only</span></div>}
+            {probe.diagnostic&&<p>{probe.diagnostic}</p>}
+          </div>}
+          {probe?.platform==="windows"&&!probe.installed&&<div className="agentInstallHelp">
+            <strong>{probe.desktopApp?"Desktop ≠ terminal CLI":"CLI not found in this SSH account"}</strong>
+            <p>Graphical apps run in the Windows desktop session. SSH provides a text terminal, not the app's window. Use Remote Desktop (RDP) for the GUI, or install the separate CLI below.</p>
+            <div><code>{installation[p.agent].command}</code><button type="button" onClick={()=>void copyInstall()}><Clipboard size={14}/> Copy install command</button></div>
+            <a href={installation[p.agent].url} target="_blank" rel="noreferrer">{installation[p.agent].label} <ExternalLink size={12}/></a>
+            <p>The install command is never executed automatically. Reconnect SSH or re-check CLI detection after installation.</p>
+          </div>}
+          {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>
           {p.status&&<p role="status" className="workspaceNotice">{p.status}</p>}
         </section>
         <section className="agentSection">
