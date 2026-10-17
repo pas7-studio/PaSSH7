@@ -27,6 +27,7 @@ export default function AgentWorkspace(p:Props){
   const cliStatus=(state:AgentProbeState|null|undefined)=>{
     if(!state)return "Not checked";
     if(state.installed)return "CLI detected";
+    if(state.location)return "CLI needs repair";
     if(state.desktopApp)return "Desktop app only";
     return "CLI missing";
   };
@@ -99,8 +100,8 @@ export default function AgentWorkspace(p:Props){
             {probe.diagnostic&&<p>{probe.diagnostic}</p>}
           </div>}
           {probe?.platform==="windows"&&!probe.installed&&<div className="agentInstallHelp">
-            <strong>{probe.desktopApp?"Desktop ≠ terminal CLI":"CLI not found in this SSH account"}</strong>
-            <p>Graphical apps run in the Windows desktop session. SSH provides a text terminal, not the app's window. Use Remote Desktop (RDP) for the GUI, or install the separate CLI below.</p>
+            <strong>{probe.location?"CLI launcher needs repair":probe.desktopApp?"Desktop ≠ terminal CLI":"CLI not found in this SSH account"}</strong>
+            <p>{probe.location?"The executable exists, but its version check failed. Verify Node.js and this SSH account's environment before reinstalling.":"Graphical apps run in the Windows desktop session. SSH provides a text terminal, not the app's window. Use Remote Desktop (RDP) for the GUI, or install the separate CLI below."}</p>
             <div><code>{installation[p.agent].command}</code><button type="button" onClick={()=>void copyInstall()}><Clipboard size={14}/> Copy install command</button></div>
             <a href={installation[p.agent].url} target="_blank" rel="noreferrer">{installation[p.agent].label} <ExternalLink size={12}/></a>
             <p>The install command is never executed automatically. Reconnect SSH or re-check CLI detection after installation.</p>
