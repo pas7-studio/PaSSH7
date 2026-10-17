@@ -171,7 +171,7 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
     await expect(page.locator(".agentInstallHelp")).toContainText("Desktop");
     await expect(page.locator(".agentInstallHelp")).toContainText("RDP");
-    await expect(page.getByRole("button",{name:/Launch CLI in Terminal/})).toBeDisabled();
+    await expect(page.getByRole("button",{name:/Launch CLI here/})).toBeDisabled();
     await page.getByRole("button",{name:/Prepare RDP tunnel/}).click();
     await expect(page.locator(".widePageTitle h1")).toHaveText("Port Forwarding");
     await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
@@ -183,7 +183,7 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await page.getByRole("button",{name:"Compact console"}).click();
     await expect(page.locator(".agentTerminalFrame")).not.toHaveClass(/expanded/);
     await expect(page.locator(".agentDiscovery")).toContainText("claude.cmd");
-    await expect(page.getByRole("button",{name:/Launch CLI in Terminal/})).toBeEnabled();
+    await expect(page.getByRole("button",{name:/Launch CLI here/})).toBeEnabled();
     await page.locator(".agentCard.opencode").click();
     await expect(page.locator(".agentInstallHelp")).toContainText("CLI not found");
     await expect(page.locator(".agentInstallHelp code")).toContainText("opencode-ai");
