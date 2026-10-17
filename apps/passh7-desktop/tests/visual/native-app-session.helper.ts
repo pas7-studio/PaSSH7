@@ -17,6 +17,7 @@ export async function runNativeAppSession(page:Page){
     const writes:Array<{id:string;data:string}>=[];
     const resized:Array<{id:string;cols:number;rows:number}>=[];
     const ready:string[]=[];
+    const delayedWrites:Array<()=>void>=[];
     const exports:Array<{containerName:string;contents:string}>=[];
     const delayedSftp:Array<()=>void>=[];
     const file=(name:string)=>({name,isDir:false,sizeBytes:100,modifiedAt:null,
@@ -49,7 +50,10 @@ export async function runNativeAppSession(page:Page){
           return null;
         case "ssh_session_ready":ready.push(String(args.id));return null;
         case "ssh_session_resize":resized.push({id:String(args.id),cols:Number(args.cols),rows:Number(args.rows)});return null;
-        case "ssh_session_write":writes.push({id:String(args.id),data:String(args.data)});return null;
+        case "ssh_session_write":
+          writes.push({id:String(args.id),data:String(args.data)});
+          if(args.data==="queue-block")await new Promise<void>(resolve=>delayedWrites.push(resolve));
+          return null;
         case "ssh_session_docker_list":return JSON.stringify({
           ID:"aaaaaaaaaaaa",Names:"api-test",Image:"api:latest",State:"running",Status:"Up 1 hour",Ports:""
         });
@@ -90,6 +94,8 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
       writes,resized,ready,exports,
+      pendingWrites(){return delayedWrites.length;},
+      releaseWrites(){for(const done of delayedWrites.splice(0))done();},
       pendingSftp(){return delayedSftp.length;},
       releaseSftp(){for(const done of delayedSftp.splice(0))done();},
       emit(event:string,payload:unknown){
@@ -143,6 +149,46 @@ export async function runNativeAppSession(page:Page){
     (window as unknown as {__mockSshBridge:{ready:string[]}}).__mockSshBridge.ready.length
   );
   expect(afterReady).toBe(initialReady);
+
+  // Native SSH PTY writes must remain FIFO across xterm, button-triggered
+  // agents and snippets. Block one native write, queue the next write for
+  // the same session and prove another session is independently writable.
+  await page.evaluate(()=>{
+    void (async()=>{
+      const backend=await import("/src/backend.ts");
+      const first=backend.writeSshSession("session-a","queue-block");
+      const later=backend.writeSshSession("session-a","queue-later");
+      const separate=backend.writeSshSession("session-b","queue-independent");
+      (window as unknown as {__sshWriteQueueDone:Promise<void>})
+        .__sshWriteQueueDone=Promise.all([first,later,separate]).then(()=>{});
+    })();
+  });
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{pendingWrites:()=>number}})
+      .__mockSshBridge.pendingWrites()
+  )).toBe(1);
+  const beforeRelease=await page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}})
+      .__mockSshBridge.writes.filter(x=>x.data.startsWith("queue-"))
+  );
+  expect(beforeRelease).toEqual([
+    {id:"session-a",data:"queue-block"},
+    {id:"session-b",data:"queue-independent"}
+  ]);
+  await page.evaluate(()=>{
+    (window as unknown as {__mockSshBridge:{releaseWrites:()=>void}})
+      .__mockSshBridge.releaseWrites();
+  });
+  await page.evaluate(async()=>await (window as unknown as {__sshWriteQueueDone:Promise<void>}).__sshWriteQueueDone);
+  const afterRelease=await page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}})
+      .__mockSshBridge.writes.filter(x=>x.data.startsWith("queue-"))
+  );
+  expect(afterRelease).toEqual([
+    {id:"session-a",data:"queue-block"},
+    {id:"session-b",data:"queue-independent"},
+    {id:"session-a",data:"queue-later"}
+  ]);
 
   // A host may have several active PTYs. Restore the user's last chosen PTY,
   // rather than switching silently back to session-a on return.
