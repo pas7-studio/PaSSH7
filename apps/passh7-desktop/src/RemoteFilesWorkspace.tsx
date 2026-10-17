@@ -1,4 +1,5 @@
 import {useEffect,useMemo,useRef,useState,type ReactNode} from "react";
+import {WorkspaceHeader} from "./WorkspaceChrome";
 import {ArrowLeft,ArrowRight,ArrowUp,Clipboard,Download,FileText,FolderClosed,FolderPlus,Home,Pencil,RefreshCw,Search,Trash2,Upload} from "lucide-react";
 import type {SftpEntry} from "./backend";
 import RemoteDirectoryTree from "./RemoteDirectoryTree";
@@ -156,8 +157,9 @@ export default function RemoteFilesWorkspace(p:Props){
   };
 
   return <div className="widePage remoteFilesPage" onKeyDown={e=>{if(e.key==="Escape")setFileMenu(null)}}>
-    <div className="widePageTitle"><FolderClosed size={25}/><div><h1>Remote Files</h1><p>Browse, preview and transfer files securely over SFTP · {p.host}</p></div>
-      <span className={p.connected?"workspaceConnected":"workspaceOffline"}>{p.connected?"● Connected":"○ Disconnected"}</span></div>
+    <WorkspaceHeader icon={FolderClosed} title="Remote Files"
+      description={"Browse, preview and transfer remote files through SSH · "+p.host}
+      status={p.connected?"connected":"offline"} statusText={p.connected?"SFTP connected":"SSH disconnected"}/>
     <div className="filesPathBar">
       <button title="Back" disabled={!p.connected||historyIndex<=0} onClick={()=>{const index=historyIndex-1;setHistoryIndex(index);p.navigate(history[index])}}><ArrowLeft size={16}/></button>
       <button title="Forward" disabled={!p.connected||historyIndex<0||historyIndex>=history.length-1} onClick={()=>{const index=historyIndex+1;setHistoryIndex(index);p.navigate(history[index])}}><ArrowRight size={16}/></button>
