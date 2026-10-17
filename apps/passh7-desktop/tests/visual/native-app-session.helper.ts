@@ -149,6 +149,7 @@ export async function runNativeAppSession(page:Page){
   await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
   await page.getByRole("button",{name:"Disconnect linux-test"}).last().click();
   await expect(page.locator(".globalSessionNotice")).toContainText("Could not confirm SSH disconnect");
+  await expect(page.locator(".globalSessionNotice").getByRole("button",{name:"Reconnect"})).toHaveCount(0);
   await expect(page.locator(".sshTab")).toHaveCount(3);
   await expect(page.locator(".terminalDockSlot .terminalSessionSurface"))
     .toHaveAttribute("data-ssh-session","session-b");
