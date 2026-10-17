@@ -494,25 +494,34 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 Ok(mut channel)=>{
                                     tauri::async_runtime::spawn(async move {
                                         let result=tokio::time::timeout(Duration::from_secs(20),async {
-                                            let mut output=Vec::new();
+                                            let mut stdout=Vec::new();
+                                            let mut stderr=Vec::new();
                                             let mut exit_status=None;
                                             while let Some(message)=channel.wait().await {
                                                 match message {
-                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
-                                                        if output.len().saturating_add(data.len())>2*1024*1024{
+                                                    russh::ChannelMsg::Data{data}=>{
+                                                        if stdout.len().saturating_add(stderr.len()).saturating_add(data.len())>2*1024*1024{
                                                             return Err("Docker inventory exceeds 2 MiB".to_owned());
                                                         }
-                                                        output.extend_from_slice(&data);
+                                                        stdout.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if stdout.len().saturating_add(stderr.len()).saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker inventory exceeds 2 MiB".to_owned());
+                                                        }
+                                                        stderr.extend_from_slice(&data);
                                                     },
                                                     russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
                                                     russh::ChannelMsg::Close=>break,
                                                     _=>{}
                                                 }
                                             }
-                                            let message=String::from_utf8_lossy(&output).into_owned();
-                                            if exit_status.unwrap_or(1)!=0{
-                                                return Err(format!("Docker inventory failed: {}",message.chars().take(500).collect::<String>()));
+                                            let message=String::from_utf8_lossy(&stdout);
+                                            if exit_status!=Some(0){
+                                                let error=if stderr.is_empty(){message.to_string()}else{String::from_utf8_lossy(&stderr).into_owned()};
+                                                return Err(format!("Docker inventory failed (SSH exit {:?}): {}",exit_status,error.chars().take(500).collect::<String>()));
                                             }
+                                            // Warnings on stderr must not corrupt the JSON-lines inventory.
                                             safe_docker_json_lines("containers",&message)
                                         }).await.unwrap_or_else(|_|Err("Docker inventory timed out after 20 seconds".into()));
                                         let _=response.send(result);
@@ -535,27 +544,32 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 Ok(mut channel)=>{
                                     tauri::async_runtime::spawn(async move {
                                         let result=tokio::time::timeout(Duration::from_secs(20),async {
-                                            let mut output=Vec::new();
+                                            let mut stdout=Vec::new();
+                                            let mut stderr=Vec::new();
                                             let mut exit_status=None;
                                             while let Some(message)=channel.wait().await {
                                                 match message {
-                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
-                                                        if output.len().saturating_add(data.len())>2*1024*1024{
+                                                    russh::ChannelMsg::Data{data}=>{
+                                                        if stdout.len().saturating_add(stderr.len()).saturating_add(data.len())>2*1024*1024{
                                                             return Err("Docker catalog exceeds 2 MiB".to_owned());
                                                         }
-                                                        output.extend_from_slice(&data);
+                                                        stdout.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if stdout.len().saturating_add(stderr.len()).saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker catalog exceeds 2 MiB".to_owned());
+                                                        }
+                                                        stderr.extend_from_slice(&data);
                                                     },
                                                     russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
                                                     russh::ChannelMsg::Close=>break,
                                                     _=>{}
                                                 }
                                             }
-                                            let message=String::from_utf8_lossy(&output).into_owned();
+                                            let message=String::from_utf8_lossy(&stdout);
                                             if exit_status!=Some(0){
-                                                let reason=if exit_status.is_none(){
-                                                    "Docker catalog command ended without an SSH exit status. ".to_owned()
-                                                }else{String::new()};
-                                                return Err(format!("{reason}Docker catalog failed: {}",message.chars().take(500).collect::<String>()));
+                                                let error=if stderr.is_empty(){message.to_string()}else{String::from_utf8_lossy(&stderr).into_owned()};
+                                                return Err(format!("Docker catalog failed (SSH exit {:?}): {}",exit_status,error.chars().take(500).collect::<String>()));
                                             }
                                             safe_docker_json_lines(&kind,&message)
                                         }).await.unwrap_or_else(|_|Err("Docker catalog timed out after 20 seconds".into()));
