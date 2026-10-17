@@ -1523,9 +1523,7 @@ mod docker_catalog_tests{
     }
     #[test]
     fn json_catalog_projection_excludes_labels_and_commands(){
-        let row=r#"{"ID":"012345abcdef","Names":"api","Image":"api:1",
-            "State":"running","Status":"Up 3h","Ports":"8080/tcp",
-            "Labels":"SECRET_LABEL_VALUE","Command":"SECRET_ARGUMENT_VALUE"}"#;
+        let row=r#"{"ID":"012345abcdef","Names":"api","Image":"api:1","State":"running","Status":"Up 3h","Ports":"8080/tcp","Labels":"SECRET_LABEL_VALUE","Command":"SECRET_ARGUMENT_VALUE"}"#;
         let safe=safe_docker_json_lines("containers",row).unwrap();
         assert!(!safe.contains("SECRET"));
         assert!(!safe.contains("Labels"));
@@ -1534,7 +1532,7 @@ mod docker_catalog_tests{
         assert_eq!(value["ID"],"012345abcdef");
         assert_eq!(value["Names"],"api");
         let another=r#"{"ID":"abcdef123456","Names":"db"}"#;
-        let listing=safe_docker_json_lines("compose-project:test",&format!("{row}\\n{another}").replace("\\n","\n")).unwrap();
+        let listing=safe_docker_json_lines("compose-project:test",&format!("{row}\n{another}")).unwrap();
         assert_eq!(listing.lines().count(),2);
     }
     #[test]
