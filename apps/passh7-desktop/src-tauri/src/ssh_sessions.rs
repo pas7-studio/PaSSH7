@@ -830,6 +830,8 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                     desktop_app:app.clone(),launch_command:launch,
                                                     diagnostic:Some(if installed{
                                                         "Windows CLI detected; the SSH shell might have an outdated PATH. Launch can use its verified absolute path.".into()
+                                                    }else if path.is_some(){
+                                                        "CLI launcher found, but --version failed. Verify Node.js dependencies, permissions and the SSH account PATH before launching.".into()
                                                     }else if app.is_some(){
                                                         "A desktop app exists, but no terminal CLI was found. A Windows GUI requires Remote Desktop (RDP), not an SSH PTY.".into()
                                                     }else{
@@ -1664,7 +1666,9 @@ $source = $null
 foreach ($ext in @('.exe','.cmd','.bat','.ps1','')) {{
   if ($found) {{ break }}
   $which = Get-Command ($name + $ext) -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($which -and $which.Source -and (Test-Path -LiteralPath $which.Source -PathType Leaf)) {{
+  if ($which -and $which.Source -and
+      $which.Source -notmatch '\\\\WindowsApps\\\\' -and
+      (Test-Path -LiteralPath $which.Source -PathType Leaf)) {{
     $found = $which.Source
     $source = 'Shell PATH'
   }}
@@ -1691,8 +1695,9 @@ if (-not $found) {{
 $version = $null
 if ($found) {{
   try {{
+    $global:LASTEXITCODE = 1
     $first = & $found --version 2>&1 | Select-Object -First 1
-    if ($first) {{ $version = ([string]$first).Trim() }}
+    if ($LASTEXITCODE -eq 0 -and $first) {{ $version = ([string]$first).Trim() }}
   }} catch {{}}
 }}
 $desktop = $null
@@ -1708,7 +1713,7 @@ if (-not $found) {{
   }} catch {{}}
 }}
 [PSCustomObject]@{{
-  installed = [bool]$found
+  installed = [bool]($found -and $version)
   path = $found
   source = $source
   version = $version
@@ -2126,6 +2131,17 @@ mod tests {
         for kind in ["claude;echo bad","cmd.exe","","../../../bin/bash"] {
             assert!(windows_agent_probe_command(kind).is_none());
         }
+    }
+    #[test]
+    fn windows_probe_does_not_confuse_windows_store_app_alias_with_cli(){
+        let encoded=windows_agent_probe_command("claude").unwrap();
+        let payload=encoded.split_whitespace().last().unwrap();
+        let bytes=STANDARD.decode(payload).unwrap();
+        let words=bytes.chunks_exact(2).map(|pair|u16::from_le_bytes([pair[0],pair[1]])).collect::<Vec<_>>();
+        let script=String::from_utf16(&words).unwrap();
+        assert!(script.contains("WindowsApps"));
+        assert!(script.contains("LASTEXITCODE -eq 0"));
+        assert!(script.contains("installed = [bool]($found -and $version)"));
     }
     #[test]
     fn windows_cli_launch_only_uses_safe_absolute_paths(){
