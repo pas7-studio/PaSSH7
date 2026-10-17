@@ -41,6 +41,7 @@ export default function RemoteFilesWorkspace(p:Props){
   const [selected,setSelected]=useState<string>("");
   const [selectedNames,setSelectedNames]=useState<string[]>([]);
   const selectionAnchor=useRef<string>("");
+  const autoPreviewRequested=useRef("");
   const [fileMenu,setFileMenu]=useState<{name:string;x:number;y:number}|null>(null);
   const fileMenuRef=useRef<HTMLDivElement>(null);
   useEffect(()=>{
@@ -116,7 +117,7 @@ export default function RemoteFilesWorkspace(p:Props){
   const previewError=p.previewError?.session===p.session&&p.previewError.path===selectedPath?p.previewError.message:"";
   const readPreviewRef=useRef(p.readPreview);
   readPreviewRef.current=p.readPreview;
-  const autoPreviewRequested=useRef("");
+
   useEffect(()=>{
     if(!selectedItem||selectedItem.isDir||!p.connected||!p.session||!selectedPath)return;
     const image=/\.(png|jpe?g|gif|webp)$/i.test(selectedItem.name);
