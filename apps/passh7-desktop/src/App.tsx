@@ -7,7 +7,7 @@ import AgentWorkspace from "./AgentWorkspace";
 import {loadPreferences,savePreferences,type AppPreferences} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -665,6 +665,9 @@ export default function App(){
   },[panel,preferences.rememberWorkspace]);
   const [dockerInventory,setDockerInventory]=useState<{session:string;items:Array<{ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string}>}|null>(null);
   const [dockerBusy,setDockerBusy]=useState(false);
+  const [dockerStats,setDockerStats]=useState<{session:string;items:DockerRuntimeStats[]}|null>(null);
+  const [dockerStatsError,setDockerStatsError]=useState<{session:string;message:string}|null>(null);
+  const dockerStatsRequestRef=useRef(0);
   const [dockerLogsBusy,setDockerLogsBusy]=useState(false);
   const [dockerActionBusy,setDockerActionBusy]=useState("");
   const [dockerActionStatus,setDockerActionStatus]=useState<{session:string;text:string}|null>(null);
@@ -715,7 +718,17 @@ export default function App(){
   const refreshDocker=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setDockerError("Connect to and select an SSH session for this host.");return}
-    const id=session.id;setDockerBusy(true);setDockerError("");
+    const id=session.id;setDockerBusy(true);setDockerError("");setDockerStatsError(null);
+    const statsRequest=++dockerStatsRequestRef.current;
+    // Resource sampling is best effort and never blocks the containers inventory.
+    void listDockerStats(id).then(items=>{
+      if(statsRequest===dockerStatsRequestRef.current)setDockerStats({session:id,items});
+    }).catch(error=>{
+      if(statsRequest===dockerStatsRequestRef.current){
+        setDockerStats({session:id,items:[]});
+        setDockerStatsError({session:id,message:String(error)});
+      }
+    });
     try{
       const raw=await listDockerContainers(id);
       const items=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>JSON.parse(line) as {ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string});
@@ -1116,6 +1129,8 @@ export default function App(){
         panel==="docker"?<DockerWorkspace
  host={active.label} session={activeSsh} connected={connected}
  items={dockerInventory?.session===activeSsh?dockerInventory.items:null}
+ stats={dockerStats?.session===activeSsh?dockerStats.items:null}
+ statsError={dockerStatsError?.session===activeSsh?dockerStatsError.message:""}
  loading={dockerBusy} error={dockerError}
  actionStatus={dockerActionStatus?.session===activeSsh?dockerActionStatus.text:null}
  actionBusy={dockerActionBusy} logs={dockerLogs} logsBusy={dockerLogsBusy}
