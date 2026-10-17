@@ -56,6 +56,8 @@ during this checklist. Use a throwaway identity and Docker container.
 | VAULT-00 | Browse an SSH backup directory with multiple versions; click Refresh versions | Versioned snapshots are listed newest first with size/date and unverified state; unrelated JSON files are ignored |
 | VAULT-00A | Inspect versioned backups with additions/removals/changes to hosts, identities and saved passwords | Native compare reports only record aliases and change categories, never secret values. Identical decrypted contents are recognized even if ciphertext nonces differ |
 | VAULT-00B | Select a snapshot whose decrypted Vault matches current local data | Review shows no content changes; Replace action stays disabled |
+| UX-KEYS-01 | Switch between Terminal, Files, Docker, Forwarding and Settings with Ctrl/Cmd+Shift+1..5, including with the host sidebar hidden | Correct full-width page opens; SSH sessions remain active and ordinary terminal Ctrl sequences remain available |
+| UX-KEYS-02 | Open Settings → Keyboard Shortcuts | Actual supported chords and file-keyboard actions appear, without claiming custom keybindings are editable |
 | VAULT-IDLE-01 | Set auto-lock to 5 minutes, unlock Vault, interact with the app and leave it idle | Native Vault locks after inactivity; SSH terminals/forwards/Docker log channels close, with secrets never written to UI settings |
 | VAULT-IDLE-02 | Leave the app idle over computer sleep for longer than the configured timeout, then restore focus | On return, idle deadline is checked before activity updates and Vault locks |
 | VAULT-IDLE-03 | Enable lock-on-blur, connect SSH, then switch to another window | Native Vault immediately locks and dependent SSH sessions close; default Off preserves previous behavior |
