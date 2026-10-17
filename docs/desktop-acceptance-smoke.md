@@ -152,3 +152,19 @@ during this checklist. Use a throwaway identity and Docker container.
 | SETTINGS-UI-01 | Open Settings, navigate to Terminal, collapse and expand a form section | Chevron and aria-expanded track actual content visibility; active category restores after reopening Settings |
 | DOCKER-TABLE-01 | Load 3 running containers and 1 stopped container, click Name/CPU/Memory headers | Rows sort correctly; per-container CPU/Memory come from read-only Docker stats; missing results display dash, not invented values |
 | DOCKER-TABLE-02 | Toggle Auto-refresh inside Docker toolbar | Persists existing 15-second inventory refresh preference; SSH log streams remain on their own dedicated channel |
+
+
+## SFTP Transfer Manager and Docker Compose discovery
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| XFER-01 | Select 3 remote files with Ctrl/Shift and queue downloads | Three queued tasks appear; one native Save dialog opens at a time; file content streams only via native SFTP; no browser blob copies |
+| XFER-02 | Cancel an active download and pause pending jobs | Staging partial file is cleaned up best effort; pending jobs stay queued without triggering dialogs until Resume |
+| XFER-03 | Retry failed transfer, decline system file picker and retry again | New transfer ID used; declined picker marks job cancelled; prior history remains visible |
+| XFER-04 | Lock Vault or disconnect the host while a transfer is active and others wait | Native active transfer cancels; queued jobs for missing sessions are marked cancelled, and no additional file picker opens |
+| XFER-05 | Upload into directory A, browse to directory B while upload finishes | Background refresh never navigates the UI back to A, nor overwrites another SSH host's listing |
+| XFER-06 | Clear finished jobs and inspect active row | Only completed/failed/cancelled history is cleared, active/pending work remains; no file paths/credentials stored in browser preferences |
+| COMPOSE-01 | Host with Docker Compose v2, select Compose tab | Real project names/status/config filenames load through fixed read-only SSH command |
+| COMPOSE-02 | Select Compose project, inspect its containers | Only containers with that Compose project label appear; UI shows real names, states, images, ports; no .env file or config values displayed |
+| COMPOSE-03 | Host without Compose plugin or denied Docker rights | Actionable read-only error appears; other Docker tabs remain usable |
+| COMPOSE-04 | Malicious/unexpected Compose project name from result | Project member query is rejected by both TS and Rust input validation; command injection is impossible |
