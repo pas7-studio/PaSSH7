@@ -136,7 +136,7 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
             <div className="settingsActions"><button disabled={!vaultUnlocked} onClick={onExport}><Download size={14}/> Export encrypted backup</button>
               <button disabled={!vaultUnlocked} onClick={onRestore}><Upload size={14}/> Review or restore backup</button>
               <button disabled={!vaultUnlocked} className="settingsDanger" onClick={onLock}><LockKeyhole size={14}/> Lock Vault now</button></div>
-            {infoRow("Automatic locking","Available only after native Vault lock policy is integrated into this build.","See release build")}
+            {infoRow("Automatic locking","After 15 minutes without local keyboard or pointer activity, PaSSH7 locks the decrypted Vault and disconnects SSH. Typing or clicking while unlocked refreshes the idle timer; remote agent output and SSH keepalives do not.","15-minute idle limit")}
           </>)}
         </>}
         {section==="terminal"&&<>
