@@ -7,7 +7,7 @@ import AgentWorkspace from "./AgentWorkspace";
 import ConnectionsWorkspace from "./ConnectionsWorkspace";
 import SnippetsWorkspace from "./SnippetsWorkspace";
 import PortForwardingWorkspace from "./PortForwardingWorkspace";
-import {loadPreferences,savePreferences,type AppPreferences} from "./preferences";
+import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
 import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
@@ -663,6 +663,15 @@ export default function App(){
   const updatePreferences=(value:AppPreferences)=>{
     setPreferences(value);savePreferences(value);setSftpOrder(value.sftpSort);setTheme(value.theme);
   };
+  const updatePaneSize=(key:keyof PaneSizes,value:number)=>{
+    // Read latest non-secret preferences to avoid a stale closure clobbering
+    // another setting while the user drags or switches workspaces.
+    setPreferences(current=>{
+      const updated={...current,paneSizes:{...current.paneSizes,[key]:value}};
+      savePreferences(updated);
+      return updated;
+    });
+  };
   useEffect(()=>{
     try{if(preferences.rememberWorkspace)localStorage.setItem("passh7.workspace.v1",panel)}catch{/* local UI preference is best effort */}
   },[panel,preferences.rememberWorkspace]);
@@ -1103,6 +1112,7 @@ export default function App(){
  onSession={id=>{if(sshTabs.some(t=>t.id===id&&t.alias===active.id))setActiveSsh(id)}}
  />:
          panel==="files"?<RemoteFilesWorkspace
+ paneSizes={preferences.paneSizes} onPaneSize={updatePaneSize}
  session={activeSsh} host={active.label} connected={connected}
  pathInput={sftpPath} setPathInput={setSftpPath}
  entries={sftpEntries} busy={sftpBusy} error={sftpError}
@@ -1183,6 +1193,7 @@ export default function App(){
  </>}
  />:
         panel==="docker"?<DockerWorkspace
+ paneSizes={preferences.paneSizes} onPaneSize={updatePaneSize}
  host={active.label} session={activeSsh} connected={connected}
  items={dockerInventory?.session===activeSsh?dockerInventory.items:null}
  stats={dockerStats?.session===activeSsh?dockerStats.items:null}
