@@ -81,7 +81,7 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
   const resetSection=()=>{
     if(!window.confirm("Reset "+sections.find(s=>s.id===section)?.label+" preferences to defaults?"))return;
     switch(section){
-      case "general":onChange({...preferences,rememberWorkspace:defaultPreferences.rememberWorkspace});break;
+      case "general":onChange({...preferences,rememberWorkspace:defaultPreferences.rememberWorkspace,sidebarExpanded:defaultPreferences.sidebarExpanded});break;
       case "appearance":onChange({...preferences,theme:defaultPreferences.theme,density:defaultPreferences.density,paneSizes:{...defaultPaneSizes}});break;
       case "terminal":onChange({...preferences,terminalFontSize:defaultPreferences.terminalFontSize,terminalScrollback:defaultPreferences.terminalScrollback,terminalFontFamily:defaultPreferences.terminalFontFamily,terminalCursorStyle:defaultPreferences.terminalCursorStyle,terminalCursorBlink:defaultPreferences.terminalCursorBlink,terminalLineHeight:defaultPreferences.terminalLineHeight});break;
       case "files":onChange({...preferences,sftpShowHidden:defaultPreferences.sftpShowHidden,sftpSort:defaultPreferences.sftpSort,confirmTransfer:defaultPreferences.confirmTransfer,paneSizes:{...preferences.paneSizes,filesTree:defaultPaneSizes.filesTree,filesInspector:defaultPaneSizes.filesInspector}});break;
@@ -103,6 +103,7 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
         {section==="general"&&<>
           {sectionCard("Application behavior",<>
             {switchRow("Remember last workspace","Reopen the same workspace after the app window is reloaded.","rememberWorkspace")}
+            {switchRow("Show host sidebar","Show or hide the workspace navigation and saved host list. Your choice is restored on startup.","sidebarExpanded")}
             {infoRow("Saved SSH host profiles","Host records and identities are stored in your encrypted Vault.","Vault only")}
             {infoRow("Start minimized","Not supported yet; this setting is not applied.","Not available")}
           </>)}
