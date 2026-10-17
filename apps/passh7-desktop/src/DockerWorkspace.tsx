@@ -1,10 +1,13 @@
 import {useEffect,useMemo,useState} from "react";
-import {listDockerCatalog,type DockerCatalogKind,type DockerRuntimeStats} from "./backend";
-import {Clipboard,Container,Cpu,Download,HardDrive,Layers,Maximize2,Minimize2,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
+import {listDockerCatalog,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
+import {Clipboard,Container,Cpu,Download,HardDrive,Layers,Maximize2,Minimize2,Network,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
 
 export type ContainerRow={ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string};
 type Logs={session:string;containerId:string;containerName:string;text:string}|null;
 type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|null;stats:DockerRuntimeStats[]|null;statsError:string;
+  details:{session:string;containerId:string;data:DockerDetails}|null;
+  detailsError:{session:string;containerId:string;message:string}|null;
+  onInspect:(containerId:string)=>void;
   loading:boolean;error:string;actionStatus:string|null;actionBusy:string;
   logs:Logs;logsBusy:boolean;logsError:string;tail:number;follow:boolean;
   liveStatus:"off"|"connecting"|"streaming"|"closed"|"error";
@@ -58,6 +61,7 @@ export default function DockerWorkspace(p:Props){
   const [wrap,setWrap]=useState(false);
   const [level,setLevel]=useState<"all"|"error"|"warn">("all");
   const [logsFullscreen,setLogsFullscreen]=useState(false);
+  const [inspectorTab,setInspectorTab]=useState<"details"|"mounts"|"network">("details");
   const running=(p.items||[]).filter(isRunning).length;
   const stopped=(p.items||[]).length-running;
   const images=new Set((p.items||[]).map(c=>c.Image).filter(Boolean)).size;
@@ -68,6 +72,11 @@ export default function DockerWorkspace(p:Props){
     (row.Names+" "+row.ID+" "+row.Image+" "+row.Status).toLowerCase().includes(search.toLowerCase())
   ),[p.items,filter,search]);
   const chosen=p.items?.find(x=>x.ID===selected)||visible[0];
+  const inspected=p.details?.session===p.session&&p.details.containerId===chosen?.ID?p.details.data:null;
+  const inspectError=p.detailsError?.session===p.session&&p.detailsError.containerId===chosen?.ID?p.detailsError.message:"";
+  useEffect(()=>{
+    if(tab==="containers"&&p.connected&&p.session&&chosen?.ID)p.onInspect(chosen.ID);
+  },[tab,p.session,p.connected,chosen?.ID]);
   const logLines=useMemo(()=>(p.logs?.session===p.session?p.logs.text:"").split(/\r?\n/)
     .filter(Boolean).filter(line=>line.toLowerCase().includes(logsSearch.toLowerCase()))
     .filter(line=>level==="all"||(level==="error"?/\berror\b|\bfatal\b|\bpanic\b/i.test(line):/\bwarn(ing)?\b/i.test(line)))
@@ -103,11 +112,35 @@ export default function DockerWorkspace(p:Props){
       </div></section>
       <aside className="dockerInspector"><div className="paneTitle">CONTAINER DETAILS</div>
         {chosen&&chosen.ID?<><div className="inspectorFile"><Container size={30}/><strong>{chosen.Names||chosen.ID.slice(0,12)}</strong><span className={"dockerStatus "+(isRunning(chosen)?"running":"stopped")}>{chosen.Status||chosen.State}</span></div>
-          <dl><dt>ID</dt><dd className="filePath">{chosen.ID}</dd><dt>Image</dt><dd>{chosen.Image||"Unknown"}</dd><dt>Ports</dt><dd>{chosen.Ports||"None"}</dd><dt>State</dt><dd>{chosen.State||"Unknown"}</dd><dt>Status</dt><dd>{chosen.Status||"Unknown"}</dd></dl>
-          <div className="inspectorActions"><button disabled={p.logsBusy} onClick={()=>p.onLogs(chosen.ID!,chosen.Names||chosen.ID!)}><TerminalSquare size={14}/> {p.logsBusy?"Loading…":"View logs"}</button>
-            {isRunning(chosen)?<><button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"restart")}><RefreshCw size={14}/> Restart</button><button className="dangerButton" disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"stop")}><Square size={14}/> Stop</button></>:<button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"start")}><Play size={14}/> Start</button>}
+          <div className="inspectorActions">
+            {isRunning(chosen)?<><button className="dangerButton" disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"stop")}><Square size={14}/> Stop</button>
+              <button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"restart")}><RefreshCw size={14}/> Restart</button></>:<button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"start")}><Play size={14}/> Start</button>}
+            <button disabled={p.logsBusy} onClick={()=>p.onLogs(chosen.ID!,chosen.Names||chosen.ID!)}><TerminalSquare size={14}/> {p.logsBusy?"Loading…":"View logs"}</button>
           </div>
-          <p className="prefInfo">Actions run using your remote SSH account's Docker privileges. Destructive actions require confirmation.</p>
+          <div className="dockerInspectTabs" role="tablist" aria-label="Container details tabs">
+            {(["details","mounts","network"] as const).map(kind=><button key={kind} role="tab" aria-selected={inspectorTab===kind}
+              className={inspectorTab===kind?"active":""} onClick={()=>setInspectorTab(kind)}>{kind==="details"?"Details":kind==="mounts"?"Volumes":"Network"}</button>)}
+          </div>
+          {inspectError&&<div className="workspaceError" role="alert">Could not inspect container: {inspectError}
+            <button onClick={()=>p.onInspect(chosen.ID!)}>Retry</button></div>}
+          {inspectorTab==="details"&&<dl><dt>Container ID</dt><dd className="filePath">{chosen.ID}</dd>
+            <dt>Image</dt><dd>{inspected?.image||chosen.Image||"Unknown"}</dd>
+            <dt>Status</dt><dd><span className={"dockerStatus "+(isRunning(chosen)?"running":"stopped")}>{chosen.State||"Unknown"}</span></dd>
+            <dt>Created</dt><dd>{inspected?.created?new Date(inspected.created).toLocaleString():"—"}</dd>
+            <dt>Started</dt><dd>{inspected?.startedAt&&!inspected.startedAt.startsWith("0001-")?new Date(inspected.startedAt).toLocaleString():"—"}</dd>
+            <dt>Restart policy</dt><dd>{inspected?.restartPolicy||"—"}</dd>
+            <dt>Ports</dt><dd>{chosen.Ports||"None published"}</dd>
+            <dt>Mounts</dt><dd>{inspected?inspected.mounts.length:"—"}</dd>
+            <dt>Networks</dt><dd>{inspected?inspected.networks.join(", ")||"None":"—"}</dd></dl>}
+          {inspectorTab==="mounts"&&<div className="dockerMounts">{inspected?.mounts.map((mount,index)=><div key={index}>
+            <strong>{mount.destination||"Unknown target"}</strong><small>{mount.source||"Unknown source"}</small>
+            <span>{mount.type||"Mount"} · {mount.rw?"read/write":"read-only"}</span>
+          </div>)}{inspected?.mounts.length===0&&<p>No volumes or bind mounts reported.</p>}{!inspected&&<p>Loading Docker mount details…</p>}</div>}
+          {inspectorTab==="network"&&<div className="dockerNetworks">
+            {inspected?.networks.map(name=><div key={name}><Network size={14}/>{name}</div>)}
+            {inspected?.networks.length===0&&<p>No networks reported.</p>}{!inspected&&<p>Loading Docker network details…</p>}
+          </div>}
+          <p className="prefInfo">Read-only inspection intentionally omits environment variable values, labels and full command arguments, which may contain secrets.</p>
         </>:<div className="workspaceEmpty">Select a container to inspect its details.</div>}
       </aside>
     </div>
