@@ -551,8 +551,11 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 }
                                             }
                                             let message=String::from_utf8_lossy(&output).into_owned();
-                                            if exit_status.is_some_and(|code|code!=0){
-                                                return Err(format!("Docker catalog failed: {}",message.chars().take(500).collect::<String>()));
+                                            if exit_status!=Some(0){
+                                                let reason=if exit_status.is_none(){
+                                                    "Docker catalog command ended without an SSH exit status. ".to_owned()
+                                                }else{String::new()};
+                                                return Err(format!("{reason}Docker catalog failed: {}",message.chars().take(500).collect::<String>()));
                                             }
                                             safe_docker_json_lines(&kind,&message)
                                         }).await.unwrap_or_else(|_|Err("Docker catalog timed out after 20 seconds".into()));
