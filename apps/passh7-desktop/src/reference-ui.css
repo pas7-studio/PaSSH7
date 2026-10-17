@@ -238,3 +238,34 @@
 .snippetWarning p{font-size:11px;line-height:1.65;color:var(--muted);margin:0}
 @media(max-width:1250px){.connectionsBody,.snippetsBody{grid-template-columns:minmax(0,1fr)}.connectionsInspector{display:flex;flex-wrap:wrap;align-items:center}.connectionsInspector h2{flex-basis:100%}.connectionsInspector .diagnosticList{flex:1}.connectionsInspector>button{width:auto}.snippetsRunner{max-width:none}}
 @media(max-width:800px){.connectionsMetrics{grid-template-columns:1fr}.connectionsToolbar,.snippetsToolbar{flex-wrap:wrap}.connectionsInspector{display:grid}.connectionsInspector>button{width:100%}}
+
+
+/* Port Forwarding: secure local SSH listeners, reference-style workspace */
+.forwardMetrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.forwardMetrics>div{display:flex;align-items:center;gap:11px;padding:15px 18px;background:var(--panel);border:1px solid var(--border);border-radius:9px}
+.forwardMetrics>div svg{color:#52a9ff}
+.forwardMetrics>div span{font-size:11px;color:var(--muted)}
+.forwardMetrics>div strong{font-size:17px;margin-left:auto}
+.forwardGrid{display:grid;grid-template-columns:minmax(260px,355px) minmax(0,1fr);gap:13px;align-items:start}
+.forwardForm,.forwardList{border:1px solid var(--border);background:linear-gradient(145deg,#10243b,#0c1b2c);border-radius:9px;padding:18px;min-width:0;display:grid;gap:14px}
+.forwardForm h2,.forwardList h2{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:700;margin:0}
+.forwardForm>p,.forwardTips>p{margin:0;color:var(--muted);line-height:1.65;font-size:11px}
+.forwardForm label{display:grid;gap:7px;color:#cfdef2;font-size:11px;font-weight:650}
+.forwardForm input{width:100%}
+.forwardFormHint{font-size:10px;color:var(--muted)}
+.forwardFormHint code{color:#d7e7fa}
+.forwardForm>.workspacePrimary{min-height:39px}
+.forwardListHeading{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.forwardListHeading button{white-space:nowrap}
+.forwardTableWrap{overflow-x:auto;min-height:210px}
+.forwardTableWrap .workspaceTable td{white-space:nowrap}
+.forwardRowActions{display:flex;align-items:center;gap:6px}
+.forwardSecure{color:#4bd98d;display:inline-flex;align-items:center;gap:5px}
+.forwardTips{padding:15px;border:1px solid var(--border);background:#10243b;border-radius:8px;display:grid;gap:11px}
+.forwardTips h3{font-size:12px;display:flex;align-items:center;gap:8px;margin:0}
+.forwardTips h3 svg{color:#49d39a}
+.forwardTips button{justify-self:start}
+.forwardNotice{border:1px solid #31547b;background:#183553;border-radius:7px;padding:10px;display:grid;gap:8px;color:var(--muted);font-size:11px;line-height:1.5}
+.forwardNotice button{justify-self:start}
+@media(max-width:1150px){.forwardGrid{grid-template-columns:1fr}}
+@media(max-width:710px){.forwardMetrics{grid-template-columns:1fr}}
