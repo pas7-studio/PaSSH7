@@ -86,6 +86,7 @@ during this checklist. Use a throwaway identity and Docker container.
 | DOCKER-JSON-02 | Repeat Docker inventories over Windows OpenSSH (PowerShell and cmd default-shell variants) | JSON lines parse without `template parsing error: unclosed action`; container list is populated with real states; stale/unsupported Docker CLI versions produce actionable errors |
 | DOCKER-JSON-03 | Add test canaries to container labels, command arguments and unrelated Docker JSON fields | Rust strips non-allowlisted fields before native IPC. Canary strings do not enter the WebView, console diagnostics or copied inventory data |
 | DOCKER-JSON-04 | Docker process fails or remote SSH exec does not report successful exit status | UI shows Docker execution error, not a misleading empty inventory or successful listing |
+| DOCKER-JSON-05 | Docker CLI produces a warning on stderr but valid JSON on stdout with exit 0 | Native reader parses stdout only, warning does not corrupt JSON. On nonzero exit, a bounded stderr error is shown without inventing inventory rows |
 
 | DOCKER-01 | Refresh containers; inspect logs | Real `docker ps -a` inventory; logs capped at 200 lines and 512 KiB |
 | DOCKER-02 | Start/stop/restart throwaway container | Per-operation confirmation, expected state shown after refresh |
