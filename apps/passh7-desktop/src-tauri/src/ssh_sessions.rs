@@ -139,6 +139,21 @@ pub struct ActiveLocalForward {
 pub struct AgentAvailability {
     pub installed:bool,
     pub version:Option<String>,
+    pub platform:&'static str,
+    pub source:Option<String>,
+    pub location:Option<String>,
+    pub desktop_app:Option<String>,
+    pub launch_command:Option<String>,
+    pub diagnostic:Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all="camelCase")]
+struct WindowsAgentProbe{
+    installed:bool,
+    path:Option<String>,
+    source:Option<String>,
+    version:Option<String>,
+    desktop_app:Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -1590,6 +1605,94 @@ pub async fn ssh_session_docker_action(
     manager.sender(&id)?.send(SessionCommand::DockerAction(action,container_id,tx)).await
         .map_err(|_|"SSH session closed before Docker action")?;
     rx.await.map_err(|_|"Docker action interrupted")?
+}
+
+/// The script is encoded as UTF-16LE to avoid cmd.exe and PowerShell's
+/// incompatible shell quote parsing. Only hard-coded allowlisted agent names
+/// can ever appear in this script. No user-supplied path or command is executed.
+fn powershell_encoded(script:&str)->String{
+    let bytes:Vec<u8>=script.encode_utf16().flat_map(|unit|unit.to_le_bytes()).collect();
+    format!("powershell.exe -NoProfile -NonInteractive -EncodedCommand {}",STANDARD.encode(bytes))
+}
+
+fn windows_agent_probe_command(agent:&str)->Option<String>{
+    let name=allowed_agent_binary(agent)?;
+    let script=format!(r#"
+$ErrorActionPreference = 'SilentlyContinue'
+$name = '{name}'
+$found = $null
+$source = $null
+foreach ($ext in @('.exe','.cmd','.bat','.ps1','')) {{
+  if ($found) {{ break }}
+  $which = Get-Command ($name + $ext) -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($which -and $which.Source -and (Test-Path -LiteralPath $which.Source -PathType Leaf)) {{
+    $found = $which.Source
+    $source = 'Shell PATH'
+  }}
+}}
+if (-not $found) {{
+  $roots = @(
+    (Join-Path $env:APPDATA 'npm'),
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'),
+    (Join-Path $env:USERPROFILE '.local\bin'),
+    (Join-Path $env:USERPROFILE '.bun\bin')
+  )
+  foreach ($root in $roots) {{
+    if ($found) {{ break }}
+    foreach ($ext in @('.cmd','.exe','.ps1','.bat')) {{
+      $candidate = Join-Path $root ($name+$ext)
+      if (Test-Path -LiteralPath $candidate -PathType Leaf) {{
+        $found = $candidate
+        $source = 'User installation outside SSH PATH'
+        break
+      }}
+    }}
+  }}
+}}
+$version = $null
+if ($found) {{
+  try {{
+    $first = & $found --version 2>&1 | Select-Object -First 1
+    if ($first) {{ $version = ([string]$first).Trim() }}
+  }} catch {{}}
+}}
+$desktop = $null
+if (-not $found) {{
+  $pattern = switch ($name) {{
+    'codex' {{ '^(Codex|OpenAI Codex)(\s|$)' }}
+    'claude' {{ '^Claude(\s|$)' }}
+    'opencode' {{ '^OpenCode(\s|$)' }}
+  }}
+  try {{
+    $app = Get-StartApps | Where-Object {{ $_.Name -match $pattern }} | Select-Object -First 1
+    if ($app) {{ $desktop = [string]$app.Name }}
+  }} catch {{}}
+}}
+[PSCustomObject]@{{
+  installed = [bool]$found
+  path = $found
+  source = $source
+  version = $version
+  desktopApp = $desktop
+}} | ConvertTo-Json -Compress -Depth 2
+"#);
+    Some(powershell_encoded(&script))
+}
+
+fn windows_agent_launch_command(path:&str)->Option<String>{
+    // Never embed paths in user-visible raw commands. Only a previously probed
+    // Windows CLI executable/script path may be launched, using an encoded
+    // PowerShell command that safely quotes apostrophes and metacharacters.
+    if path.len()>1024||path.chars().any(|c|c.is_control()) ||
+        ![".exe",".cmd",".bat",".ps1"].iter().any(|ext|path.to_ascii_lowercase().ends_with(ext)) ||
+        !(path.contains(":\\")||path.starts_with("\\\\")){return None;}
+    let script=format!("& '{}'",path.replace('\'',"''"));
+    Some(powershell_encoded(&script))
+}
+
+fn parse_windows_agent_probe(output:&str)->Option<WindowsAgentProbe>{
+    output.lines().rev().map(str::trim).find_map(|line|
+        serde_json::from_str::<WindowsAgentProbe>(line).ok())
 }
 
 fn allowed_agent_binary(kind:&str)->Option<&'static str>{
