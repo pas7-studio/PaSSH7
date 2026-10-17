@@ -140,3 +140,15 @@ during this checklist. Use a throwaway identity and Docker container.
 | FILE-ACTIONS-03 | Enter /home/user/projects/myapp in file path | Directory tree reveals only ancestors on current path, not unrelated branches; lazy SFTP calls are bounded by depth |
 | DOCKER-SHELL-01 | Choose running fixture container and click Open shell, then reject confirmation | No terminal command executes and the current PTY remains unchanged |
 | DOCKER-SHELL-02 | Choose running fixture container and accept shell launch while at SSH shell prompt | Validated container ID and one docker exec command written to current connected PTY; Terminal workspace shown |
+
+
+## Terminal preferences and Docker inventory table UX
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| TERM-PREF-01 | Set Cascadia / Consolas / JetBrains / monospace, change font size and line height while terminal is open | xterm renders new typography without reopening SSH session or dropping buffered PTY output; missing system fonts fall back |
+| TERM-PREF-02 | Change cursor style block/underline/bar, toggle cursor blink | Current terminal updates without reconnect; values survive app reload |
+| TERM-PREF-03 | Reset Terminal settings, export preferences, import on test profile | Defaults and imported non-secret values round-trip; Vault secret material unaffected |
+| SETTINGS-UI-01 | Open Settings, navigate to Terminal, collapse and expand a form section | Chevron and aria-expanded track actual content visibility; active category restores after reopening Settings |
+| DOCKER-TABLE-01 | Load 3 running containers and 1 stopped container, click Name/CPU/Memory headers | Rows sort correctly; per-container CPU/Memory come from read-only Docker stats; missing results display dash, not invented values |
+| DOCKER-TABLE-02 | Toggle Auto-refresh inside Docker toolbar | Persists existing 15-second inventory refresh preference; SSH log streams remain on their own dedicated channel |
