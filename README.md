@@ -48,6 +48,12 @@ The encrypted envelope version and the decrypted data schema version are indepen
 
 **Not yet guaranteed:** concurrent-writer isolation, filesystem ACL retention, power-loss rollback and full Windows crash recovery. Until those are implemented and independently verified, do not rely on PaSSH7 for irreplaceable keys.
 
+## Remote host readiness diagnostics
+
+Open **Settings → About & Diagnostics → Live SSH host health** with an authenticated host selected, then choose **Run host checks**. PaSSH7 checks the selected SSH account's SFTP directory access, Docker inventory and Codex/Claude Code/OpenCode terminal CLI availability without modifying files, containers or services. It distinguishes a usable Windows CLI from a Start Menu desktop application that cannot run in an SSH PTY. Results and failures are specific to the currently selected SSH session; switching hosts clears them. **Copy safe health summary** omits host addresses, usernames, file and container names, credentials and raw remote command output.
+
+A **Ready** result means the corresponding read-only check succeeded for that SSH account. It is not a guarantee that all agent workflows or remote Docker actions work: use actual Windows WebView2 + remote SSH acceptance before relying on them.
+
 ## Desktop app (experimental)
 
 The browser preview uses synthetic `.invalid` hosts and cannot open real SSH connections. Real SSH operations run only inside the Tauri desktop app.
@@ -76,7 +82,7 @@ After unlocking the encrypted vault, create a host with **Password only** (no SS
 - **Ports:** localhost-bound local TCP forwarding to destinations reachable by the SSH server; tunnels stop on session shutdown or vault lock; SOCKS/remote forwarding are not implemented
 - **AI Agent:** checks availability of remote Codex / Claude Code / OpenCode via allowlisted `--version` probes, then launches an installed CLI in an interactive SSH terminal with the remote account's **full permissions**. A non-interactive version probe can miss shell-only aliases. This is **not** an isolated sandbox, MCP authorization layer or provider setup wizard.
 
-The unlocked vault keeps sensitive material in the application's process, subject to a 15-minute idle timeout and explicit lock. Passwords also exist temporarily in the WebView/IPC during unlock and login. Independent Windows security tests, real-server acceptance testing, permission hardening, and crash recovery validation are still needed.
+The unlocked vault keeps sensitive material in the application's process, subject to a 15-minute **local user inactivity** timeout and explicit lock. Real keyboard and pointer input inside PaSSH7 refreshes that timeout (including interactive SSH terminal input); remote process output and SSH transport keepalives intentionally do **not** refresh it. An unattended agent's SSH connection is closed when the Vault automatically locks after 15 minutes, even though an active user can work in the terminal indefinitely without triggering the idle lock. Passwords also exist temporarily in the WebView/IPC during unlock and login. Independent Windows security tests, real-server acceptance testing, permission hardening, and crash recovery validation are still needed.
 
 The CI pipeline runs on dedicated self-hosted runners; automatic execution of public pull request code is deliberately disabled. See [CI setup](docs/self-hosted-ci.md) and [threat model](docs/threat-model.md).
 

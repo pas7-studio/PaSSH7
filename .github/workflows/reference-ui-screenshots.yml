@@ -1,0 +1,55 @@
+name: PaSSH7 reference UI screenshot smoke
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: passh7-reference-ui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  visual-smoke:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build production frontend and type-check dev fixture
+        run: |
+          npm install --no-audit --no-fund --prefix apps/passh7-desktop
+          npm run build --prefix apps/passh7-desktop
+      - name: Ensure visual fixtures are excluded from production
+        run: |
+          if grep -R "DEV UI FIXTURE" apps/passh7-desktop/dist; then
+            echo "Development fixture leaked into the release bundle"
+            exit 1
+          fi
+      - name: Install isolated visual-test dependencies
+        run: npm install --no-audit --no-fund --prefix apps/passh7-desktop/tests/visual
+      - name: Check npm-bundled Chromium availability
+        working-directory: apps/passh7-desktop/tests/visual
+        run: |
+          node --input-type=module -e "import('@sparticuz/chromium').then(async m => { const path=await m.default.executablePath(); console.log('Visual-test Chromium:',path); })"
+      - name: Capture approved reference workspaces
+        run: |
+          set -e
+          npm run dev --prefix apps/passh7-desktop -- --host 127.0.0.1 --port 4187 --strictPort > /tmp/passh7-visual-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4187/?__reference=1 >/dev/null; then break; fi
+            sleep 1
+          done
+          cd apps/passh7-desktop/tests/visual
+          ./node_modules/.bin/playwright test
+      - name: Upload screenshot evidence and test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaSSH7-reference-UI-screenshots
+          path: apps/passh7-desktop/tests/visual/test-results
+          if-no-files-found: warn
+          retention-days: 7

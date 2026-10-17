@@ -6,7 +6,28 @@ import {closeSshSession,readySshSession,resizeSshSession,writeSshSession} from "
 import "@xterm/xterm/css/xterm.css";
 import {loadPreferences,type AppPreferences} from "./preferences";
 
-type Props={id:string;active:boolean;onClosed:(id:string,detail?:string)=>void};
+type Props={id:string;active:boolean;layoutKey?:string;onClosed:(id:string,detail?:string)=>void};
+const fontStack=(choice:AppPreferences["terminalFontFamily"]):string=>{
+  switch(choice){
+    case "consolas":return "Consolas, monospace";
+    case "jetbrains":return '"JetBrains Mono", Consolas, monospace';
+    case "monospace":return "monospace";
+    default:return '"Cascadia Code", Consolas, monospace';
+  }
+};
+
+const terminalTheme=(theme:AppPreferences["theme"])=>theme==="light"?{
+  background:"#f7fbff",foreground:"#1d344e",cursor:"#216dd0",
+  cursorAccent:"#f7fbff",selectionBackground:"#bdd8f5a8",
+  black:"#324155",red:"#b83247",green:"#166e4c",yellow:"#95620d",
+  blue:"#236abc",magenta:"#8a49a6",cyan:"#087b86",white:"#eaf0f8",
+  brightBlack:"#687b91",brightRed:"#d84857",brightGreen:"#23895f",
+  brightYellow:"#bb8628",brightBlue:"#327fe0",brightMagenta:"#a169c2",
+  brightCyan:"#1e96a3",brightWhite:"#ffffff"
+}:{
+  background:"#081522",foreground:"#e5effb",cursor:"#7bb7ff",
+  selectionBackground:"#23559488"
+};
 
 const INPUT_BATCH_MS=3;
 const OUTPUT_BATCH_MS=4;
@@ -64,7 +85,7 @@ function createInputSender(id:string,terminal:Terminal,isLive:()=>boolean){
   }};
 }
 
-export default function TerminalView({id,active,onClosed}:Props){
+export default function TerminalView({id,active,layoutKey,onClosed}:Props){
   const container=useRef<HTMLDivElement>(null);
   const fitRef=useRef<FitAddon|null>(null);
   const termRef=useRef<Terminal|null>(null);
@@ -73,9 +94,11 @@ export default function TerminalView({id,active,onClosed}:Props){
     if(!node)return;
     const preferences=loadPreferences();
     const terminal=new Terminal({
-      cursorBlink:true,convertEol:false,scrollback:preferences.terminalScrollback,
-      fontFamily:"Cascadia Code, Consolas, monospace",
-      fontSize:preferences.terminalFontSize,theme:{background:"#0e1420",foreground:"#e5ecf6"}
+      cursorBlink:preferences.terminalCursorBlink,cursorStyle:preferences.terminalCursorStyle,
+      convertEol:false,scrollback:preferences.terminalScrollback,
+      fontFamily:fontStack(preferences.terminalFontFamily),lineHeight:preferences.terminalLineHeight,
+      fontSize:preferences.terminalFontSize,
+      theme:terminalTheme(preferences.theme)
     });
     const fit=new FitAddon();terminal.loadAddon(fit);terminal.open(node);
     fitRef.current=fit;termRef.current=terminal;
@@ -83,7 +106,12 @@ export default function TerminalView({id,active,onClosed}:Props){
       const p=(event as CustomEvent<AppPreferences>).detail;
       if(!p)return;
       terminal.options.fontSize=p.terminalFontSize;
+      terminal.options.fontFamily=fontStack(p.terminalFontFamily);
+      terminal.options.lineHeight=p.terminalLineHeight;
+      terminal.options.cursorStyle=p.terminalCursorStyle;
+      terminal.options.cursorBlink=p.terminalCursorBlink;
       terminal.options.scrollback=p.terminalScrollback;
+      terminal.options.theme=terminalTheme(p.theme);
       if(node.clientWidth>40&&node.clientHeight>40)fit.fit();
     };
     window.addEventListener("passh7:preferences",onPreferences);
@@ -92,6 +120,11 @@ export default function TerminalView({id,active,onClosed}:Props){
     let live=true;
     const input=createInputSender(id,terminal,()=>live);
     const disposeInput=terminal.onData(input.accept);
+    // A button action (Launch CLI, snippet, Docker shell) may immediately send
+    // its own command after xterm loses focus. Flush outstanding typed bytes
+    // on blur before that action is enqueued in the shared session FIFO.
+    const keyboardInput=node.querySelector(".xterm-helper-textarea");
+    keyboardInput?.addEventListener("blur",input.flush);
 
     // The SSH event stream is base64 because it contains arbitrary PTY bytes,
     // including non-UTF-8 data and ANSI controls. xterm parses Uint8Array
@@ -168,6 +201,7 @@ export default function TerminalView({id,active,onClosed}:Props){
     });
     return ()=>{
       window.removeEventListener("passh7:preferences",onPreferences);
+      keyboardInput?.removeEventListener("blur",input.flush);
       input.dispose();
       live=false;
       flushOutput();
@@ -187,6 +221,6 @@ export default function TerminalView({id,active,onClosed}:Props){
       const input=container.current.querySelector("textarea");
       if(input instanceof HTMLElement)input.focus();
     }
-  },[active,id]);
+  },[active,id,layoutKey]);
   return <div ref={container} className="liveTerminal" style={{display:active?"block":"none"}} aria-label="Interactive SSH terminal"/>;
 }

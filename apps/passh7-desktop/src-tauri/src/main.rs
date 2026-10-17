@@ -117,6 +117,53 @@ impl SessionStore {
         *self.0.lock().map_err(|_| "Vault session unavailable")? = None;
         Ok(())
     }
+    // Only genuine local user interaction calls this command. Background SSH
+    // heartbeats and agent output must NOT extend the lifetime of decrypted
+    // credentials. Expired sessions are never silently reactivated.
+    fn touch_if_live(&self)->Result<bool,String>{
+        let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
+        let Some(session)=guard.as_mut() else{return Ok(false)};
+        if session.last_used.elapsed()>=IDLE_TIMEOUT{
+            *guard=None;
+            return Ok(false);
+        }
+        session.last_used=Instant::now();
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod vault_local_activity_tests{
+    use super::*;
+    #[test]
+    fn real_local_activity_refreshes_live_vault_ttl(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()-Duration::from_secs(120)
+        })));
+        assert!(store.touch_if_live().unwrap());
+        let guard=store.0.lock().unwrap();
+        assert!(guard.as_ref().unwrap().last_used.elapsed()<Duration::from_secs(3));
+    }
+    #[test]
+    fn expired_vault_cannot_be_reactivated_by_activity(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()-IDLE_TIMEOUT-Duration::from_secs(1)
+        })));
+        assert!(!store.touch_if_live().unwrap());
+        assert!(store.0.lock().unwrap().is_none());
+        assert!(!store.touch_if_live().unwrap());
+    }
+    #[test]
+    fn explicit_vault_lock_cannot_be_reversed_by_activity(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()
+        })));
+        store.lock().unwrap();
+        assert!(!store.touch_if_live().unwrap());
+    }
 }
 
 #[derive(Serialize)]
@@ -217,6 +264,72 @@ async fn vault_export_encrypted_backup(
     if result.is_err() && created{let _=std::fs::remove_file(&target);}
     result?;
     Ok(Some(format!("Encrypted Vault exported and verified ({} bytes)",data.len())))
+}
+
+/// Produce a filename safe on both Windows and Unix, including reserved DOS
+/// device names. Docker container names are untrusted display data, not paths.
+fn docker_log_file_name(container_name:&str)->String {
+    let fragment:String=container_name.chars().filter(|ch|
+        ch.is_ascii_alphanumeric()||matches!(ch,'-'|'_')
+    ).take(56).collect();
+    let value=if fragment.is_empty() {"container"}else{fragment.as_str()};
+    format!("passh7-{value}-logs.txt")
+}
+
+/// Save only the currently visible/filtered Docker log lines using the OS
+/// dialog. No browser blob download or implicit overwrite is attempted.
+#[tauri::command]
+async fn docker_save_visible_logs(
+    app:tauri::AppHandle,container_name:String,contents:String
+)->Result<Option<String>,String>{
+    use tauri_plugin_dialog::DialogExt;
+    use std::io::Write;
+    if contents.is_empty(){return Err("No visible Docker log lines to save".into());}
+    if contents.len()>8*1024*1024{
+        return Err("Visible Docker log export exceeds the 8 MiB safety limit".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    app.dialog().file().set_file_name(docker_log_file_name(&container_name))
+        .save_file(move|selected|{let _=tx.send(selected);});
+    let chosen=rx.await.map_err(|_|"Docker log Save As dialog failed")?;
+    let Some(chosen)=chosen else{return Ok(None)};
+    let target=chosen.into_path().map_err(|_|"Choose a local filesystem path")?;
+    let mut created=false;
+    let result=(||->Result<(),String>{
+        let mut file=std::fs::OpenOptions::new().create_new(true).write(true)
+            .open(&target).map_err(|error|
+                format!("Cannot create log file (existing files are not overwritten): {error}")
+            )?;
+        created=true;
+        file.write_all(contents.as_bytes()).map_err(|error|
+            format!("Could not write Docker log file: {error}")
+        )?;
+        file.sync_all().map_err(|error|format!("Could not sync Docker log file: {error}"))?;
+        drop(file);
+        let readback=std::fs::read(&target).map_err(|error|
+            format!("Could not verify saved Docker logs: {error}")
+        )?;
+        if readback!=contents.as_bytes(){
+            return Err("Saved log bytes did not match the requested export".into());
+        }
+        Ok(())
+    })();
+    if result.is_err()&&created{let _=std::fs::remove_file(&target);}
+    result?;
+    Ok(Some(format!("Saved {} UTF-8 bytes to {}",contents.len(),target.display())))
+}
+
+#[cfg(test)]
+mod docker_log_filename_tests {
+    use super::docker_log_file_name;
+    #[test]
+    fn never_uses_container_names_as_paths(){
+        assert_eq!(docker_log_file_name("../api:prod\\\\secrets"),"passh7-apiprodsecrets-logs.txt");
+        assert_eq!(docker_log_file_name("CON"),"passh7-CON-logs.txt");
+        assert_eq!(docker_log_file_name(""),"passh7-container-logs.txt");
+        assert_eq!(docker_log_file_name("...."),"passh7-container-logs.txt");
+        assert!(docker_log_file_name(&"x".repeat(100)).len()<80);
+    }
 }
 
 fn prepare_vault_restore_preview(
@@ -383,6 +496,13 @@ fn vault_restore_commit(
     })?;
     ssh.stop_all(); // All sessions may reference replaced credentials.
     Ok(())
+}
+
+#[tauri::command]
+fn vault_touch(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool,String>{
+    let active=sessions.touch_if_live()?;
+    if !active{ssh.stop_all();}
+    Ok(active)
 }
 
 #[tauri::command]
@@ -1043,11 +1163,11 @@ fn main() {
         .manage(PendingVaultRestore::default())
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
-            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
+            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_inspect,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_read_image,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");

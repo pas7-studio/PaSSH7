@@ -1,16 +1,24 @@
-import {useCallback,useRef} from "react";
+import {useCallback,useLayoutEffect,useRef} from "react";
+import {createPortal} from "react-dom";
 import TerminalView from "./TerminalView";
 import RemoteFilesWorkspace from "./RemoteFilesWorkspace";
+import useSftpTransferQueue from "./useSftpTransferQueue";
 import DockerWorkspace from "./DockerWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
-import {loadPreferences,savePreferences,type AppPreferences} from "./preferences";
+import AgentWorkspace from "./AgentWorkspace";
+import ConnectionsWorkspace from "./ConnectionsWorkspace";
+import SnippetsWorkspace from "./SnippetsWorkspace";
+import PortForwardingWorkspace from "./PortForwardingWorkspace";
+import QuickSwitch from "./QuickSwitch";
+import useModalFocus from "./useModalFocus";
+import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,downloadSftpFile,uploadSftpFile,cancelSftpTransfer,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,type SftpTransferEvent,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
-type Panel = "files" | "docker" | "agent" | "ports" | "settings";
+type Panel = "connections" | "terminal" | "files" | "docker" | "agent" | "snippets" | "ports" | "settings";
 type Host = {id:string; label:string; address:string; user:string; port:number; group:string; fingerprint:boolean;identityAlias?:string;hasSavedCredentials?:boolean;savedAuthMode?:string|null;backupDirectory?:string|null;jumpAlias?:string|null};
 const DEMO_HOSTS:Host[] = [
   {id:"dev",label:"Development",address:"dev.example.invalid",user:"ubuntu",port:22,group:"Development",fingerprint:true},
@@ -39,10 +47,47 @@ export default function App(){
   const [selected,setSelected]=useState("dev");
   const [sshTabs,setSshTabs]=useState<{id:string;alias:string}[]>([]);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
+  const lastLocalVaultActivity=useRef(Number.NEGATIVE_INFINITY);
+  const noteLocalVaultActivity=()=>{
+    if(!vaultUnlocked||!desktopAvailable())return;
+    const now=performance.now();
+    // Protect against IPC floods while preserving a 15-minute idle TTL.
+    // Only actual DOM interaction (keyboard/pointer), not SSH output or
+    // recurring polls, is permitted to refresh unlocked credentials.
+    if(now-lastLocalVaultActivity.current<60_000)return;
+    lastLocalVaultActivity.current=now;
+    void touchVaultActivity().then(active=>{
+      if(!active){setVaultUnlocked(false);setHosts([]);setSelected("");}
+    }).catch(()=>{/* Existing vault_status poll independently enforces expiry. */});
+  };
   // Native session events use a stable callback; its owner map stays fresh.
   const sshTabsRef=useRef(sshTabs);
   useEffect(()=>{sshTabsRef.current=sshTabs},[sshTabs]);
   const [activeSsh,setActiveSsh]=useState("");
+  // Remember the user's selected terminal per host. With multiple SSH shells
+  // open on the same machine, switching away and back must NOT silently
+  // change the CLI/PTY that receives subsequent keyboard input.
+  const preferredSessionByHost=useRef(new Map<string,string>());
+  // One persistent xterm and event subscriber per native SSH session.
+  // Reparent its DOM surface between Terminal and AI Agents; never remount
+  // the renderer or attach a second PTY viewer when changing workspaces.
+  const terminalSurfaces=useRef(new Map<string,HTMLDivElement>());
+  const mainTerminalDock=useRef<HTMLDivElement|null>(null);
+  const agentTerminalDock=useRef<HTMLDivElement|null>(null);
+  const parkedTerminals=useRef<HTMLDivElement|null>(null);
+  const agentTerminalDockRef=useCallback((node:HTMLDivElement|null)=>{
+    agentTerminalDock.current=node;
+  },[]);
+  const getTerminalSurface=(id:string)=>{
+    let surface=terminalSurfaces.current.get(id);
+    if(!surface){
+      surface=document.createElement("div");
+      surface.className="terminalSessionSurface";
+      surface.dataset.sshSession=id;
+      terminalSurfaces.current.set(id,surface);
+    }
+    return surface;
+  };
   const [sshBusy,setSshBusy]=useState(false);
   const [loginOpen,setLoginOpen]=useState(false);
   const [tofuCandidate,setTofuCandidate]=useState<{alias:string;fingerprint:string}|null>(null);
@@ -72,32 +117,65 @@ export default function App(){
   const [loginMode,setLoginMode]=useState<"key"|"password"|"key-password">("key-password");
   useEffect(()=>{
     const current=sshTabs.find(t=>t.id===activeSsh);
-    if(current?.alias===selected)return;
-    // The side panel must never operate on a different server than YOUR HOSTS.
-    const matching=sshTabs.find(t=>t.alias===selected);
+    if(current?.alias===selected){
+      preferredSessionByHost.current.set(selected,current.id);
+      return;
+    }
+    // Preserve the previously selected PTY on this host, if still live.
+    // Fall back to another session of this host only after disconnection.
+    const preferred=preferredSessionByHost.current.get(selected);
+    const matching=sshTabs.find(t=>t.alias===selected&&t.id===preferred)
+      ||sshTabs.find(t=>t.alias===selected);
     setActiveSsh(matching?.id??"");
   },[sshTabs,activeSsh,selected]);
   const [tunnels,setTunnels]=useState<{session:string;localPort:number;targetHost:string;remotePort:number}[]>([]);
+  // Each native SSH session owns independent port-forward operations. A slow
+  // response from A may update A's cache, but never B's busy/error state.
+  const tunnelRevision=useRef(new Map<string,number>());
+  const tunnelInFlight=useRef(new Set<string>());
+  const [tunnelBusySessions,setTunnelBusySessions]=useState<string[]>([]);
+  const [tunnelErrors,setTunnelErrors]=useState<Record<string,string>>({});
+  const tunnelBusy=tunnelBusySessions.includes(activeSsh);
+  const tunnelError=tunnelErrors[activeSsh]||"";
+  const setPortError=(session:string,message:string)=>
+    setTunnelErrors(previous=>({...previous,[session]:message}));
+  const beginPortOperation=(session:string)=>{
+    if(tunnelInFlight.current.has(session))return false;
+    tunnelInFlight.current.add(session);
+    tunnelRevision.current.set(session,(tunnelRevision.current.get(session)||0)+1);
+    setTunnelBusySessions(previous=>[...previous.filter(id=>id!==session),session]);
+    setPortError(session,"");
+    return true;
+  };
+  const finishPortOperation=(session:string)=>{
+    tunnelInFlight.current.delete(session);
+    setTunnelBusySessions(previous=>previous.filter(id=>id!==session));
+  };
   // The backend owns active TCP listeners. Recover them after WebView reload
   // and when a previously existing native terminal session becomes visible.
   useEffect(()=>{
     if(!vaultUnlocked||!desktopAvailable()||sshTabs.length===0)return;
     let live=true;
-    const ids=new Set(sshTabs.map(s=>s.id));
-    void Promise.all(sshTabs.map(async session=>{
-      try{
-        const items=await listLocalForwards(session.id);
-        return items.map(item=>({session:session.id,...item}));
-      }catch{return [] as {session:string;localPort:number;targetHost:string;remotePort:number}[]}
-    })).then(groups=>{
+    const observed=sshTabs.map(session=>({
+      session:session.id,revision:tunnelRevision.current.get(session.id)||0
+    }));
+    void Promise.allSettled(observed.map(async ({session,revision})=>({
+      session,revision,items:await listLocalForwards(session)
+    }))).then(results=>{
       if(!live)return;
-      setTunnels(previous=>[
-        ...previous.filter(t=>!ids.has(t.session)),...groups.flat()
-      ]);
+      setTunnels(previous=>{
+        const accepted=results.flatMap(result=>result.status==="fulfilled"&&
+          (tunnelRevision.current.get(result.value.session)||0)===result.value.revision&&
+          sshTabsRef.current.some(tab=>tab.id===result.value.session)
+            ?[result.value]:[]);
+        const updated=new Set(accepted.map(result=>result.session));
+        return [...previous.filter(item=>!updated.has(item.session)),
+          ...accepted.flatMap(({session,items})=>items.map(item=>({session,...item})))];
+      });
     });
     return()=>{live=false};
   },[vaultUnlocked,sshTabs]);
-  const [sessionNotice,setSessionNotice]=useState<{alias:string;detail:string}|null>(null);
+  const [sessionNotice,setSessionNotice]=useState<{alias:string;detail:string;kind?:"close-failed"}|null>(null);
   const onSessionClosed=useCallback((id:string,detail?:string)=>{
     const alias=sshTabsRef.current.find(t=>t.id===id)?.alias||"";
     setSshTabs(t=>t.filter(x=>x.id!==id));
@@ -280,8 +358,26 @@ export default function App(){
   const [step,setStep]=useState(0);
   const [draft,setDraft]=useState<HostDraft>({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});
   const [sftpPath,setSftpPath]=useState(".");
+  // A connected SSH terminal keeps its own last successful directory.
+  // Switching hosts must not reuse another user's path or reset navigation.
+  const lastSftpDirectory=useRef(new Map<string,string>());
   const [sftpEntries,setSftpEntries]=useState<{session:string;path:string;items:SftpEntry[]}|null>(null);
   const [sftpBusy,setSftpBusy]=useState(false);
+  useEffect(()=>{
+    const alive=new Set(sshTabs.map(tab=>tab.id));
+    for(const sessionId of lastSftpDirectory.current.keys()){
+      if(!alive.has(sessionId))lastSftpDirectory.current.delete(sessionId);
+    }
+  },[sshTabs]);
+  useEffect(()=>{
+    setSftpPath(lastSftpDirectory.current.get(activeSsh)||".");
+  },[activeSsh,selected]);
+  const sftpBrowseRequestRef=useRef(0);
+  const sftpContextRef=useRef({session:activeSsh,host:selected});
+  sftpContextRef.current={session:activeSsh,host:selected};
+  const sftpRequestCurrent=(request:number,session:string,host:string)=>
+    request===sftpBrowseRequestRef.current&&
+    sftpContextRef.current.session===session&&sftpContextRef.current.host===host;
   const [sftpFilter,setSftpFilter]=useState("");
   const [sftpOrder,setSftpOrder]=useState<"folders"|"name"|"size"|"modified">(()=>loadPreferences().sftpSort);
   const visibleSftpEntries=useMemo(()=>{
@@ -299,15 +395,37 @@ export default function App(){
     });
   },[sftpEntries,sftpFilter,sftpOrder]);
   const [sftpError,setSftpError]=useState("");
-  const [sftpPreview,setSftpPreview]=useState<{session:string;path:string;body:string}|null>(null);
+  const [sftpNotice,setSftpNotice]=useState<{session:string;text:string}|null>(null);
+  const [sftpPreview,setSftpPreview]=useState<{session:string;path:string;body:string;kind:"image"|"text"}|null>(null);
+  const [sftpPreviewError,setSftpPreviewError]=useState<{session:string;path:string;message:string}|null>(null);
+  const sftpPreviewRequestRef=useRef(0);
   const [sftpPreviewBusy,setSftpPreviewBusy]=useState(false);
-  const [sftpTransferBusy,setSftpTransferBusy]=useState(false);
-  const [sftpTransferProgress,setSftpTransferProgress]=useState<{
-    session:string;id:string;direction:"upload"|"download";
-    stage:"selecting"|"started"|"progress"|"cancelling";
-    bytes:number;totalBytes:number|null
-  }|null>(null);
-  const [sftpTransferResult,setSftpTransferResult]=useState<{session:string;text:string}|null>(null);
+  useEffect(()=>{
+    // Invalidate SFTP navigation/preview results as soon as the user selects
+    // another host or PTY. Late responses may not replace the new server's view.
+    sftpBrowseRequestRef.current++;
+    sftpPreviewRequestRef.current++;
+    setSftpBusy(false);setSftpPreviewBusy(false);
+    setSftpError("");setSftpPreviewError(null);
+  },[activeSsh,selected]);
+  const transferSessionRef=useRef(activeSsh);
+  transferSessionRef.current=activeSsh;
+  const transferFolderRef=useRef({session:activeSsh,path:sftpEntries?.session===activeSsh?sftpEntries.path:sftpPath});
+  transferFolderRef.current={session:activeSsh,path:sftpEntries?.session===activeSsh?sftpEntries.path:sftpPath};
+  const transferQueue=useSftpTransferQueue((session,directory)=>{
+    // A completed background upload must not navigate the user away from a
+    // newer folder or an unrelated SSH host.
+    void listSftpDirectory(session,directory).then(items=>{
+      if(transferFolderRef.current.session===session&&transferFolderRef.current.path===directory){
+        setSftpEntries({session,path:directory,items});
+        setSftpPath(directory);
+      }
+    }).catch(error=>{
+      if(transferFolderRef.current.session===session&&transferFolderRef.current.path===directory)
+        setSftpError("Upload succeeded; could not refresh folder: "+String(error));
+    });
+  },sshTabs.map(tab=>tab.id));
+  const sftpTransferBusy=transferQueue.active;
   const [vaultSnapshotHistory,setVaultSnapshotHistory]=useState<{
     session:string;directory:string;entries:SftpEntry[]
   }|null>(null);
@@ -482,73 +600,35 @@ export default function App(){
     finally{setVaultBackupBusy(false)}
   };
 
-  const cancelActiveTransfer=async()=>{
-    const current=sftpTransferProgress;
-    if(!current||current.stage==="selecting"||current.stage==="cancelling")return;
-    setSftpTransferProgress(prev=>prev?.id===current.id?{...prev,stage:"cancelling"}:prev);
-    try{await cancelSftpTransfer(current.session,current.id)}
-    catch(e){setSftpError("Could not cancel transfer: "+String(e))}
-  };
-  const transferSftp=async(direction:"upload"|"download",path?:string)=>{
+  const enqueueSftpTransfer=(direction:"upload"|"download",paths:string[]=[])=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Select a connected SSH session before transferring files.");return}
-    if(sftpTransferBusy)return;
-    if(preferences.confirmTransfer && !window.confirm(
-      direction==="upload"?"Upload a local file to "+(sftpEntries?.path||sftpPath)+" on "+session.alias+"?":
-      "Download remote file "+(path||"")+" from "+session.alias+"?"
-    ))return;
-    const transferId=crypto.randomUUID();
-    setSftpTransferBusy(true);setSftpError("");setSftpTransferResult(null);
-    setSftpTransferProgress({session:session.id,id:transferId,direction,stage:"selecting",bytes:0,totalBytes:null});
-    let unlisten:(()=>void)|null=null;
-    try{
-      // Install the progress listener before opening the native picker. This
-      // avoids missing the first event when the selected file is small.
-      unlisten=await listen<SftpTransferEvent>("passh7:sftp-transfer",event=>{
-        const value=event.payload;
-        if(value.sessionId!==session.id||value.transferId!==transferId)return;
-        setSftpTransferProgress(previous=>previous?.id===transferId&&previous.stage!=="cancelling"
-          ? {...previous,stage:value.stage,bytes:value.bytes,totalBytes:value.totalBytes}
-          :previous);
-      });
-      const targetDir=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
-      const result=direction==="download"
-        ? await downloadSftpFile(session.id,path||"",transferId)
-        : await uploadSftpFile(session.id,targetDir,transferId);
-      if(result){
-        setSftpTransferResult({session:session.id,text:result});
-        if(direction==="upload"){
-          // Upload completion is independent of a subsequent directory refresh.
-          try{
-            const items=await listSftpDirectory(session.id,targetDir);
-            setSftpEntries({session:session.id,path:targetDir,items});
-            setSftpPath(targetDir);
-          }catch(refreshError){
-            setSftpError("Upload succeeded, but directory refresh failed: "+String(refreshError));
-          }
-        }
-      }
-    }catch(e){
-      const reason=String(e);
-      if(/cancelled by user/i.test(reason)){
-        setSftpTransferResult({session:session.id,text:"Transfer cancelled. Remote partial-file cleanup is best effort."});
-      }else{
-        setSftpError((direction==="download"?"Download":"Upload")+" failed: "+reason);
-      }
-    }
-    finally{
-      unlisten?.();
-      setSftpTransferProgress(previous=>previous?.id===transferId?null:previous);
-      setSftpTransferBusy(false);
-    }
+    const targetDir=sftpEntries?.session===session.id?sftpEntries.path:sftpPath;
+    const items=direction==="download"?paths.filter(Boolean):[targetDir];
+    if(!items.length)return;
+    if(preferences.confirmTransfer&&!window.confirm(direction==="upload"
+      ?"Add a local-file upload to "+targetDir+" on "+session.alias+"?\n\nA system file picker opens when the job starts."
+      :"Queue "+items.length+" remote file(s) from "+session.alias+"?\n\nEach download will open a native Save dialog. Existing local files will not be overwritten."))return;
+    const count=transferQueue.enqueue({session:session.id,host:session.alias,direction,paths:items});
+    if(count<items.length)setSftpError("Only "+count+" of "+items.length+" transfers were queued. Finish or clear existing jobs before adding more.");
+    else setSftpError("");
   };
   const readSftpPreview=async(path:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Select an active SSH session first.");return}
-    setSftpPreviewBusy(true);setSftpError("");
-    try{setSftpPreview({session:session.id,path,body:await readSftpText(session.id,path)})}
-    catch(e){setSftpError(String(e))}
-    finally{setSftpPreviewBusy(false)}
+    const request=++sftpPreviewRequestRef.current,host=session.alias;
+    const stillCurrent=()=>request===sftpPreviewRequestRef.current&&
+      sftpContextRef.current.session===session.id&&sftpContextRef.current.host===host;
+    const image=/\.(png|jpe?g|gif|webp)$/i.test(path);
+    setSftpPreviewBusy(true);setSftpPreview(null);setSftpPreviewError(null);
+    try{
+      const body=image?await readSftpImage(session.id,path):await readSftpText(session.id,path);
+      if(stillCurrent())setSftpPreview({session:session.id,path,body,kind:image?"image":"text"});
+    }catch(error){
+      if(stillCurrent())setSftpPreviewError({session:session.id,path,message:String(error)});
+    }finally{
+      if(stillCurrent())setSftpPreviewBusy(false);
+    }
   };
 
   const [sftpMutationBusy,setSftpMutationBusy]=useState(false);
@@ -560,69 +640,114 @@ export default function App(){
     try{
       await mutateSftpFile(session.id,operation,dir,name,isDirectory,newName);
       const entries=await listSftpDirectory(session.id,dir);
-      setSftpEntries({session:session.id,path:dir,items:entries});
-      setSftpTransferResult({session:session.id,text:(operation==="mkdir"?"Created folder ":operation==="rename"?"Renamed ":"Deleted ")+name+(newName?" → "+newName:"")});
+      if(transferSessionRef.current===session.id){
+        setSftpEntries({session:session.id,path:dir,items:entries});
+        setSftpNotice({session:session.id,text:(operation==="mkdir"?"Created folder ":operation==="rename"?"Renamed ":"Deleted ")+name+(newName?" → "+newName:"")});
+      }
     }catch(error){setSftpError("Remote "+operation+" failed: "+String(error))}
     finally{setSftpMutationBusy(false)}
   };
   const browseSftp=async(path:string)=>{
-    const session=sshTabs.find(t=>t.id===activeSsh && t.alias===selected);
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Connect to the selected host first.");return}
+    const request=++sftpBrowseRequestRef.current,host=session.alias;
     setSftpBusy(true);setSftpError("");
-    try{const items=await listSftpDirectory(session.id,path);setSftpEntries({session:session.id,path,items});setSftpPath(path)}
-    catch(e){setSftpError(String(e))}
-    finally{setSftpBusy(false)}
+    try{
+      const items=await listSftpDirectory(session.id,path);
+      if(sftpRequestCurrent(request,session.id,host)){
+        lastSftpDirectory.current.set(session.id,path);
+        setSftpEntries({session:session.id,path,items});
+        setSftpPath(path);
+      }
+    }catch(error){
+      if(sftpRequestCurrent(request,session.id,host))setSftpError("Could not list remote directory "+path+": "+String(error));
+    }finally{
+      if(sftpRequestCurrent(request,session.id,host))setSftpBusy(false);
+    }
   };
   const [tunnelLocalPort,setTunnelLocalPort]=useState(18080);
   const [tunnelRemoteHost,setTunnelRemoteHost]=useState("127.0.0.1");
   const [tunnelRemotePort,setTunnelRemotePort]=useState(8080);
-  const [tunnelBusy,setTunnelBusy]=useState(false);
-  const [tunnelError,setTunnelError]=useState("");
 
   const addTunnel=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
-    if(!session){setTunnelError("Select an active SSH session for this host.");return}
-    setTunnelBusy(true);setTunnelError("");
-    try {
-      await startLocalForward(session.id,tunnelLocalPort,tunnelRemoteHost,tunnelRemotePort);
-      setTunnels(v=>[...v,{session:session.id,localPort:tunnelLocalPort,targetHost:tunnelRemoteHost,remotePort:tunnelRemotePort}]);
-    }catch(e){setTunnelError(String(e))}
-    finally{setTunnelBusy(false)}
+    if(!session)return;
+    if(!beginPortOperation(session.id))return;
+    const port=tunnelLocalPort,target=tunnelRemoteHost,remotePort=tunnelRemotePort;
+    try{
+      await startLocalForward(session.id,port,target,remotePort);
+      if(sshTabsRef.current.some(tab=>tab.id===session.id)){
+        setTunnels(previous=>[
+          ...previous.filter(item=>!(item.session===session.id&&item.localPort===port)),
+          {session:session.id,localPort:port,targetHost:target,remotePort}
+        ]);
+      }
+    }catch(error){
+      setPortError(session.id,"Could not start local forward: "+String(error));
+    }finally{finishPortOperation(session.id)}
   };
   const refreshLocalForwarding=async()=>{
-    const sessions=sshTabs.filter(s=>s.alias===selected);
-    if(!sessions.length){setTunnelError("Connect to this host before inspecting local forwards.");return}
-    setTunnelBusy(true);setTunnelError("");
+    // Refresh every PTY of this host. Each session is isolated: a slow or
+    // broken sibling must never discard healthy forwarding inventories.
+    const sessions=sshTabs.filter(tab=>tab.alias===selected);
+    const eligible=sessions.filter(tab=>beginPortOperation(tab.id));
+    if(!eligible.length)return;
     try{
-      const results=await Promise.all(sessions.map(async session=>{
-        const entries=await listLocalForwards(session.id);
-        return entries.map(entry=>({session:session.id,...entry}));
-      }));
-      const ids=new Set(sessions.map(s=>s.id));
-      setTunnels(current=>[...current.filter(t=>!ids.has(t.session)),...results.flat()]);
-    }catch(error){setTunnelError("Cannot refresh native SSH forwards: "+String(error))}
-    finally{setTunnelBusy(false)}
+      const results=await Promise.allSettled(eligible.map(async tab=>({
+        session:tab.id,items:await listLocalForwards(tab.id)
+      })));
+      for(let index=0;index<results.length;index++){
+        const response=results[index];
+        const session=eligible[index].id;
+        if(!sshTabsRef.current.some(tab=>tab.id===session))continue;
+        if(response.status==="fulfilled"){
+          setTunnels(previous=>[
+            ...previous.filter(item=>item.session!==session),
+            ...response.value.items.map(item=>({session,...item}))
+          ]);
+        }else{
+          setPortError(session,"Cannot refresh native SSH forwards: "+String(response.reason));
+        }
+      }
+    }finally{for(const tab of eligible)finishPortOperation(tab.id)}
   };
   const removeTunnel=async(session:string,localPort:number)=>{
-    setTunnelBusy(true);setTunnelError("");
-    try{await stopLocalForward(session,localPort);setTunnels(v=>v.filter(t=>!(t.session===session&&t.localPort===localPort)))}
-    catch(e){setTunnelError(String(e))}
-    finally{setTunnelBusy(false)}
+    if(!sshTabsRef.current.some(tab=>tab.id===session)||!beginPortOperation(session))return;
+    try{
+      await stopLocalForward(session,localPort);
+      setTunnels(previous=>previous.filter(item=>!(item.session===session&&item.localPort===localPort)));
+    }catch(error){
+      setPortError(session,"Could not stop local forward: "+String(error));
+    }finally{finishPortOperation(session)}
   };
   const [agent,setAgent]=useState<AgentKind>("codex");
   const [agentStatus,setAgentStatus]=useState("");
   const [agentProbeBusy,setAgentProbeBusy]=useState(false);
   const [agentProbeError,setAgentProbeError]=useState("");
-  const [agentAvailability,setAgentAvailability]=useState<Partial<Record<AgentKind,{
-    session:string;installed:boolean;version:string|null
-  }>>>({});
+  const agentProbeGeneration=useRef(0);
+  const agentContext=useRef({session:activeSsh,host:selected});
+  agentContext.current={session:activeSsh,host:selected};
+  useEffect(()=>{
+    // A response from a prior SSH session must not appear on a new host.
+    agentProbeGeneration.current++;
+    setAgentProbeBusy(false);
+    setAgentProbeError("");
+    setAgentStatus("");
+  },[activeSsh,selected]);
+  const [agentAvailability,setAgentAvailability]=useState<Partial<Record<AgentKind,
+    RemoteAgentAvailability&{session:string}
+  >>>({});
   const checkRemoteAgents=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentProbeError("Connect to this host before checking installed tools.");return}
     if(agentProbeBusy)return;
+    const generation=++agentProbeGeneration.current;
     setAgentProbeBusy(true);setAgentProbeError("");
     const checks=await Promise.allSettled(AGENTS.map(a=>probeRemoteAgent(session.id,a.kind)));
-    const discovered:Partial<Record<AgentKind,{session:string;installed:boolean;version:string|null}>>={};
+    if(generation!==agentProbeGeneration.current
+      ||agentContext.current.session!==session.id
+      ||agentContext.current.host!==session.alias)return;
+    const discovered:Partial<Record<AgentKind,RemoteAgentAvailability&{session:string}>>={};
     const failures:string[]=[];
     checks.forEach((check,index)=>{
       const kind=AGENTS[index].kind;
@@ -632,6 +757,7 @@ export default function App(){
         failures.push(AGENTS[index].name+": "+String(check.reason));
       }
     });
+    // Results are scoped to the same still-active SSH session and generation.
     setAgentAvailability(prev=>({...prev,...discovered}));
     if(failures.length)setAgentProbeError(failures.join("; "));
     setAgentProbeBusy(false);
@@ -639,37 +765,111 @@ export default function App(){
   const launchRemoteAgent=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentStatus("Connect to this host first.");return}
-    const cli:Record<AgentKind,string>={codex:"codex",claude:"claude",opencode:"opencode"};
     const name=AGENTS.find(a=>a.kind===agent)?.name||agent;
-    // Exec probes can miss binaries loaded by custom interactive shell startup.
-    // Never block an explicit user-triggered interactive launch on a probe.
-    if(!window.confirm("Run "+name+" on "+session.alias+" in the existing SSH terminal? This CLI runs with your full SSH account privileges, NOT in a PaSSH7 sandbox. It must already be installed and configured on the remote host."))return;
+    const probed=agentAvailability[agent]?.session===session.id?agentAvailability[agent]:null;
+    if(probed?.platform==="windows"&&!probed.installed){
+      setAgentStatus(probed.desktopApp
+        ?name+" Desktop is a GUI application. It cannot render in an SSH terminal. Use Windows Remote Desktop (RDP), or install its separate CLI."
+        :name+" CLI was not found for this Windows SSH account. Use Check installed tools, then install the CLI or repair its PATH.");
+      return;
+    }
+    // The native backend provides a safely encoded PowerShell invocation of a
+    // probed absolute Windows .exe/.cmd/.ps1 path. Do not use a GUI app's path.
+    const command=probed?.installed&&probed.launchCommand?probed.launchCommand:agent;
+    if(command.length>2048||/[\r\n]/.test(command)){
+      setAgentStatus("Unsafe agent launch command rejected. Run Check installed tools again.");return;
+    }
+    if(!window.confirm("Run "+name+" on "+session.alias+" in your existing SSH terminal? This agent runs with the FULL permissions of the remote SSH account, not inside a PaSSH7 sandbox."))return;
     try{
-      await writeSshSession(session.id,cli[agent]+"\r");
-      setAgentStatus("Launch command sent to the SSH terminal. Check terminal output to confirm "+name+" started.");
-    }catch(e){setAgentStatus("Could not launch agent: "+String(e))}
+      await writeSshSession(session.id,command+"\r");
+      if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
+        setAgentStatus("Launch command sent to "+session.alias+". Check the interactive terminal below to confirm the CLI started.");
+    }catch(error){
+      if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
+        setAgentStatus("Could not send agent launch command: "+String(error));
+    }
   };
   const [error,setError]=useState("");
   const [query,setQuery]=useState("");
   const [panel,setPanel]=useState<Panel>(()=>{
-    try{const value=localStorage.getItem("passh7.workspace.v1");return ["agent","files","docker","ports","settings"].includes(value||"")?value as Panel:"agent"}catch{return "agent"}
+    try{const value=localStorage.getItem("passh7.workspace.v1");return ["connections","terminal","agent","files","docker","snippets","ports","settings"].includes(value||"")?value as Panel:"connections"}catch{return "agent"}
   });
+  useLayoutEffect(()=>{
+    const dock=panel==="agent"?agentTerminalDock.current
+      :panel==="terminal"?mainTerminalDock.current:null;
+    const parking=parkedTerminals.current;
+    if(!parking)return;
+    const liveIds=new Set(sshTabs.map(tab=>tab.id));
+    for(const tab of sshTabs){
+      const node=terminalSurfaces.current.get(tab.id);
+      if(!node)continue;
+      const target=tab.id===activeSsh&&vaultUnlocked&&dock?dock:parking;
+      if(node.parentElement!==target)target.appendChild(node);
+    }
+    for(const [id,node] of terminalSurfaces.current){
+      if(!liveIds.has(id)){
+        node.remove();
+        terminalSurfaces.current.delete(id);
+      }
+    }
+  },[panel,activeSsh,sshTabs,vaultUnlocked]);
   const [preferences,setPreferences]=useState<AppPreferences>(loadPreferences);
   const updatePreferences=(value:AppPreferences)=>{
     setPreferences(value);savePreferences(value);setSftpOrder(value.sftpSort);setTheme(value.theme);
+  };
+  const updatePaneSize=(key:keyof PaneSizes,value:number)=>{
+    // Read latest non-secret preferences to avoid a stale closure clobbering
+    // another setting while the user drags or switches workspaces.
+    setPreferences(current=>{
+      const updated={...current,paneSizes:{...current.paneSizes,[key]:value}};
+      savePreferences(updated);
+      return updated;
+    });
   };
   useEffect(()=>{
     try{if(preferences.rememberWorkspace)localStorage.setItem("passh7.workspace.v1",panel)}catch{/* local UI preference is best effort */}
   },[panel,preferences.rememberWorkspace]);
   const [dockerInventory,setDockerInventory]=useState<{session:string;items:Array<{ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string}>}|null>(null);
+  const dockerContextRef=useRef({session:activeSsh,host:selected});
+  dockerContextRef.current={session:activeSsh,host:selected};
+  const dockerRefreshRequestRef=useRef(0);
+  const dockerCurrent=(session:string,host:string)=>dockerContextRef.current.session===session&&dockerContextRef.current.host===host;
   const [dockerBusy,setDockerBusy]=useState(false);
+  const [dockerStats,setDockerStats]=useState<{session:string;items:DockerRuntimeStats[]}|null>(null);
+  const [dockerStatsError,setDockerStatsError]=useState<{session:string;message:string}|null>(null);
+  const [dockerDetails,setDockerDetails]=useState<{session:string;containerId:string;data:DockerDetails}|null>(null);
+  const [dockerDetailsError,setDockerDetailsError]=useState<{session:string;containerId:string;message:string}|null>(null);
+  const dockerDetailsRequestRef=useRef(0);
+  const readDockerDetails=async(containerId:string)=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session)return;
+    const request=++dockerDetailsRequestRef.current;
+    const host=session.alias;
+    setDockerDetailsError(null);setDockerDetails(null);
+    try{
+      const data=await inspectDockerContainer(session.id,containerId);
+      if(request===dockerDetailsRequestRef.current&&dockerCurrent(session.id,host))
+        setDockerDetails({session:session.id,containerId,data});
+    }catch(error){
+      if(request===dockerDetailsRequestRef.current&&dockerCurrent(session.id,host))
+        setDockerDetailsError({session:session.id,containerId,message:String(error)});
+    }
+  };
+  const dockerStatsRequestRef=useRef(0);
   const [dockerLogsBusy,setDockerLogsBusy]=useState(false);
   const [dockerActionBusy,setDockerActionBusy]=useState("");
   const [dockerActionStatus,setDockerActionStatus]=useState<{session:string;text:string}|null>(null);
   const [dockerLogs,setDockerLogs]=useState<{session:string;containerId:string;containerName:string;text:string}|null>(null);
   const [dockerLogsError,setDockerLogsError]=useState<{session:string;message:string}|null>(null);
   const dockerLogsRequestRef=useRef(0);
-  useEffect(()=>{dockerLogsRequestRef.current++},[activeSsh,selected]);
+  useEffect(()=>{
+    dockerLogsRequestRef.current++;
+    dockerDetailsRequestRef.current++;
+    dockerStatsRequestRef.current++;
+    dockerRefreshRequestRef.current++;
+    setDockerLogsBusy(false);setDockerBusy(false);setDockerStatsError(null);
+    setDockerDetailsError(null);setDockerError("");setDockerLiveStatus("off");
+  },[activeSsh,selected]);
   const [dockerLiveStatus,setDockerLiveStatus]=useState<"off"|"connecting"|"streaming"|"closed"|"error">("off");
   const [dockerError,setDockerError]=useState("");
   const runDockerAction=async(containerId:string,containerName:string,action:"start"|"stop"|"restart")=>{
@@ -680,17 +880,31 @@ export default function App(){
     setDockerActionBusy(containerId);setDockerError("");setDockerActionStatus(null);
     try{
       const result=await controlDockerContainer(session.id,containerId,action);
-      setDockerActionStatus({session:session.id,text:result});
+      if(dockerCurrent(session.id,session.alias))setDockerActionStatus({session:session.id,text:result});
       try{
         const raw=await listDockerContainers(session.id);
         const items=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean)
           .map(line=>JSON.parse(line) as {ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string});
-        setDockerInventory({session:session.id,items});
+        if(dockerCurrent(session.id,session.alias))setDockerInventory({session:session.id,items});
       }catch(refreshError){
-        setDockerError("Docker "+action+" succeeded, but refreshing container state failed: "+String(refreshError));
+        if(dockerCurrent(session.id,session.alias))setDockerError("Docker "+action+" succeeded, but refreshing container state failed: "+String(refreshError));
       }
-    }catch(error){setDockerError("Docker "+action+" failed: "+String(error))}
+    }catch(error){if(dockerCurrent(session.id,session.alias))setDockerError("Docker "+action+" failed: "+String(error))}
     finally{setDockerActionBusy("")}
+  };
+  const openDockerShell=async(containerId:string,containerName:string)=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session){setDockerError("Select a connected SSH terminal first.");return}
+    if(!/^[a-f0-9]{12,64}$/i.test(containerId)){
+      setDockerError("Invalid container ID; refresh Docker inventory.");return;
+    }
+    if(!window.confirm("Open an interactive sh in "+containerName+" on "+session.alias+"?\n\n"+
+      "This executes as your remote SSH account with Docker privileges. The command "+
+      "will be sent to the current terminal; confirm it is at a shell prompt."))return;
+    try{
+      await writeSshSession(session.id,"docker exec -it "+containerId+" sh\r");
+      setDockerError("");setPanel("terminal");
+    }catch(error){setDockerError("Could not start Docker shell: "+String(error))}
   };
   const viewDockerLogs=async(containerId:string,containerName:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -713,19 +927,40 @@ export default function App(){
   const refreshDocker=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setDockerError("Connect to and select an SSH session for this host.");return}
-    const id=session.id;setDockerBusy(true);setDockerError("");
+    const id=session.id,host=session.alias,request=++dockerRefreshRequestRef.current;
+    setDockerBusy(true);setDockerError("");setDockerStatsError(null);
+    const statsRequest=++dockerStatsRequestRef.current;
+    // CPU/RAM sampling is independent of inventory and bound to the same host.
+    void listDockerStats(id).then(items=>{
+      if(statsRequest===dockerStatsRequestRef.current&&dockerCurrent(id,host))setDockerStats({session:id,items});
+    }).catch(error=>{
+      if(statsRequest===dockerStatsRequestRef.current&&dockerCurrent(id,host)){
+        setDockerStats({session:id,items:[]});
+        setDockerStatsError({session:id,message:String(error)});
+      }
+    });
     try{
       const raw=await listDockerContainers(id);
       const items=raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map(line=>JSON.parse(line) as {ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string});
-      setDockerInventory({session:id,items});
-    }catch(e){setDockerError(String(e))}
-    finally{setDockerBusy(false)}
+      if(request===dockerRefreshRequestRef.current&&dockerCurrent(id,host))
+        setDockerInventory({session:id,items});
+    }catch(error){
+      if(request===dockerRefreshRequestRef.current&&dockerCurrent(id,host))setDockerError(String(error));
+    }finally{
+      if(request===dockerRefreshRequestRef.current&&dockerCurrent(id,host))setDockerBusy(false);
+    }
   };
+  // Opening Docker or switching hosts should load the current server immediately.
+  // Auto-refresh is an optional subsequent 15-second poll, not a prerequisite.
   useEffect(()=>{
-    if(panel!=="docker"||!preferences.dockerAutoRefresh)return;
+    if(panel==="docker"&&vaultUnlocked&&activeSsh&&sshTabs.some(tab=>tab.id===activeSsh&&tab.alias===selected))
+      void refreshDocker();
+  },[panel,activeSsh,selected,vaultUnlocked]);
+  useEffect(()=>{
+    if(panel!=="docker"||!preferences.dockerAutoRefresh||!vaultUnlocked||!activeSsh)return;
     const timer=window.setInterval(()=>{void refreshDocker()},15000);
     return ()=>window.clearInterval(timer);
-  },[panel,activeSsh,selected,preferences.dockerAutoRefresh]);
+  },[panel,activeSsh,selected,vaultUnlocked,preferences.dockerAutoRefresh]);
   // A real dedicated SSH exec channel follows Docker output. Subscribe to
   // native events before requesting the stream so its first bytes are never
   // dropped. Changing host, container, workspace or Follow closes the channel.
@@ -740,6 +975,10 @@ export default function App(){
     let disposed=false;
     let finished=false;
     let streamId="";
+    // The native producer may emit its first log events before start() returns.
+    // Hold them by stream ID until the acknowledgement identifies OUR stream.
+    // Old follow streams for the same container must never contaminate a new one.
+    const preAck=new Map<string,{events:DockerLogEvent[];bytes:number;truncated:boolean}>();
     let unsubscribe:(()=>void)|undefined;
     let flushTimer:number|undefined;
     let pending="";
@@ -753,11 +992,23 @@ export default function App(){
         ?{...previous,text:(previous.text+chunk).slice(-1_500_000)}:previous);
     };
     void (async()=>{
-      unsubscribe=await listen<DockerLogEvent>("passh7:docker-log",event=>{
-        if(disposed)return;
-        const data=event.payload;
-        if(data.sessionId!==sessionId||data.containerId!==containerId||
-           (streamId&&data.streamId!==streamId))return;
+      const onDockerLog=(data:DockerLogEvent)=>{
+        if(disposed||data.sessionId!==sessionId||data.containerId!==containerId)return;
+        if(!streamId){
+          let buffered=preAck.get(data.streamId);
+          if(!buffered){
+            if(preAck.size>=8)return;
+            buffered={events:[],bytes:0,truncated:false};
+            preAck.set(data.streamId,buffered);
+          }
+          const bytes=data.data?.length||0;
+          if(buffered.events.length<256&&buffered.bytes+bytes<=256*1024){
+            buffered.events.push(data);
+            buffered.bytes+=bytes;
+          }else buffered.truncated=true;
+          return;
+        }
+        if(data.streamId!==streamId)return;
         if(data.kind==="data"&&data.data){
           const binary=atob(data.data);
           const bytes=new Uint8Array(binary.length);
@@ -774,10 +1025,18 @@ export default function App(){
             setDockerLogsError({session:sessionId,message:data.detail||"Docker live log channel failed"});
           }else setDockerLiveStatus("closed");
         }
-      });
+      };
+      unsubscribe=await listen<DockerLogEvent>("passh7:docker-log",event=>onDockerLog(event.payload));
       if(disposed){unsubscribe();unsubscribe=undefined;return;}
       const opened=await startDockerLogStream(sessionId,containerId,0);
       streamId=opened;
+      const currentEarly=preAck.get(opened);
+      const queued=currentEarly?.events||[];
+      preAck.clear();
+      for(const event of queued)onDockerLog(event);
+      if(currentEarly?.truncated){
+        setDockerLogsError({session:sessionId,message:"Some initial live log events exceeded the display buffer; refresh recent logs if needed."});
+      }
       if(disposed){
         void stopDockerLogStream(sessionId,opened).catch(()=>{});
       }else if(!finished)setDockerLiveStatus("streaming");
@@ -801,8 +1060,7 @@ export default function App(){
   useEffect(()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session)return;
-    if(panel==="docker"&&dockerInventory?.session!==session.id){void refreshDocker()}
-    if(panel==="files"&&sftpEntries?.session!==session.id){void browseSftp(".")}
+    if(panel==="files"&&sftpEntries?.session!==session.id){void browseSftp(lastSftpDirectory.current.get(session.id)||".")}
   },[panel,activeSsh,selected]);
   const confirmRemove=async()=>{
     if(!deleteTarget || !desktopAvailable() || !vaultUnlocked)return;
@@ -821,8 +1079,25 @@ export default function App(){
       setDeleteTarget(null);setError("");
     }catch(e){setError(String(e))}
   };
-  const [sidebar,setSidebar]=useState(true);
+  const [terminalDetailsOpen,setTerminalDetailsOpen]=useState(false);
+  const sidebar=preferences.sidebarExpanded;
+  const toggleSidebar=()=>updatePreferences({...preferences,sidebarExpanded:!sidebar});
   const [commandOpen,setCommandOpen]=useState(false);
+  const topDialog=commandOpen?"quick-switch":configImportOpen?"ssh-import":keyDialog?"identity":
+    loginOpen?"ssh-login":tofuCandidate?"host-trust":accessOpen?"windows-access":
+    vaultDialog?"vault":deleteTarget?"confirm-delete":addOpen?"host-wizard":null;
+  useModalFocus(topDialog);
+  useEffect(()=>{
+    const globalShortcut=(event:KeyboardEvent)=>{
+      if(!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=="k"||event.repeat)return;
+      if(topDialog)return; // Never open a new palette over SSH auth or Vault dialogs.
+      event.preventDefault();
+      event.stopPropagation();
+      setCommandOpen(true);
+    };
+    document.addEventListener("keydown",globalShortcut,true);
+    return()=>document.removeEventListener("keydown",globalShortcut,true);
+  },[topDialog]);
 
   const [theme,setTheme]=useState<"dark"|"light">(()=>loadPreferences().theme);
   const [buildInfo,setBuildInfo]=useState<BuildInfo|null>(null);
@@ -882,6 +1157,34 @@ export default function App(){
       setLoginMode(mode);setUseSavedCredentials(true);setRememberCredentials(true);
       setProbeError(String(e));setLoginOpen(true);
     }finally{setSshBusy(false)}
+  };
+  const connectFromConnections=async(alias:string)=>{
+    const host=hosts.find(h=>h.id===alias);
+    if(!host)return;
+    setSelected(alias);setPanel("terminal");setProbeError("");setTofuError("");
+    if(!desktopAvailable()||!vaultUnlocked){setVaultDialog(true);return}
+    if(!host.fingerprint){
+      setTofuBusy(true);
+      try{
+        const key=host.jumpAlias?await discoverSshHostKeyVia(alias):await discoverSshHostKey(alias);
+        setTofuCandidate({alias,fingerprint:key.fingerprint});
+      }catch(error){setProbeError(String(error))}
+      finally{setTofuBusy(false)}
+      return;
+    }
+    const mode=(host.savedAuthMode as "key"|"password"|"key-password")||(host.identityAlias?"key-password":"password");
+    if(host.hasSavedCredentials){await quickConnect(alias,mode);return}
+    setLoginPassword("");setLoginKeyPassphrase("");setHostIdentityChoice("");
+    setLoginMode(mode);setRememberCredentials(false);setUseSavedCredentials(false);setLoginOpen(true);
+  };
+  const executeSnippet=async(command:string)=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session){setProbeError("Select an authenticated SSH session before running a snippet.");setPanel("terminal");return}
+    if(!command||command.length>512||/[\r\n]/.test(command))return;
+    if(!window.confirm("Execute this command as the remote SSH user on "+session.alias+"?\n\n"+command+
+      "\n\nPaSSH7 does not sandbox commands. Confirm the terminal is at a shell prompt."))return;
+    try{await writeSshSession(session.id,command+"\r");setPanel("terminal")}
+    catch(error){setProbeError("Snippet could not be sent: "+String(error));setPanel("terminal")}
   };
   const reconnectNotice=(alias:string)=>{
     const host=hosts.find(h=>h.id===alias);
@@ -955,24 +1258,77 @@ export default function App(){
     try{await writeSshSession(session.id,'net user "'+profile.user+'" *\r')}
     catch(e){setProbeError(String(e))}
   };
-  const closeInteractive=async(id:string)=>{try{await closeSshSession(id)}catch(e){setProbeError(String(e))}onSessionClosed(id)};
+  const closeInteractive=async(id:string)=>{
+    const alias=sshTabsRef.current.find(tab=>tab.id===id)?.alias||"SSH host";
+    try{
+      await closeSshSession(id);
+      onSessionClosed(id);
+    }catch(error){
+      // Do not optimistically erase a live remote shell when native IPC
+      // rejected Close. A failed close can otherwise orphan an active PTY
+      // and leave the UI falsely reporting Disconnected.
+      try{
+        const live=await listLiveSshSessions();
+        if(!live.some(tab=>tab.id===id)){
+          onSessionClosed(id);
+          return;
+        }
+      }catch{/* Cannot establish backend state: preserve the visible session. */}
+      setSessionNotice({alias,kind:"close-failed",detail:"Could not confirm SSH disconnect; session may still be active. "+String(error)});
+    }
+  };
+  // User-initiated host changes update the alias and its PTY in one React
+  // event. Without this, quick SFTP/Docker navigation can land between
+  // selected=newHost and activeSsh=oldHost and lose the action.
+  const selectHost=(alias:string)=>{
+    const preferred=preferredSessionByHost.current.get(alias);
+    const matching=sshTabs.find(tab=>tab.alias===alias&&tab.id===preferred)
+      ||sshTabs.find(tab=>tab.alias===alias);
+    setSelected(alias);
+    setActiveSsh(matching?.id||"");
+  };
   const active=hosts.find(h=>h.id===selected) || {id:"",label:"No host selected",address:"",user:"",port:22,group:"Workspace",fingerprint:false};
   const filtered=useMemo(()=>hosts.filter(h=>(h.label+" "+h.address+" "+h.group).toLowerCase().includes(query.trim().toLowerCase())),[hosts,query]);
   const activeConnections=sshTabs.filter(t=>t.alias===active.id).length;
   const connected=activeConnections>0;
   const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: "+(connected?`connected (${activeConnections} SSH session${activeConnections===1?"":"s"})`:"disconnected")+"\nVault: "+(vaultUnlocked?"unlocked":"locked")+"\nPermissions: "+(connected?"Remote SSH account privileges (not sandboxed)":"No active SSH account")+"\nSelected resources: none"+"\nSSH route: "+(active.jumpAlias?"via "+active.jumpAlias+" (gateway LAN → "+active.address+":"+active.port+")":"direct");
-  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if(e.key==="Escape"){setCommandOpen(false);}}}>
-    <header className="topbar"><div className="brand"><div className="brandicon"><TerminalSquare size={19}/></div><strong>PaSSH7</strong><span className="alpha">v{buildInfo?.version ?? "0.1.0"} · PREVIEW</span></div><nav className="topWorkspaces" aria-label="Main workspace navigation">{([["agent","Terminal",TerminalSquare],["files","Files",FolderClosed],["docker","Docker",Container],["ports","Forwarding",Activity],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=><button type="button" key={id} aria-current={panel===id?"page":undefined} className={panel===id?"active":""} onClick={()=>setPanel(id)}><Icon size={15}/><span>{label}</span></button>)}</nav><div className="topactions"><button className="lock" onClick={()=>{if(desktopAvailable()){if(vaultUnlocked){void lockVault()}else{setVaultDialog(true)}}}}><LockKeyhole size={14}/> {vaultUnlocked?"Lock vault":desktopAvailable()?"Unlock vault":"Vault unavailable"}</button><button className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button><button className="iconbtn" title="Settings" aria-label="Settings" onClick={()=>setPanel("settings")}><Settings2 size={17}/></button></div></header>
-    <div className={"workspace "+(["files","docker","settings"].includes(panel)?"workspaceFull":"")}>
+  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")}
+    onKeyDownCapture={noteLocalVaultActivity} onPointerDownCapture={noteLocalVaultActivity}>
+    <header className="topbar">
+      <div className="brand"><div className="brandicon"><TerminalSquare size={16}/></div><strong>PaSSH7</strong></div>
+      <div className="topHost">
+        <button type="button" className="hostSelectIcon" title={sidebar?"Collapse host sidebar":"Expand host sidebar"} aria-label={sidebar?"Collapse host sidebar":"Expand host sidebar"} onClick={()=>toggleSidebar()}><ChevronDown size={17}/></button>
+        <span className={"hostDot "+(connected?"connected":active.fingerprint?"trusted":"untrusted")} title={connected?"SSH connected":active.fingerprint?"Host-key pinned, disconnected":"Not connected"}/>
+        <div className="topHostIdentity"><strong>{active.label}</strong><small>{active.id?active.user+" · "+active.address+" · SSH (port "+active.port+")"+(active.jumpAlias?" · via "+active.jumpAlias:""):"Choose a saved SSH host"}</small></div>
+        <span className="hostStatusLabel">{connected?activeConnections+" live session"+(activeConnections===1?"":"s"):active.fingerprint?"Verified key · Offline":"Disconnected"}</span>
+      </div>
+      <div className="topactions">
+        <button type="button" className="topQuickButton" disabled={!active.id} onClick={()=>setPanel("terminal")}><TerminalSquare size={15}/><span>Open in Terminal</span></button>
+        <button type="button" className="topQuickButton topDisconnect" disabled={!connected||sshBusy} title="Disconnect the selected host's active SSH session" onClick={()=>{const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===active.id)||sshTabs.find(t=>t.alias===active.id);if(session)void closeInteractive(session.id)}}><X size={15}/><span>Disconnect</span></button>
+        <button type="button" className="lock" onClick={()=>{if(!desktopAvailable())return;if(vaultUnlocked){void lockVault()}else setVaultDialog(true)}}><LockKeyhole size={14}/><span>{vaultUnlocked?"Lock Vault":"Unlock Vault"}</span></button>
+        <button type="button" className="iconbtn" title="Quick switch (Ctrl+K)" aria-label="Quick switch" onClick={()=>setCommandOpen(true)}><Command size={17}/></button>
+      </div>
+    </header>
+    {sessionNotice&&<div className="globalSessionNotice" role="alert" aria-live="polite">
+      <div className="globalSessionNoticeText"><Activity size={17} aria-hidden="true"/>
+        <span><strong>{sessionNotice.alias||"SSH connection"}</strong> · {sessionNotice.detail}</span>
+      </div>
+      <div className="globalSessionNoticeActions">
+        {sessionNotice.kind!=="close-failed"&&sessionNotice.alias&&hosts.some(h=>h.id===sessionNotice.alias)&&vaultUnlocked&&
+          <button type="button" disabled={sshBusy} onClick={()=>reconnectNotice(sessionNotice.alias)}>Reconnect</button>}
+        <button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button>
+      </div>
+    </div>}
+    <div className={"workspace "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"workspaceFull":"")}>
       {sidebar&&<aside className="sidebar"><nav className="workspaceNav" aria-label="Workspaces">
-{([["agent","Terminal",TerminalSquare],["files","Remote Files",FolderClosed],["docker","Docker",Container],["ports","Port Forwarding",Activity],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=>
+{([["connections","Connections",Server],["terminal","Terminal",TerminalSquare],["files","Remote Files",FolderClosed],["docker","Docker",Container],["ports","Port Forwarding",Activity],["snippets","Snippets",FileText],["agent","AI Agents",Bot],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=>
 <button type="button" key={id} className={panel===id?"active":""} onClick={()=>setPanel(id)}><Icon size={16}/>{label}</button>)}
 </nav><div className="sectionHeading"><span>YOUR HOSTS</span><button className="iconbtn" title="Import hosts from local OpenSSH config" aria-label="Import SSH config" onClick={()=>void inspectLocalSshConfig()}><FileText size={15}/></button><button className="iconbtn" title="Add host" aria-label="Add host" onClick={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}><Plus size={16}/></button></div><label className="search"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hosts" aria-label="Search hosts"/><span>⌘ K</span></label>
-        {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} onClick={()=>setSelected(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}{h.jumpAlias?" · via "+h.jumpAlias:""}</small></span><span className={"hostDot "+(sshTabs.some(t=>t.alias===h.id)?"connected":h.fingerprint?"trusted":"untrusted")} title={sshTabs.some(t=>t.alias===h.id)?"SSH connected ("+sshTabs.filter(t=>t.alias===h.id).length+" session(s))":h.fingerprint?"Host key pinned; SSH disconnected":"SSH disconnected; host key not pinned"}/></button>)}</section>)}
+        {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} title={h.user+"@"+h.address+":"+h.port+(h.jumpAlias?" via "+h.jumpAlias:"")} onClick={()=>selectHost(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}{h.jumpAlias?" · via "+h.jumpAlias:""}</small></span><span className={"hostDot "+(sshTabs.some(t=>t.alias===h.id)?"connected":h.fingerprint?"trusted":"untrusted")} title={sshTabs.some(t=>t.alias===h.id)?"SSH connected ("+sshTabs.filter(t=>t.alias===h.id).length+" session(s))":h.fingerprint?"Host key pinned; SSH disconnected":"SSH disconnected; host key not pinned"}/></button>)}</section>)}
         {!filtered.length&&<div className="emptySearch"><p>{!vaultUnlocked&&desktopAvailable()?"Unlock your vault to access saved hosts.":hosts.length===0?"No saved SSH hosts yet. Add your first server to get started.":query.trim()?"No hosts match your search.":"No matching hosts."}</p>{desktopAvailable()&&vaultUnlocked&&hosts.length===0&&<button type="button" className="contextAction" onClick={()=>{setAddOpen(true);setStep(0);setError("")}}><Plus size={14}/> Add your first host</button>}{desktopAvailable()&&!vaultUnlocked&&<button type="button" className="contextAction" onClick={()=>setVaultDialog(true)}><LockKeyhole size={14}/> Unlock vault</button>}</div>}
         {desktopAvailable()&&vaultUnlocked&&<section className="identityManage"><div className="groupLabel">SSH IDENTITIES</div>{identities.map(name=><div className="identityManageRow" key={name}><KeyRound size={14}/><span title={name}>{name}</span><button className="iconbtn" title={"Show public key "+name} aria-label={"Show public key "+name} onClick={async()=>{try{const pub=await getPublicIdentity(name);setGeneratedKey(pub);setKeyDialog(true);setError("")}catch(e){setError(String(e))}}}><KeyRound size={14}/></button><button className="iconbtn" title={"Remove identity "+name} aria-label={"Remove identity "+name} onClick={()=>{setError("");setDeleteTarget({kind:"identity",alias:name})}}><Trash2 size={14}/></button></div>)}{!identities.length&&<p className="emptySearch">No keys imported</p>}</section>}
         <div className="sidebottom"><span><ShieldCheck size={15}/> Local-first workspace</span><small>{desktopAvailable()?(vaultUnlocked?`${hosts.length} saved host${hosts.length===1?"":"s"} in encrypted vault`:"Unlock vault to view saved hosts"):"Example hosts only. No real credentials."}</small></div></aside>}
-      <main className="main"><div className="sessionTabs"><button className="iconbtn" aria-label={sidebar?"Hide host sidebar":"Show host sidebar"} onClick={()=>setSidebar(x=>!x)}><Monitor size={16}/></button><div className="sessionActive"><TerminalSquare size={15}/>{active.label}<span className="tabdot" style={{background:connected?"#22c55e":undefined}}/></div><div className="tabSpacer"/><span className="unavailable" style={{color:connected?"#22c55e":undefined}}>{connected?`Connected · ${activeConnections} session${activeConnections===1?"":"s"}`:"Not connected"}</span></div>
+      <main className="main">
         <div className="identity"><div><div className="eyebrow">WORKSPACE / {active.group.toUpperCase()}</div><h1>{active.label}</h1><div className="identityMeta"><span><Server size={14}/>{active.user}@{active.address}</span><span>Port {active.port ?? 22}</span><span title={active.jumpAlias?"Internal network through an already connected SSH gateway":"Direct SSH connection"}>{active.jumpAlias?"Via "+active.jumpAlias:"Direct"}</span><span title={active.identityAlias?"This host has a vault SSH key associated":"No SSH key is required for password login"}>{active.identityAlias?"Vault key: "+active.identityAlias:"Password SSH profile"}</span><span className={active.fingerprint?"pin ok":"pin warn"}><ShieldCheck size={14}/>{active.fingerprint?"Host key saved":"Host key unpinned"}</span></div></div><div className="jumpRouteConfig">
 <label htmlFor="jump-host-selector">SSH route</label>
 <select id="jump-host-selector" aria-label="Jump gateway" value={active.jumpAlias||""} disabled={!vaultUnlocked||jumpBusy||sshBusy||activeConnections>0}
@@ -982,7 +1338,7 @@ export default function App(){
 <option value={h.id} key={h.id}>Via {h.label}{sshTabs.some(t=>t.alias===h.id)?" · connected":" · connect first"}</option>)}
 </select>
 {active.jumpAlias&&<small>Route: this computer → {active.jumpAlias} (SSH) → {active.address}:{active.port} (SSH). The gateway must be connected first. Target SSH keys never leave this PC.</small>}
-{active.jumpAlias&&!sshTabs.some(t=>t.alias===active.jumpAlias)&&<button type="button" className="contextAction" onClick={()=>{setSelected(active.jumpAlias!);setProbeError("")}}>Open {active.jumpAlias} gateway to connect first →</button>}
+{active.jumpAlias&&!sshTabs.some(t=>t.alias===active.jumpAlias)&&<button type="button" className="contextAction" onClick={()=>{selectHost(active.jumpAlias!);setProbeError("")}}>Open {active.jumpAlias} gateway to connect first →</button>}
 {jumpError&&<small role="alert" className="wizardError">{jumpError}</small>}
 </div>
 <div className="identityActions">{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" title="Remove selected host" aria-label="Remove selected host" onClick={()=>{setError("");setDeleteTarget({kind:"host",alias:active.id})}}><Trash2 size={16}/></button>}<button className="primary" disabled={!desktopAvailable()||!vaultUnlocked||!active.id||sshBusy||tofuBusy} onClick={async()=>{
@@ -996,38 +1352,72 @@ export default function App(){
   }
   setLoginPassword("");setLoginKeyPassphrase("");setHostIdentityChoice("");setLoginMode((active.savedAuthMode as "key"|"password"|"key-password")||(active.identityAlias?"key-password":"password"));setUseSavedCredentials(!!active.hasSavedCredentials);setRememberCredentials(!!active.hasSavedCredentials);setLoginOpen(true)
 }}>Connect <span>↗</span></button>{active.hasSavedCredentials&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} disabled={sshBusy||!vaultUnlocked} title="Connect using credentials saved in the encrypted vault" onClick={()=>void quickConnect(active.id,(active.savedAuthMode as "key"|"password"|"key-password")||"key-password")}>Quick connect</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&active.fingerprint&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void authenticateActive()} disabled={authBusy||!active.identityAlias||!!active.jumpAlias} title="Key-only direct SSH authentication check. For encrypted keys, Windows passwords or two-factor SSH use Connect instead.">{authBusy?"Testing key…":"Test SSH key-only"}</button>}{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" style={{width:"auto",padding:"0 12px"}} onClick={()=>void probeActive()} disabled={probeBusy} title="Check SSH banner; not an authenticated connection">{probeBusy?"Checking…":"Test SSH port"}</button>}</div></div>
-        {sessionNotice&&<div role="status" className="wizardError" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-<span>{sessionNotice.alias?sessionNotice.alias+": ":""}{sessionNotice.detail}</span>
-{sessionNotice.alias&&hosts.some(h=>h.id===sessionNotice.alias)&&vaultUnlocked&&<button type="button" disabled={sshBusy} onClick={()=>reconnectNotice(sessionNotice.alias)}>Reconnect</button>}
-<button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button></div>}{credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{connected?`${activeConnections} active session(s) on this host`:"NO ACTIVE SESSION ON THIS HOST"}</small>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar">{sshTabs.map(t=><button key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"} onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}>{t.alias} <span role="button" title="Disconnect" onClick={e=>{e.stopPropagation();void closeInteractive(t.id)}}>×</span></button>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
+{credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{connected?`${activeConnections} active session(s) on this host`:"NO ACTIVE SESSION ON THIS HOST"}</small><div className="terminalbarSpacer"/><button type="button" className={terminalDetailsOpen?"terminalInfoToggle active":"terminalInfoToggle"} aria-expanded={terminalDetailsOpen} aria-controls="passh7-terminal-inspector" onClick={()=>setTerminalDetailsOpen(open=>!open)}><CircleHelp size={15}/>{terminalDetailsOpen?"Hide session details":"Session details"}</button>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar" role="tablist" aria-label="Active SSH terminals">{sshTabs.map(t=><div key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"}>
+  <button type="button" role="tab" aria-selected={activeSsh===t.id} className="sshTabSelect"
+    onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}><span className="sshTabConnectionDot" aria-hidden="true"/>{t.alias}</button>
+  <button type="button" className="sshTabClose" title={"Disconnect "+t.alias}
+    aria-label={"Disconnect "+t.alias} onClick={()=>void closeInteractive(t.id)}><X size={14}/></button>
+</div>)}</div>}
+        <div ref={mainTerminalDock} className="terminalDockSlot" style={{display:connected?"block":"none"}} aria-label="Interactive terminal session"/>
+        <div ref={parkedTerminals} className="terminalParked" aria-hidden="true"/>
+        {sshTabs.map(t=>createPortal(
+          <TerminalView id={t.id} active={t.id===activeSsh&&(panel==="terminal"||panel==="agent")} layoutKey={panel} onClosed={onSessionClosed}/>,
+          getTerminalSurface(t.id),t.id
+        ))}
+        {!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
         <footer><span className="footerBrand"><span className="statusDot" style={{background:connected?"#22c55e":undefined}}/> {connected?"SSH connected":desktopAvailable()?"No active SSH session":"Offline preview"}</span><span>{active.label} · {activeConnections} on host · {sshTabs.length} total</span><span>{buildInfo?.publisher ?? "PAS7 Studio"} · {buildInfo?.target ?? "Loading build info"}</span></footer>
       </main>
-      <aside className={"context "+(["files","docker","settings"].includes(panel)?"fullContext":"")}><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
-        {panel==="agent"?<><div className="contextTitle"><Bot size={18}/><h3>AI Agent</h3></div><p className="muted">Launch Codex, Claude Code or OpenCode in the SSH terminal. These tools run with your remote account permissions.</p><label className="fieldLabel">Agent</label><select value={agent} onChange={e=>setAgent(e.target.value as AgentKind)} aria-label="Select AI agent">{AGENTS.map(a=><option key={a.kind} value={a.kind}>{a.name}</option>)}</select><label className="fieldLabel">Remote CLI availability</label>
-<button type="button" className="contextAction" disabled={!connected||agentProbeBusy} onClick={()=>void checkRemoteAgents()}>{agentProbeBusy?"Checking remote CLI tools…":"Check installed agents"}</button>
-{AGENTS.map(a=><div className="agentAvailability" key={a.kind}><strong>{a.name}</strong><span>{
-  agentAvailability[a.kind]?.session===activeSsh
-    ? agentAvailability[a.kind]?.installed
-      ? ("Installed"+(agentAvailability[a.kind]?.version?" · "+agentAvailability[a.kind]?.version:""))
-      : "Not found by probe · launch may still work"
-    : "Not checked"
-}</span></div>)}
-{agentProbeError&&<p role="alert" className="wizardError">{agentProbeError}</p>}
-<label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Availability checks run on the selected **remote** SSH host, not this PC. A negative result may mean different login/interactive PATH settings. You can still launch the CLI in the existing terminal. Launches the CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
-        panel==="files"?<RemoteFilesWorkspace
+      {(panel!=="terminal"||terminalDetailsOpen)&&<aside id={panel==="terminal"?"passh7-terminal-inspector":undefined} className={"context "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"fullContext":"")}><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
+        {panel==="connections"?<ConnectionsWorkspace
+  hosts={hosts} selected={selected} connectedAliases={sshTabs.map(t=>t.alias)} vaultUnlocked={vaultUnlocked}
+  onSelect={selectHost} onConnect={alias=>void connectFromConnections(alias)}
+  onTerminal={alias=>{selectHost(alias);setPanel("terminal")}}
+  onAdd={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}
+  onImport={()=>void inspectLocalSshConfig()}
+ />:
+ panel==="snippets"?<SnippetsWorkspace host={active.label} connected={connected}
+  onTerminal={()=>setPanel("terminal")} onExecute={command=>void executeSnippet(command)}
+ />:
+ panel==="agent"?<AgentWorkspace
+ host={active.label} address={active.address} username={active.user} port={active.port}
+ route={active.jumpAlias?"Via "+active.jumpAlias:"Direct SSH"}
+ sessionId={sshTabs.some(t=>t.id===activeSsh&&t.alias===active.id)?activeSsh:""}
+ sessions={sshTabs.filter(t=>t.alias===active.id)}
+ vaultUnlocked={vaultUnlocked}
+ agent={agent} onAgent={setAgent}
+ availability={agentAvailability} checking={agentProbeBusy}
+ error={agentProbeError} status={agentStatus} context={context}
+ liveTerminal={true} onTerminalDock={agentTerminalDockRef}
+ onCheck={()=>void checkRemoteAgents()}
+ onLaunch={()=>void launchRemoteAgent()}
+ onTerminal={()=>setPanel("terminal")}
+ onPrepareRdp={()=>{
+   setTunnelLocalPort(13389);
+   setTunnelRemoteHost("127.0.0.1");
+   setTunnelRemotePort(3389);
+   setPanel("ports");
+ }}
+ onSession={id=>{if(sshTabs.some(t=>t.id===id&&t.alias===active.id))setActiveSsh(id)}}
+ />:
+         panel==="files"?<RemoteFilesWorkspace
+ paneSizes={preferences.paneSizes} onPaneSize={updatePaneSize}
  session={activeSsh} host={active.label} connected={connected}
  pathInput={sftpPath} setPathInput={setSftpPath}
  entries={sftpEntries} busy={sftpBusy} error={sftpError}
+ notice={sftpNotice?.session===activeSsh?sftpNotice.text:""}
  filter={sftpFilter} setFilter={setSftpFilter}
  sort={sftpOrder} setSort={setSftpOrder} showHidden={preferences.sftpShowHidden}
  navigate={path=>void browseSftp(path)}
- upload={()=>void transferSftp("upload")}
- download={path=>void transferSftp("download",path)}
+ upload={()=>enqueueSftpTransfer("upload")}
+ download={path=>enqueueSftpTransfer("download",[path])}
+ queueDownloads={paths=>enqueueSftpTransfer("download",paths)}
  readPreview={path=>void readSftpPreview(path)}
  preview={sftpPreview} previewBusy={sftpPreviewBusy}
- transferBusy={sftpTransferBusy} transferProgress={sftpTransferProgress}
- transferResult={sftpTransferResult?.session===activeSsh?sftpTransferResult.text:null}
- cancelTransfer={()=>void cancelActiveTransfer()}
+ previewError={sftpPreviewError?.session===activeSsh?sftpPreviewError:null}
+ transferJobs={transferQueue.jobs} transferPaused={transferQueue.paused}
+ onPauseQueue={transferQueue.setQueuePaused}
+ onCancelJob={id=>void transferQueue.cancel(id)}
+ onRetryJob={transferQueue.retry} onClearFinished={transferQueue.clearFinished}
  mutationBusy={sftpMutationBusy}
  onMkdir={name=>void mutateRemoteSftp("mkdir",name)}
  onDelete={(name,isDir)=>void mutateRemoteSftp("delete",name,isDir)}
@@ -1095,30 +1485,60 @@ export default function App(){
  </>}
  />:
         panel==="docker"?<DockerWorkspace
+ paneSizes={preferences.paneSizes} onPaneSize={updatePaneSize}
  host={active.label} session={activeSsh} connected={connected}
  items={dockerInventory?.session===activeSsh?dockerInventory.items:null}
+ stats={dockerStats?.session===activeSsh?dockerStats.items:null}
+ statsError={dockerStatsError?.session===activeSsh?dockerStatsError.message:""}
+ details={dockerDetails?.session===activeSsh?dockerDetails:null}
+ detailsError={dockerDetailsError?.session===activeSsh?dockerDetailsError:null}
+ onInspect={id=>void readDockerDetails(id)}
  loading={dockerBusy} error={dockerError}
  actionStatus={dockerActionStatus?.session===activeSsh?dockerActionStatus.text:null}
  actionBusy={dockerActionBusy} logs={dockerLogs} logsBusy={dockerLogsBusy}
  logsError={dockerLogsError?.session===activeSsh?dockerLogsError.message:""}
  liveStatus={dockerLiveStatus}
  tail={preferences.dockerTail} follow={preferences.dockerFollowLogs}
+ autoRefresh={preferences.dockerAutoRefresh} onAutoRefresh={enabled=>updatePreferences({...preferences,dockerAutoRefresh:enabled})}
  onTail={tail=>updatePreferences({...preferences,dockerTail:tail})}
  onFollow={follow=>updatePreferences({...preferences,dockerFollowLogs:follow})}
  onRefresh={()=>void refreshDocker()}
  onAction={(id,name,action)=>void runDockerAction(id,name,action)}
  onLogs={(id,name)=>void viewDockerLogs(id,name)}
+ onShell={(id,name)=>void openDockerShell(id,name)}
  onCloseLogs={()=>{dockerLogsRequestRef.current++;setDockerLogs(null);setDockerLogsError(null)}}
  />:
         panel==="settings"?<SettingsWorkspace
  preferences={preferences} onChange={updatePreferences}
  buildInfo={buildInfo} vaultUnlocked={vaultUnlocked}
+ host={active.label} session={connected?activeSsh:""} connected={connected}
  onLock={()=>void lockVault()}
  onExport={()=>void exportVaultBackup()}
  onRestore={()=>{setPanel("files");void inspectVaultRestore()}}
  />:
+        panel==="ports"?<PortForwardingWorkspace
+ host={active.label} connected={connected} session={activeSsh}
+ forwards={tunnels} busy={tunnelBusy} busySessions={tunnelBusySessions}
+ sessions={sshTabs.filter(tab=>tab.alias===selected).map(tab=>tab.id)}
+ error={tunnelError}
+ localPort={tunnelLocalPort} remoteHost={tunnelRemoteHost} remotePort={tunnelRemotePort}
+ onLocalPort={setTunnelLocalPort} onRemoteHost={setTunnelRemoteHost} onRemotePort={setTunnelRemotePort}
+ onStart={()=>void addTunnel()} onRefresh={()=>void refreshLocalForwarding()}
+ onStop={(session,localPort)=>void removeTunnel(session,localPort)}
+ onTerminal={()=>setPanel("terminal")}
+ />:
+        panel==="terminal"?<div className="terminalContext">
+ <div className="contextTitle"><TerminalSquare size={18}/><h3>SSH session</h3></div>
+ <p className="muted">Use the secure interactive terminal on the left. Open a dedicated tool workspace for remote files, containers, agents or ports.</p>
+ <div className="permission"><ShieldCheck size={16}/><div><strong>{connected?"Connected to "+active.label:"No SSH session selected"}</strong><small>{connected?active.user+"@"+active.address:"Select a host and connect to get started."}</small></div></div>
+ <button className="contextAction" onClick={()=>setPanel("agent")}><Bot size={15}/> Open AI Agent workspace</button>
+ <button className="contextAction" onClick={()=>setPanel("files")}><FolderClosed size={15}/> Browse remote files</button>
+ <button className="contextAction" onClick={()=>setPanel("docker")}><Container size={15}/> Inspect Docker</button>
+ <button className="contextAction" onClick={()=>setPanel("ports")}><Activity size={15}/> Manage port forwarding</button>
+ {agentStatus&&<p className="note" role="status">{agentStatus}</p>}
+ </div>:
         <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button><button className="contextAction" type="button" disabled={!connected||tunnelBusy} onClick={()=>void refreshLocalForwarding()}>Refresh active forwards</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{!tunnels.some(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected))&&<p className="note">No active local forwards for this host. Start one above to map a localhost port through SSH, or refresh to retrieve active native tunnels.</p>}{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusy} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
-      </div></aside>
+      </div></aside>}
     </div>
     {deleteTarget&&<div className="overlay" onMouseDown={()=>{setDeleteTarget(null);setError("")}}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm vault removal" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}<button aria-label="Close" onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button></div><p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted vault? This cannot be undone. Removing a host keeps its SSH key; removing a key used by a host is blocked.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<div className="wizardActions"><button onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button><button className="primary" onClick={()=>void confirmRemove()}>Confirm removal</button></div></div></div>}
     {vaultDialog&&<div className="overlay" onMouseDown={()=>setVaultDialog(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Unlock encrypted vault" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><LockKeyhole size={18}/> {vaultPresent?"Unlock vault":"Create vault"}<button aria-label="Close" onClick={()=>setVaultDialog(false)}><X size={17}/></button></div><p>Master password stays in this application session only. Lock the vault when finished.</p><form onSubmit={async e=>{e.preventDefault();await unlockVault()}} className="wizardFields"><label>Master password<input autoFocus type="password" autoComplete="off" value={vaultPassword} onChange={e=>setVaultPassword(e.target.value)} minLength={12} required/></label>{error&&<p role="alert" className="wizardError">{error}</p>}<button className="primary" type="submit">{vaultPresent?"Unlock":"Create encrypted vault"}</button></form></div></div>}
@@ -1182,7 +1602,18 @@ export default function App(){
       {error&&<p role="alert" className="wizardError">{error}</p>}
       <div className="wizardActions"><button onClick={()=>step===0?setAddOpen(false):setStep(step-1)}>{step===0?"Cancel":"Back"}</button><button className="primary" onClick={async()=>{const issue=validateHostDraft({...draft,fingerprint:step<2?"":draft.fingerprint,identity:step===0?"placeholder":draft.identity});if(step===0&&(!draft.label.trim()||!draft.hostname.trim()||!draft.username.trim()||draft.port<1||draft.port>65535)){setError("Complete the connection details");return}if(step>=1&&issue){setError(issue);return}setError("");if(step<3){setStep(step+1);return}if(desktopAvailable()){try{await addHost({alias:draft.label,hostname:draft.hostname,port:draft.port,username:draft.username,identityAlias:draft.auth==="password"?"":draft.identity,pinnedHostKey:draft.fingerprint||null});const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias})));setSelected(draft.label);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false)}catch(err){setError(String(err))}return}const id="preview-"+Date.now();setHosts(v=>[...v,{id,label:draft.label,address:draft.hostname,user:draft.username,port:draft.port,group:"My hosts",fingerprint:!!draft.fingerprint,identityAlias:draft.auth==="password"?"":draft.identity}]);setSelected(id);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false);}}> {step===3?(desktopAvailable()?"Save host":"Add to preview"):"Continue"} </button></div>
     </div></div>}
-    {commandOpen&&<div className="overlay" onMouseDown={()=>setCommandOpen(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Search size={18}/> Quick switch <button onClick={()=>setCommandOpen(false)} aria-label="Close"><X size={17}/></button></div><p>Switch to a host</p>{hosts.map(h=><button className="paletteHost" key={h.id} onClick={()=>{setSelected(h.id);setCommandOpen(false)}}><Server size={16}/>{h.label}<small>{h.address}</small></button>)}</div></div>}
+    {commandOpen&&<div className="overlay quickSwitchOverlay" onMouseDown={()=>setCommandOpen(false)}>
+      <div className="modal quickSwitchModal" role="dialog" aria-modal="true" aria-label="Quick switch"
+        onMouseDown={e=>e.stopPropagation()}>
+        <div className="quickSwitchTitle"><Command size={17}/><strong>Quick switch</strong>
+          <button type="button" aria-label="Close" onClick={()=>setCommandOpen(false)}><X size={17}/></button>
+        </div>
+        <QuickSwitch hosts={hosts} connectedAliases={sshTabs.map(t=>t.alias)} selected={selected}
+          onChooseHost={setSelected}
+          onWorkspace={route=>setPanel(route)}
+          onClose={()=>setCommandOpen(false)}/>
+      </div>
+    </div>}
 
   </div>;
 }
