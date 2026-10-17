@@ -20,8 +20,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
       - name: Frontend typecheck and Vite build
         working-directory: apps/passh7-desktop
         run: |
           npm install --no-audit --no-fund
           npm run build
+      - name: Validate native read-only Docker stats command
+        run: cargo test --manifest-path apps/passh7-desktop/src-tauri/Cargo.toml --bin passh7-desktop docker_catalog_tests
