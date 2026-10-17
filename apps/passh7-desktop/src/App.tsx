@@ -873,8 +873,7 @@ export default function App(){
     // The native producer may emit its first log events before start() returns.
     // Hold them by stream ID until the acknowledgement identifies OUR stream.
     // Old follow streams for the same container must never contaminate a new one.
-    const preAck=new Map<string,{events:DockerLogEvent[];bytes:number}>();
-    let initialTruncated=false;
+    const preAck=new Map<string,{events:DockerLogEvent[];bytes:number;truncated:boolean}>();
     let unsubscribe:(()=>void)|undefined;
     let flushTimer:number|undefined;
     let pending="";
@@ -891,13 +890,17 @@ export default function App(){
       const onDockerLog=(data:DockerLogEvent)=>{
         if(disposed||data.sessionId!==sessionId||data.containerId!==containerId)return;
         if(!streamId){
-          const buffered=preAck.get(data.streamId)||{events:[],bytes:0};
+          let buffered=preAck.get(data.streamId);
+          if(!buffered){
+            if(preAck.size>=8)return;
+            buffered={events:[],bytes:0,truncated:false};
+            preAck.set(data.streamId,buffered);
+          }
           const bytes=data.data?.length||0;
           if(buffered.events.length<256&&buffered.bytes+bytes<=256*1024){
             buffered.events.push(data);
             buffered.bytes+=bytes;
-            preAck.set(data.streamId,buffered);
-          }else initialTruncated=true;
+          }else buffered.truncated=true;
           return;
         }
         if(data.streamId!==streamId)return;
@@ -922,10 +925,11 @@ export default function App(){
       if(disposed){unsubscribe();unsubscribe=undefined;return;}
       const opened=await startDockerLogStream(sessionId,containerId,0);
       streamId=opened;
-      const queued=preAck.get(opened)?.events||[];
+      const currentEarly=preAck.get(opened);
+      const queued=currentEarly?.events||[];
       preAck.clear();
       for(const event of queued)onDockerLog(event);
-      if(initialTruncated&&queued.length){
+      if(currentEarly?.truncated){
         setDockerLogsError({session:sessionId,message:"Some initial live log events exceeded the display buffer; refresh recent logs if needed."});
       }
       if(disposed){
