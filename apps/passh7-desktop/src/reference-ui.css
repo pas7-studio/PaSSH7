@@ -932,3 +932,12 @@
   .quickSwitchHostState svg{width:13px}
   .quickSwitchFooter{gap:10px;flex-wrap:wrap}
 }
+
+
+/* Appearance preference applies to xterm as well as the outer shell. */
+.shell.light .main .terminal{background:#f7fbff;border-color:#c4d6ea}
+.shell.light .liveTerminal{background:#f7fbff}
+.shell.light .referenceTerminalText{background:#f7fbff;color:#284463}
+.shell.light .referenceTerminalPrompt{color:#156f50}
+.shell.light .referenceTerminalPrompt>span{color:#264462}
+.shell.light .referenceTerminalPrompt .terminalCaret{color:#1d75d9}
