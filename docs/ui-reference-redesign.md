@@ -158,3 +158,21 @@ Agent discovery now uses separate bounded native SSH exec probes:
 - Real Windows OpenSSH smoke against the intended Windows host remains to be
   done before claiming the app/CLI is actually present and launchable.
 
+
+### Windows execution aliases, broken CLIs and GUI access
+
+Windows Start Menu entries and WindowsApps execution aliases are **not**
+accepted as evidence of a runnable terminal CLI. A discovered executable must
+respond successfully to `--version`; a broken npm shim or missing Node.js
+dependency is displayed as **CLI needs repair**, distinct from a GUI-only
+application or an absent CLI. Version checks are read-only and bounded.
+
+If only a Windows desktop application exists, **Prepare RDP tunnel** opens
+PaSSH7's existing Port Forwarding workspace prefilled with local
+`127.0.0.1:13389` to target `127.0.0.1:3389`. The user must explicitly
+start the SSH forward. Only then, if Windows Remote Desktop is enabled,
+`mstsc /v:127.0.0.1:13389` opens the GUI desktop. The GUI is never launched
+into an invisible SSH service session, and RDP is not enabled automatically.
+
+Final Rust/TypeScript/visual test evidence:
+https://github.com/pas7-studio/PaSSH7/actions/runs/39040275865
