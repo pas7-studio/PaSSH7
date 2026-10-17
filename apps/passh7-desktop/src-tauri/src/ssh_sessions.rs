@@ -485,7 +485,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let setup=tokio::time::timeout(Duration::from_secs(10),async {
                                 let mut channel=connection.channel_open_session().await
                                     .map_err(|_|"Could not open Docker listing channel".to_owned())?;
-                                channel.exec(true,b"docker ps -a --format \"{{json .}}\"").await
+                                channel.exec(true,b"docker ps -a --format json").await
                                     .map_err(|_|"SSH server refused Docker inventory command".to_owned())?;
                                 Ok::<_,String>(channel)
                             }).await.unwrap_or_else(|_|Err("Docker SSH channel setup timed out".into()));
@@ -513,7 +513,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             if exit_status.unwrap_or(1)!=0{
                                                 return Err(format!("Docker inventory failed: {}",message.chars().take(500).collect::<String>()));
                                             }
-                                            Ok::<String,String>(message)
+                                            safe_docker_json_lines("containers",&message)
                                         }).await.unwrap_or_else(|_|Err("Docker inventory timed out after 20 seconds".into()));
                                         let _=response.send(result);
                                     });
@@ -554,7 +554,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             if exit_status.is_some_and(|code|code!=0){
                                                 return Err(format!("Docker catalog failed: {}",message.chars().take(500).collect::<String>()));
                                             }
-                                            Ok::<String,String>(message)
+                                            safe_docker_json_lines(&kind,&message)
                                         }).await.unwrap_or_else(|_|Err("Docker catalog timed out after 20 seconds".into()));
                                         let _=response.send(result);
                                     });
@@ -1422,10 +1422,10 @@ pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>
 /// names. The catalog response is bounded in the SSH actor.
 fn docker_catalog_command(kind:&str)->Option<String>{
     match kind{
-        "images"=>Some("docker image ls --format \"{{json .}}\"".into()),
-        "volumes"=>Some("docker volume ls --format \"{{json .}}\"".into()),
-        "networks"=>Some("docker network ls --format \"{{json .}}\"".into()),
-        "stats"=>Some("docker stats --no-stream --format \"{{json .}}\"".into()),
+        "images"=>Some("docker image ls --format json".into()),
+        "volumes"=>Some("docker volume ls --format json".into()),
+        "networks"=>Some("docker network ls --format json".into()),
+        "stats"=>Some("docker stats --no-stream --format json".into()),
         "compose"=>Some("docker compose ls --format json".into()),
         _=>{
             // Project values are never interpolated without strict validation.
@@ -1433,7 +1433,7 @@ fn docker_catalog_command(kind:&str)->Option<String>{
             // YAML files, env files, or sending their contents to the WebView.
             let project=kind.strip_prefix("compose-project:")?;
             if !valid_compose_project_name(project){return None;}
-            Some(format!("docker ps -a --filter label=com.docker.compose.project={project} --format \"{{{{json .}}}}\""))
+            Some(format!("docker ps -a --filter label=com.docker.compose.project={project} --format json"))
         }
     }
 }
