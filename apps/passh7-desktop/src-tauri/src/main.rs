@@ -132,6 +132,40 @@ impl SessionStore {
     }
 }
 
+#[cfg(test)]
+mod vault_local_activity_tests{
+    use super::*;
+    #[test]
+    fn real_local_activity_refreshes_live_vault_ttl(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()-Duration::from_secs(120)
+        })));
+        assert!(store.touch_if_live().unwrap());
+        let guard=store.0.lock().unwrap();
+        assert!(guard.as_ref().unwrap().last_used.elapsed()<Duration::from_secs(3));
+    }
+    #[test]
+    fn expired_vault_cannot_be_reactivated_by_activity(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()-IDLE_TIMEOUT-Duration::from_secs(1)
+        })));
+        assert!(!store.touch_if_live().unwrap());
+        assert!(store.0.lock().unwrap().is_none());
+        assert!(!store.touch_if_live().unwrap());
+    }
+    #[test]
+    fn explicit_vault_lock_cannot_be_reversed_by_activity(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()
+        })));
+        store.lock().unwrap();
+        assert!(!store.touch_if_live().unwrap());
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HostSummary {
