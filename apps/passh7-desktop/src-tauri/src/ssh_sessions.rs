@@ -295,6 +295,19 @@ impl SshSessionManager {
     }
 }
 
+/// SSH keepalives are transport-level probes (not shell commands). An
+/// interactive shell may be quiet for hours while an agent waits for input.
+/// Unresponsive peers still close after three unanswered 30-second probes.
+fn interactive_ssh_config() -> russh::client::Config {
+    russh::client::Config {
+        nodelay: true,
+        inactivity_timeout: None,
+        keepalive_interval: Some(Duration::from_secs(30)),
+        keepalive_max: 3,
+        ..Default::default()
+    }
+}
+
 #[tauri::command]
 pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_password: Option<String>, auth_mode: Option<String>, key_passphrase: Option<String>, use_saved_credentials: Option<bool>,
     vault: State<'_, SessionStore>, manager: State<'_, SshSessionManager>, app: AppHandle
@@ -341,12 +354,11 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         Some(russh::keys::decode_secret_key(secret.as_ref().ok_or("SSH identity missing for key authentication")?, if key_passphrase.is_empty() { None } else { Some(key_passphrase.as_str()) })
             .map_err(|_| "Cannot unlock SSH private key. Enter its key passphrase, or verify the imported key.".to_owned())?)
     } else { None };
-    let config = std::sync::Arc::new(russh::client::Config {
-        // Critical for interactive SSH: the default Nagle algorithm may
-        // delay single-keystroke packets until remote acknowledgements arrive.
-        nodelay: true,
-        inactivity_timeout: Some(Duration::from_secs(600)), ..Default::default()
-    });
+    // Long-running coding agents and TUI shells must not be disconnected after
+    // ten minutes without keyboard input. Protocol keepalives distinguish
+    // legitimate idle sessions from truly unreachable servers without
+    // sending any characters to the remote shell or affecting its prompt.
+    let config = std::sync::Arc::new(interactive_ssh_config());
     let jump_alias=host.extensions.get("passh7_jump_alias")
         .and_then(|v|v.as_str()).filter(|s|!s.is_empty());
     let mut connection=if let Some(gateway)=jump_alias {
@@ -2107,6 +2119,15 @@ pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn idle_interactive_agents_use_ssh_keepalives_not_a_ten_minute_ttl(){
+        let config=interactive_ssh_config();
+        assert!(config.nodelay, "interactive keypresses must not be delayed");
+        assert!(config.inactivity_timeout.is_none(), "a quiet live TUI must remain connected");
+        assert_eq!(config.keepalive_interval,Some(Duration::from_secs(30)));
+        assert_eq!(config.keepalive_max,3, "dead peers must eventually close");
+    }
+
 
     #[test]
     fn mutation_names_are_single_safe_path_components(){
