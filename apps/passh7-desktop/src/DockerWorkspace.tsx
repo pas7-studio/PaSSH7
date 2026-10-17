@@ -63,7 +63,8 @@ export default function DockerWorkspace(p:Props){
   const catalogColumns:Record<DockerCatalogKind,string[]>={
     images:["Repository","Tag","ID","Size","CreatedSince"],
     volumes:["Name","Driver","Scope"],
-    networks:["Name","ID","Driver","Scope"]
+    networks:["Name","ID","Driver","Scope"],
+    compose:["Name","Status","ConfigFiles"]
   };
 
   const [selected,setSelected]=useState("");
@@ -119,7 +120,7 @@ export default function DockerWorkspace(p:Props){
       <div title="One read-only docker stats sample. CPU percentages are summed across running containers, not normalized to total host CPU."><small><Cpu size={17}/> Container CPU</small><strong>{totalCpu===null?"—":totalCpu.toFixed(1)+"%"}</strong><span>{p.statsError?"Stats unavailable":p.stats?"Sum of container CPU":"Sampling remote Docker…"}</span></div>
       <div title="One read-only docker stats sample. Memory sums the container usage values, not overall server RAM."><small><HardDrive size={17}/> Container memory</small><strong>{totalMemory===null?"—":readableMemory(totalMemory)}</strong><span>{p.statsError?"Stats unavailable":p.stats?"Reported container usage":"Sampling remote Docker…"}</span></div>
     </div>
-    <div className="dockerResourceTabs" role="tablist" aria-label="Docker resources">{(["containers","images","volumes","networks"] as const).map(kind=><button type="button" role="tab" aria-selected={tab===kind} className={tab===kind?"active":""} key={kind} onClick={()=>setTab(kind)}>{kind[0].toUpperCase()+kind.slice(1)} {tab===kind&&tab!=="containers"&&displayCatalog?"("+displayCatalog.length+")":""}</button>)}</div>
+    <div className="dockerResourceTabs" role="tablist" aria-label="Docker resources">{(["containers","images","volumes","networks","compose"] as const).map(kind=><button type="button" role="tab" aria-selected={tab===kind} className={tab===kind?"active":""} key={kind} onClick={()=>setTab(kind)}>{kind[0].toUpperCase()+kind.slice(1)} {tab===kind&&tab!=="containers"&&displayCatalog?"("+displayCatalog.length+")":""}</button>)}</div>
     {tab==="containers"?<><div className="dockerWorkspaceGrid resizableDockerGrid"
       style={{gridTemplateColumns:`minmax(250px,1fr) 7px minmax(265px,${inspectorWidth}px)`}}><section className="dockerContainersPane">
       <div className="dockerToolbar"><div className="filesSearch"><Search size={15}/><input placeholder="Search containers…" value={search} onChange={e=>setSearch(e.target.value)} aria-label="Search containers"/></div>
@@ -234,7 +235,9 @@ export default function DockerWorkspace(p:Props){
         displayCatalog&&filteredCatalog.length===0?<div className="workspaceEmpty">No matching {tab}.</div>:
         !displayCatalog&&!catalogBusy?<div className="workspaceEmpty">Select Refresh to load {tab}.</div>:null}
       </div>
-      <p className="prefInfo">Read-only {tab} inventory using the connected SSH account. No resource is modified by browsing.</p>
+      <p className="prefInfo">{tab==="compose"
+        ?"Read-only Docker Compose project discovery via docker compose ls. Services, compose up/down, and project mutations are not available here yet."
+        :"Read-only "+tab+" inventory using the connected SSH account. No resource is modified by browsing."}</p>
     </section>}
   </div>;
 }
