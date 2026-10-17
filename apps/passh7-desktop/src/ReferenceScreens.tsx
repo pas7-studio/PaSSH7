@@ -12,6 +12,12 @@ import ConnectionsWorkspace from "./ConnectionsWorkspace";
 import PortForwardingWorkspace from "./PortForwardingWorkspace";
 import SnippetsWorkspace from "./SnippetsWorkspace";
 import AgentWorkspace from "./AgentWorkspace";
+import TerminalReference from "./TerminalReference";
+import {AGENTS} from "./integrations";
+import ConnectionsWorkspace from "./ConnectionsWorkspace";
+import PortForwardingWorkspace from "./PortForwardingWorkspace";
+import SnippetsWorkspace from "./SnippetsWorkspace";
+import AgentWorkspace from "./AgentWorkspace";
 import {AGENTS} from "./integrations";
 import {defaultPreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import type {SftpEntry,BuildInfo,DockerDetails,DockerRuntimeStats} from "./backend";
@@ -83,6 +89,16 @@ const logs=[
 const build:BuildInfo={version:"0.2.0",publisher:"PAS7 Studio",repository:"pas7-studio/PaSSH7",
   commit:"visual-fixture-not-a-build",builtAt:"2026-10-17T10:00:00Z",runNumber:"reference",target:"DEV visual fixture"};
 const sampleFileText="# PaSSH7 app\n\nDevelopment-only fixture for screenshot layout checks.\n\n- Native SSH sessions remain disconnected\n- No real credentials are present\n- Colors and spacing use the actual UI components";
+const exampleHosts=[
+  {id:"dev-server",label:"dev-server",address:"192.0.2.10",user:"deploy",port:22,group:"Production",fingerprint:true,hasSavedCredentials:true},
+  {id:"stage-server",label:"stage-server",address:"198.51.100.17",user:"ubuntu",port:2222,group:"Staging",fingerprint:true},
+  {id:"new-server",label:"new-server",address:"203.0.113.21",user:"admin",port:22,group:"Staging",fingerprint:false}
+];
+const exampleForwards=[
+  {session:"visual-fixture",localPort:8080,targetHost:"127.0.0.1",remotePort:8080},
+  {session:"visual-fixture",localPort:5432,targetHost:"127.0.0.1",remotePort:5432}
+];
+
 export default function ReferenceScreens(){
   const params=new URLSearchParams(window.location.search);
   const requested=params.get("screen");
@@ -93,6 +109,8 @@ export default function ReferenceScreens(){
   const [sort,setSort]=useState<AppPreferences["sftpSort"]>("folders");
   const [preview,setPreview]=useState<{session:string;path:string;body:string;kind:"image"|"text"}|null>(null);
   const [chosenContainer,setChosenContainer]=useState(containerRows[0]);
+  const [agent,setAgent]=useState(AGENTS[0].kind);
+  const [selectedHost,setSelectedHost]=useState("dev-server");
   const [agent,setAgent]=useState(AGENTS[0].kind);
   const [selectedHost,setSelectedHost]=useState("dev-server");
   const [transferJobs]=useState<TransferJob[]>([
@@ -148,7 +166,7 @@ export default function ReferenceScreens(){
           transferJobs={transferJobs} transferPaused={false} onPauseQueue={()=>{}} onCancelJob={()=>{}} onRetryJob={()=>{}} onClearFinished={()=>{}}
           paneSizes={preferences.paneSizes} onPaneSize={pane}
           backupPanel={<section className="vaultBackupCard"><strong>Encrypted Vault backups</strong><p className="prefInfo">Reference layout only · No actual vault or files are accessed.</p></section>}
-        />:<DockerWorkspace
+        />:screen==="docker"?<DockerWorkspace
           host="dev-server" session="visual-fixture" connected={true} items={containerRows} stats={dockerStats} statsError=""
           details={{session:"visual-fixture",containerId:chosenContainer.ID,data:{...dockerDetails,image:chosenContainer.Image}}} detailsError={null}
           onInspect={id=>{const selectedRow=containerRows.find(c=>c.ID===id);if(selectedRow)setChosenContainer(selectedRow)}}
@@ -159,7 +177,24 @@ export default function ReferenceScreens(){
           liveStatus="off" onFollow={()=>{}} onTail={()=>{}}
           autoRefresh={false} onAutoRefresh={()=>{}} onRefresh={()=>{}}
           onAction={()=>{}} onLogs={()=>{}} onCloseLogs={()=>{}} onShell={()=>{}}
-        />}
+        />:screen==="connections"?<ConnectionsWorkspace hosts={exampleHosts} selected={selectedHost}
+          connectedAliases={["dev-server"]} vaultUnlocked={true} onSelect={setSelectedHost}
+          onConnect={()=>{}} onTerminal={()=>choose("terminal")} onAdd={()=>{}} onImport={()=>{}}
+        />:screen==="snippets"?<SnippetsWorkspace host="dev-server" connected={true}
+          onTerminal={()=>choose("terminal")} onExecute={()=>{}}
+        />:screen==="ports"?<PortForwardingWorkspace host="dev-server" session="visual-fixture"
+          connected={true} forwards={exampleForwards} busy={false} error=""
+          localPort={3000} remoteHost="127.0.0.1" remotePort={3000}
+          onLocalPort={()=>{}} onRemoteHost={()=>{}} onRemotePort={()=>{}}
+          onStart={()=>{}} onRefresh={()=>{}} onStop={()=>{}}
+          onTerminal={()=>choose("terminal")}
+        />:screen==="agent"?<AgentWorkspace host="dev-server" address="192.0.2.10"
+          username="deploy" port={22} route="Direct SSH" sessionId="visual-fixture"
+          sessions={[{id:"visual-fixture",alias:"dev-server"}]} vaultUnlocked={true}
+          agent={agent} onAgent={setAgent} availability={{}} checking={false} error="" status=""
+          context={"Host: dev-server\nTarget: deploy@192.0.2.10\nVisual fixture: no agent is launched"}
+          onCheck={()=>{}} onLaunch={()=>{}} onTerminal={()=>choose("terminal")} onSession={()=>{}}
+        />:<TerminalReference/>}
       </div></aside>
     </div>
     <div className="referenceFixtureLabel" role="status">DEV UI FIXTURE · {selected?.name} · NOT A REAL SSH CONNECTION</div>
