@@ -182,6 +182,12 @@ during this checklist. Use a throwaway identity and Docker container.
 | TERM-PREF-02 | Change cursor style block/underline/bar, toggle cursor blink | Current terminal updates without reconnect; values survive app reload |
 | TERM-PREF-03 | Reset Terminal settings, export preferences, import on test profile | Defaults and imported non-secret values round-trip; Vault secret material unaffected |
 | SETTINGS-UI-01 | Open Settings, navigate to Terminal, collapse and expand a form section | Chevron and aria-expanded track actual content visibility; active category restores after reopening Settings |
+| SETTINGS-HEALTH-01 | Open Settings → About & Diagnostics for an authenticated Linux SSH host and click Run host checks | One read-only check each for SFTP and Docker inventory, plus independent Codex / Claude Code / OpenCode CLI discovery; statuses explain working and missing capabilities |
+| SETTINGS-HEALTH-02 | Repeat checks through a Windows OpenSSH account with Claude desktop GUI installed but no Claude CLI | Shows desktop app as GUI-only; does not claim usable SSH CLI and does not attempt to launch desktop application |
+| SETTINGS-HEALTH-03 | Start checks on host A, immediately switch to host B while the first host is slow | A's delayed responses cannot overwrite B's statuses, and health report shows Not checked yet until B is probed |
+| SETTINGS-HEALTH-04 | Copy the completed host health summary | JSON report contains component statuses, app version and target only; never includes host IP, usernames, Docker container IDs/names, filenames, private keys or remote probe stdout |
+| SETTINGS-HEALTH-05 | Run diagnostics while Docker daemon is down or SFTP permission is denied | Specific failing capability shows remediation while SSH and unaffected capabilities remain available; no modifications to the remote host |
+
 | DOCKER-TABLE-01 | Load 3 running containers and 1 stopped container, click Name/CPU/Memory headers | Rows sort correctly; per-container CPU/Memory come from read-only Docker stats; missing results display dash, not invented values |
 | DOCKER-TABLE-02 | Toggle Auto-refresh inside Docker toolbar | Persists existing 15-second inventory refresh preference; SSH log streams remain on their own dedicated channel |
 
