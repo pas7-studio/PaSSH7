@@ -826,7 +826,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                     installed,platform:"windows",
                                                     version:found.version.map(|v|sanitize_probe_text(&v,120)),
                                                     source:found.source.map(|v|sanitize_probe_text(&v,90)),
-                                                    location:path,
+                                                    location:path.clone(),
                                                     desktop_app:app.clone(),launch_command:launch,
                                                     diagnostic:Some(if installed{
                                                         "Windows CLI detected; the SSH shell might have an outdated PATH. Launch can use its verified absolute path.".into()
