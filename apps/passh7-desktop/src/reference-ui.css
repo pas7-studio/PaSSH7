@@ -425,3 +425,17 @@
 .shell.light .fileContextMenu button:hover:not(:disabled){background:#deedff;color:#20466f}
 .shell.light .fileContextMenu button.dangerItem{color:#a82542}
 @media(prefers-reduced-motion:reduce){.treeLoading{animation:none}}
+
+
+/* Dense live Docker inventory, matching the approved table hierarchy. */
+.dockerTableScroll{overflow-x:auto;scrollbar-width:thin}
+.dockerTableScroll>.workspaceTable{min-width:760px}
+.dockerTableScroll .workspaceTable thead th{white-space:nowrap}
+.dockerSort{background:transparent!important;border:0!important;padding:0!important;min-height:0!important;display:inline-flex!important;gap:6px;justify-content:flex-start!important;align-items:center;color:inherit!important;font-size:inherit!important;font-weight:650}
+.dockerSort:hover:not(:disabled){color:#74b3ff!important;background:transparent!important}
+.dockerStatCell{font-family:"Cascadia Code",Consolas,monospace;font-variant-numeric:tabular-nums;font-size:10.5px;white-space:nowrap;color:#c2e1ff}
+.dockerAutoRefresh{white-space:nowrap;display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
+.dockerAutoRefresh input{accent-color:#3388ff;height:15px;width:15px}
+.dockerTableScroll tr[tabindex]:focus-visible{outline:2px solid #62adff;outline-offset:-2px}
+.shell.light .dockerStatCell{color:#34516f}
+@media(max-width:1200px){.dockerToolbar{flex-wrap:wrap}.dockerToolbar .filesSearch{flex:1}}
