@@ -3,6 +3,7 @@ import TerminalView from "./TerminalView";
 import RemoteFilesWorkspace from "./RemoteFilesWorkspace";
 import DockerWorkspace from "./DockerWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
+import AgentWorkspace from "./AgentWorkspace";
 import {loadPreferences,savePreferences,type AppPreferences} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
@@ -10,7 +11,7 @@ import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockN
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
-type Panel = "files" | "docker" | "agent" | "ports" | "settings";
+type Panel = "terminal" | "files" | "docker" | "agent" | "ports" | "settings";
 type Host = {id:string; label:string; address:string; user:string; port:number; group:string; fingerprint:boolean;identityAlias?:string;hasSavedCredentials?:boolean;savedAuthMode?:string|null;backupDirectory?:string|null;jumpAlias?:string|null};
 const DEMO_HOSTS:Host[] = [
   {id:"dev",label:"Development",address:"dev.example.invalid",user:"ubuntu",port:22,group:"Development",fingerprint:true},
@@ -647,12 +648,13 @@ export default function App(){
     try{
       await writeSshSession(session.id,cli[agent]+"\r");
       setAgentStatus("Launch command sent to the SSH terminal. Check terminal output to confirm "+name+" started.");
+      setPanel("terminal");
     }catch(e){setAgentStatus("Could not launch agent: "+String(e))}
   };
   const [error,setError]=useState("");
   const [query,setQuery]=useState("");
   const [panel,setPanel]=useState<Panel>(()=>{
-    try{const value=localStorage.getItem("passh7.workspace.v1");return ["agent","files","docker","ports","settings"].includes(value||"")?value as Panel:"agent"}catch{return "agent"}
+    try{const value=localStorage.getItem("passh7.workspace.v1");return ["terminal","agent","files","docker","ports","settings"].includes(value||"")?value as Panel:"terminal"}catch{return "agent"}
   });
   const [preferences,setPreferences]=useState<AppPreferences>(loadPreferences);
   const updatePreferences=(value:AppPreferences)=>{
@@ -962,10 +964,10 @@ export default function App(){
   const connected=activeConnections>0;
   const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: "+(connected?`connected (${activeConnections} SSH session${activeConnections===1?"":"s"})`:"disconnected")+"\nVault: "+(vaultUnlocked?"unlocked":"locked")+"\nPermissions: "+(connected?"Remote SSH account privileges (not sandboxed)":"No active SSH account")+"\nSelected resources: none"+"\nSSH route: "+(active.jumpAlias?"via "+active.jumpAlias+" (gateway LAN → "+active.address+":"+active.port+")":"direct");
   return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if(e.key==="Escape"){setCommandOpen(false);}}}>
-    <header className="topbar"><div className="brand"><div className="brandicon"><TerminalSquare size={19}/></div><strong>PaSSH7</strong><span className="alpha">v{buildInfo?.version ?? "0.1.0"} · PREVIEW</span></div><nav className="topWorkspaces" aria-label="Main workspace navigation">{([["agent","Terminal",TerminalSquare],["files","Files",FolderClosed],["docker","Docker",Container],["ports","Forwarding",Activity],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=><button type="button" key={id} aria-current={panel===id?"page":undefined} className={panel===id?"active":""} onClick={()=>setPanel(id)}><Icon size={15}/><span>{label}</span></button>)}</nav><div className="topactions"><button className="lock" onClick={()=>{if(desktopAvailable()){if(vaultUnlocked){void lockVault()}else{setVaultDialog(true)}}}}><LockKeyhole size={14}/> {vaultUnlocked?"Lock vault":desktopAvailable()?"Unlock vault":"Vault unavailable"}</button><button className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button><button className="iconbtn" title="Settings" aria-label="Settings" onClick={()=>setPanel("settings")}><Settings2 size={17}/></button></div></header>
-    <div className={"workspace "+(["files","docker","settings"].includes(panel)?"workspaceFull":"")}>
+    <header className="topbar"><div className="brand"><div className="brandicon"><TerminalSquare size={19}/></div><strong>PaSSH7</strong><span className="alpha">v{buildInfo?.version ?? "0.1.0"} · PREVIEW</span></div><nav className="topWorkspaces" aria-label="Main workspace navigation">{([["terminal","Terminal",TerminalSquare],["agent","AI Agent",Bot],["files","Files",FolderClosed],["docker","Docker",Container],["ports","Forwarding",Activity],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=><button type="button" key={id} aria-current={panel===id?"page":undefined} className={panel===id?"active":""} onClick={()=>setPanel(id)}><Icon size={15}/><span>{label}</span></button>)}</nav><div className="topactions"><button className="lock" onClick={()=>{if(desktopAvailable()){if(vaultUnlocked){void lockVault()}else{setVaultDialog(true)}}}}><LockKeyhole size={14}/> {vaultUnlocked?"Lock vault":desktopAvailable()?"Unlock vault":"Vault unavailable"}</button><button className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button><button className="iconbtn" title="Settings" aria-label="Settings" onClick={()=>setPanel("settings")}><Settings2 size={17}/></button></div></header>
+    <div className={"workspace "+(["files","docker","agent","settings"].includes(panel)?"workspaceFull":"")}>
       {sidebar&&<aside className="sidebar"><nav className="workspaceNav" aria-label="Workspaces">
-{([["agent","Terminal",TerminalSquare],["files","Remote Files",FolderClosed],["docker","Docker",Container],["ports","Port Forwarding",Activity],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=>
+{([["terminal","Terminal",TerminalSquare],["agent","AI Agent",Bot],["files","Remote Files",FolderClosed],["docker","Docker",Container],["ports","Port Forwarding",Activity],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=>
 <button type="button" key={id} className={panel===id?"active":""} onClick={()=>setPanel(id)}><Icon size={16}/>{label}</button>)}
 </nav><div className="sectionHeading"><span>YOUR HOSTS</span><button className="iconbtn" title="Import hosts from local OpenSSH config" aria-label="Import SSH config" onClick={()=>void inspectLocalSshConfig()}><FileText size={15}/></button><button className="iconbtn" title="Add host" aria-label="Add host" onClick={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}><Plus size={16}/></button></div><label className="search"><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search hosts" aria-label="Search hosts"/><span>⌘ K</span></label>
         {[...new Set(hosts.map(h=>h.group))].map(group=><section key={group}><div className="groupLabel"><ChevronDown size={13}/>{group}</div>{filtered.filter(h=>h.group===group).map(h=><button key={h.id} className={"host "+(selected===h.id?"selected":"")} onClick={()=>setSelected(h.id)}><Server size={16}/><span className="hostText"><strong>{h.label}</strong><small>{h.user}@{h.address}{h.jumpAlias?" · via "+h.jumpAlias:""}</small></span><span className={"hostDot "+(sshTabs.some(t=>t.alias===h.id)?"connected":h.fingerprint?"trusted":"untrusted")} title={sshTabs.some(t=>t.alias===h.id)?"SSH connected ("+sshTabs.filter(t=>t.alias===h.id).length+" session(s))":h.fingerprint?"Host key pinned; SSH disconnected":"SSH disconnected; host key not pinned"}/></button>)}</section>)}
@@ -1002,19 +1004,22 @@ export default function App(){
 <button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button></div>}{credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{connected?`${activeConnections} active session(s) on this host`:"NO ACTIVE SESSION ON THIS HOST"}</small>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar">{sshTabs.map(t=><button key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"} onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}>{t.alias} <span role="button" title="Disconnect" onClick={e=>{e.stopPropagation();void closeInteractive(t.id)}}>×</span></button>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
         <footer><span className="footerBrand"><span className="statusDot" style={{background:connected?"#22c55e":undefined}}/> {connected?"SSH connected":desktopAvailable()?"No active SSH session":"Offline preview"}</span><span>{active.label} · {activeConnections} on host · {sshTabs.length} total</span><span>{buildInfo?.publisher ?? "PAS7 Studio"} · {buildInfo?.target ?? "Loading build info"}</span></footer>
       </main>
-      <aside className={"context "+(["files","docker","settings"].includes(panel)?"fullContext":"")}><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
-        {panel==="agent"?<><div className="contextTitle"><Bot size={18}/><h3>AI Agent</h3></div><p className="muted">Launch Codex, Claude Code or OpenCode in the SSH terminal. These tools run with your remote account permissions.</p><label className="fieldLabel">Agent</label><select value={agent} onChange={e=>setAgent(e.target.value as AgentKind)} aria-label="Select AI agent">{AGENTS.map(a=><option key={a.kind} value={a.kind}>{a.name}</option>)}</select><label className="fieldLabel">Remote CLI availability</label>
-<button type="button" className="contextAction" disabled={!connected||agentProbeBusy} onClick={()=>void checkRemoteAgents()}>{agentProbeBusy?"Checking remote CLI tools…":"Check installed agents"}</button>
-{AGENTS.map(a=><div className="agentAvailability" key={a.kind}><strong>{a.name}</strong><span>{
-  agentAvailability[a.kind]?.session===activeSsh
-    ? agentAvailability[a.kind]?.installed
-      ? ("Installed"+(agentAvailability[a.kind]?.version?" · "+agentAvailability[a.kind]?.version:""))
-      : "Not found by probe · launch may still work"
-    : "Not checked"
-}</span></div>)}
-{agentProbeError&&<p role="alert" className="wizardError">{agentProbeError}</p>}
-<label className="fieldLabel">Permissions</label><div className="permission"><ShieldCheck size={16}/><div><strong>Remote CLI privileges</strong><small>Runs with connected SSH user permissions; no PaSSH7 sandbox or MCP scoping yet</small></div></div><label className="fieldLabel">Context preview</label><pre className="preview">{context}</pre><button className="contextAction" disabled={!connected||!activeSsh} onClick={()=>void launchRemoteAgent()}>Launch {AGENTS.find(a=>a.kind===agent)?.name} in SSH terminal</button>{agentStatus&&<p role="status" className="note">{agentStatus}</p>}<p className="note">Availability checks run on the selected **remote** SSH host, not this PC. A negative result may mean different login/interactive PATH settings. You can still launch the CLI in the existing terminal. Launches the CLI in your SSH shell, not a scoped MCP integration. PaSSH7 does not send private SSH keys or vault secrets to the agent. Configure provider authentication on the remote host yourself.</p></>:
-        panel==="files"?<RemoteFilesWorkspace
+      <aside className={"context "+(["files","docker","agent","settings"].includes(panel)?"fullContext":"")}><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
+        {panel==="agent"?<AgentWorkspace
+ host={active.label} address={active.address} username={active.user} port={active.port}
+ route={active.jumpAlias?"Via "+active.jumpAlias:"Direct SSH"}
+ sessionId={sshTabs.some(t=>t.id===activeSsh&&t.alias===active.id)?activeSsh:""}
+ sessions={sshTabs.filter(t=>t.alias===active.id)}
+ vaultUnlocked={vaultUnlocked}
+ agent={agent} onAgent={setAgent}
+ availability={agentAvailability} checking={agentProbeBusy}
+ error={agentProbeError} status={agentStatus} context={context}
+ onCheck={()=>void checkRemoteAgents()}
+ onLaunch={()=>void launchRemoteAgent()}
+ onTerminal={()=>setPanel("terminal")}
+ onSession={id=>{if(sshTabs.some(t=>t.id===id&&t.alias===active.id))setActiveSsh(id)}}
+ />:
+         panel==="files"?<RemoteFilesWorkspace
  session={activeSsh} host={active.label} connected={connected}
  pathInput={sftpPath} setPathInput={setSftpPath}
  entries={sftpEntries} busy={sftpBusy} error={sftpError}
@@ -1117,6 +1122,16 @@ export default function App(){
  onExport={()=>void exportVaultBackup()}
  onRestore={()=>{setPanel("files");void inspectVaultRestore()}}
  />:
+        panel==="terminal"?<div className="terminalContext">
+ <div className="contextTitle"><TerminalSquare size={18}/><h3>SSH session</h3></div>
+ <p className="muted">Use the secure interactive terminal on the left. Open a dedicated tool workspace for remote files, containers, agents or ports.</p>
+ <div className="permission"><ShieldCheck size={16}/><div><strong>{connected?"Connected to "+active.label:"No SSH session selected"}</strong><small>{connected?active.user+"@"+active.address:"Select a host and connect to get started."}</small></div></div>
+ <button className="contextAction" onClick={()=>setPanel("agent")}><Bot size={15}/> Open AI Agent workspace</button>
+ <button className="contextAction" onClick={()=>setPanel("files")}><FolderClosed size={15}/> Browse remote files</button>
+ <button className="contextAction" onClick={()=>setPanel("docker")}><Container size={15}/> Inspect Docker</button>
+ <button className="contextAction" onClick={()=>setPanel("ports")}><Activity size={15}/> Manage port forwarding</button>
+ {agentStatus&&<p className="note" role="status">{agentStatus}</p>}
+ </div>:
         <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button><button className="contextAction" type="button" disabled={!connected||tunnelBusy} onClick={()=>void refreshLocalForwarding()}>Refresh active forwards</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{!tunnels.some(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected))&&<p className="note">No active local forwards for this host. Start one above to map a localhost port through SSH, or refresh to retrieve active native tunnels.</p>}{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusy} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
       </div></aside>
     </div>
