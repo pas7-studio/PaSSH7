@@ -517,3 +517,17 @@
 .dockerComposeMembers .workspaceEmpty{padding:22px 15px}
 .shell.light .dockerComposeMembers{background:#fff}
 .shell.light .dockerComposeMembersHeader{background:#edf5ff}
+
+
+/* Native image preview: never render SVG/HTML, avoid overflowing file inspector. */
+.fileImagePreview{display:grid;gap:10px;padding:10px 2px 5px;min-width:0}
+.fileImagePreview img{
+  display:block;width:100%;height:auto;max-height:290px;
+  object-fit:contain;object-position:center;border-radius:7px;
+  border:1px solid #2c4969;background:#071525;
+}
+.fileImagePreview small{font-size:10px;color:#91a9c5;line-height:1.5}
+.filePreviewError{display:grid;gap:9px;padding:13px;color:#ff9ea8;font-size:11px;line-height:1.6;overflow-wrap:anywhere}
+.filePreviewError button{justify-self:start;min-height:29px;padding:6px 10px}
+.shell.light .fileImagePreview img{background:#edf4fa;border-color:#c8d9ea}
+.shell.light .fileImagePreview small{color:#58728e}
