@@ -48,6 +48,12 @@ The encrypted envelope version and the decrypted data schema version are indepen
 
 **Not yet guaranteed:** concurrent-writer isolation, filesystem ACL retention, power-loss rollback and full Windows crash recovery. Until those are implemented and independently verified, do not rely on PaSSH7 for irreplaceable keys.
 
+## Remote host readiness diagnostics
+
+Open **Settings → About & Diagnostics → Live SSH host health** with an authenticated host selected, then choose **Run host checks**. PaSSH7 checks the selected SSH account's SFTP directory access, Docker inventory and Codex/Claude Code/OpenCode terminal CLI availability without modifying files, containers or services. It distinguishes a usable Windows CLI from a Start Menu desktop application that cannot run in an SSH PTY. Results and failures are specific to the currently selected SSH session; switching hosts clears them. **Copy safe health summary** omits host addresses, usernames, file and container names, credentials and raw remote command output.
+
+A **Ready** result means the corresponding read-only check succeeded for that SSH account. It is not a guarantee that all agent workflows or remote Docker actions work: use actual Windows WebView2 + remote SSH acceptance before relying on them.
+
 ## Desktop app (experimental)
 
 The browser preview uses synthetic `.invalid` hosts and cannot open real SSH connections. Real SSH operations run only inside the Tauri desktop app.
