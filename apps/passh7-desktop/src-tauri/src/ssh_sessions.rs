@@ -1837,8 +1837,14 @@ if (-not $found) {{
     (Join-Path $env:APPDATA 'npm'),
     (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'),
     (Join-Path $env:USERPROFILE '.local\bin'),
-    (Join-Path $env:USERPROFILE '.bun\bin')
-  )
+    (Join-Path $env:USERPROFILE '.bun\bin'),
+    (Join-Path $env:USERPROFILE '.volta\bin'),
+    (Join-Path $env:USERPROFILE 'scoop\shims'),
+    (Join-Path $env:USERPROFILE '.cargo\bin'),
+    (Join-Path $env:LOCALAPPDATA 'pnpm'),
+    (Join-Path $env:LOCALAPPDATA 'Yarn\bin'),
+    $env:PNPM_HOME
+  ) | Where-Object {{ $_ -and (Test-Path -LiteralPath $_ -PathType Container) }} | Select-Object -Unique
   foreach ($root in $roots) {{
     if ($found) {{ break }}
     foreach ($ext in @('.cmd','.exe','.ps1','.bat')) {{
@@ -2309,6 +2315,9 @@ mod tests {
         let script=String::from_utf16(&words).unwrap();
         assert!(script.contains("WindowsApps"));
         assert!(script.contains("LASTEXITCODE -eq 0"));
+        for root in ["PNPM_HOME","scoop\\shims",".volta\\bin",".cargo\\bin","Yarn\\bin"]{
+            assert!(script.contains(root),"Windows CLI probe must include {root}");
+        }
         assert!(script.contains("installed = [bool]($found -and $version)"));
     }
     #[test]
