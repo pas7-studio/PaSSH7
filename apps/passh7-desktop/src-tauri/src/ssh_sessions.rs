@@ -50,6 +50,7 @@ enum SessionCommand {
     VaultRead(String,tokio::sync::oneshot::Sender<Result<Vec<u8>,String>>),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
+    ForwardFinished(u16,u64),
     ForwardList(tokio::sync::oneshot::Sender<Vec<ActiveLocalForward>>),
     ForwardOpen(tokio::net::TcpStream,String,u16),
     JumpOpen(String,u16,tokio::sync::oneshot::Sender<Result<russh::ChannelStream<russh::client::Msg>,String>>),
@@ -428,7 +429,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut buffered = 0usize;
         let mut overflowed = false;
         let mut closure_detail: Option<String> = None;
-        let mut forwarders: HashMap<u16,(tokio::sync::oneshot::Sender<()>,String,u16)> = HashMap::new();
+        let mut forwarders: HashMap<u16,(tokio::sync::oneshot::Sender<()>,String,u16,u64)> = HashMap::new();
         let mut transfers: HashMap<String,tokio::sync::watch::Sender<bool>> = HashMap::new();
         let mut docker_log_streams: HashMap<String,tokio::sync::watch::Sender<bool>>=HashMap::new();
         loop {
@@ -1309,7 +1310,8 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 match tokio::net::TcpListener::bind(("127.0.0.1",local_port)).await {
                                     Ok(listener) => {
                                         let (stop_tx,mut stop_rx) = tokio::sync::oneshot::channel::<()>();
-                                        forwarders.insert(local_port,(stop_tx,target_host.clone(),remote_port));
+                                        let instance=NEXT_ID.fetch_add(1,Ordering::Relaxed);
+                                        forwarders.insert(local_port,(stop_tx,target_host.clone(),remote_port,instance));
                                         let tx = forward_sender.clone();
                                         let mut cancel = cancelled.clone();
                                         tauri::async_runtime::spawn(async move {
@@ -1327,6 +1329,11 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                     },
                                                 }
                                             }
+                                            // A dead listener must disappear from the
+                                            // authoritative native inventory. Instance
+                                            // generation prevents a late old completion
+                                            // from removing a newer listener on this port.
+                                            let _=tx.send(SessionCommand::ForwardFinished(local_port,instance)).await;
                                         });
                                         let _ = response.send(Ok(()));
                                     },
@@ -1336,7 +1343,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::ForwardStop(local_port,response)) => {
-                            if let Some((cancel,_,_))=forwarders.remove(&local_port){
+                            if let Some((cancel,_,_,_))=forwarders.remove(&local_port){
                                 let _ = cancel.send(());
                                 let _ = response.send(Ok(()));
                             }else{
@@ -1344,9 +1351,15 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
+                        Some(SessionCommand::ForwardFinished(port,instance))=>{
+                            if forwarders.get(&port).is_some_and(|entry|entry.3==instance){
+                                forwarders.remove(&port);
+                            }
+                            Ok(())
+                        },
                         Some(SessionCommand::ForwardList(response)) => {
                             let mut records:Vec<ActiveLocalForward>=forwarders.iter()
-                                .map(|(port,(_,host,remote_port))|ActiveLocalForward{
+                                .map(|(port,(_,host,remote_port,_instance))|ActiveLocalForward{
                                     local_port:*port,target_host:host.clone(),remote_port:*remote_port
                                 }).collect();
                             records.sort_by_key(|r|r.local_port);
@@ -1401,7 +1414,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                 }
             }
         }
-        for (_, (stop,_,_)) in forwarders.drain() { let _=stop.send(()); }
+        for (_, (stop,_,_,_)) in forwarders.drain() { let _=stop.send(()); }
         for (_,cancel) in transfers.drain() { let _=cancel.send(true); }
         for (_,stop) in docker_log_streams.drain() { let _=stop.send(true); }
         let _ = channel.close().await;
