@@ -545,3 +545,12 @@
 .referenceFixture .workspaceNav button.active{opacity:1}
 .referenceFixture .sidebottom small{color:#e6b971}
 .referenceFixture .contextBody{scrollbar-width:thin}
+
+
+/* Transfer queue status copy is informational, not a green success banner. */
+.shell .transferQueuePanel .transferQueueDescription{
+  color:#9bb5d1!important;background:transparent!important;
+}
+.shell.light .transferQueuePanel .transferQueueDescription{
+  color:#566e87!important;
+}
