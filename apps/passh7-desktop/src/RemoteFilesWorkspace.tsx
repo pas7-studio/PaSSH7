@@ -19,7 +19,8 @@ const crumbs=(path:string)=>{
   }))];
 };
 type Entries={session:string;path:string;items:SftpEntry[]}|null;
-type Preview={session:string;path:string;body:string}|null;
+type Preview={session:string;path:string;body:string;kind:"image"|"text"}|null;
+type PreviewError={session:string;path:string;message:string}|null;
 type Props={
   session:string;host:string;connected:boolean;
   pathInput:string;setPathInput:(value:string)=>void;
@@ -30,7 +31,7 @@ type Props={
   upload:()=>void;download:(path:string)=>void;queueDownloads:(paths:string[])=>void;readPreview:(path:string)=>void;
   onMkdir:(name:string)=>void;onDelete:(name:string,isDirectory:boolean)=>void;
   onRename:(name:string,newName:string,isDirectory:boolean)=>void;mutationBusy:boolean;
-  preview:Preview;previewBusy:boolean;
+  preview:Preview;previewBusy:boolean;previewError:PreviewError;
   transferJobs:TransferJob[];transferPaused:boolean;
   onPauseQueue:(value:boolean)=>void;onCancelJob:(id:string)=>void;
   onRetryJob:(id:string)=>void;onClearFinished:()=>void;backupPanel:ReactNode;
@@ -94,6 +95,7 @@ export default function RemoteFilesWorkspace(p:Props){
   const renderedItems=items.slice(0,visibleLimit);
   const selectedPath=selected?full(path,selected):"";
   const preview=p.preview?.session===p.session&&p.preview.path===selectedPath?p.preview:null;
+  const previewError=p.previewError?.session===p.session&&p.previewError.path===selectedPath?p.previewError.message:"";
   const renameFile=(item:SftpEntry)=>{
     setFileMenu(null);
     if(!p.connected||p.mutationBusy||p.busy)return;
@@ -198,7 +200,12 @@ export default function RemoteFilesWorkspace(p:Props){
           <dl><dt>Size</dt><dd>{size(selectedItem.sizeBytes)}</dd><dt>Modified</dt><dd>{selectedItem.modifiedAt!==null?new Date(selectedItem.modifiedAt*1000).toLocaleString():"Unknown"}</dd><dt>Permissions</dt><dd><code>{octalPermissions(selectedItem.unixPermissions)}</code></dd><dt>Owner ID</dt><dd>{selectedItem.ownerId??"Unknown"}</dd><dt>Group ID</dt><dd>{selectedItem.groupId??"Unknown"}</dd><dt>Path</dt><dd className="filePath">{selectedPath}</dd></dl>
           <div className="inspectorActions"><button onClick={()=>navigator.clipboard.writeText(selectedPath)}><Clipboard size={14}/> Copy path</button>
           {selectedItem.isDir?<button onClick={()=>open(selectedPath)}>Open folder</button>:<><button onClick={()=>p.readPreview(selectedPath)} disabled={p.previewBusy}>Preview</button><button onClick={()=>p.download(selectedPath)}>Download</button></>}</div>
-          {!selectedItem.isDir&&<div className="fileCodePreview"><strong>READ-ONLY PREVIEW</strong>{p.previewBusy?<p>Loading preview…</p>:preview?<pre>{preview.body}</pre>:<p>Select Preview to read UTF-8 text. Binary files may not be previewable.</p>}</div>}
+          {!selectedItem.isDir&&<div className="fileCodePreview"><strong>READ-ONLY PREVIEW</strong>
+            {p.previewBusy?<p>Loading preview from the remote host…</p>:
+             previewError?<div className="filePreviewError" role="alert">{previewError}<button type="button" onClick={()=>p.readPreview(selectedPath)}>Retry</button></div>:
+             preview?.kind==="image"?<div className="fileImagePreview"><img src={preview.body} alt={"Remote image preview: "+selectedItem.name}/><small>Native SFTP image preview · 768 KiB maximum</small></div>:
+             preview?.kind==="text"?<pre>{preview.body}</pre>:
+             <p>Select Preview to view UTF-8 text or small PNG, JPEG, GIF and WebP images. Other binary formats require Download.</p>}</div>}
         </>:<div className="workspaceEmpty">Select a file to see details and preview its contents.</div>}
       </aside>
     </div>
