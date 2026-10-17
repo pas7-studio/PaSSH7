@@ -246,3 +246,17 @@ Underlying fix: use Docker's normal JSON array output instead of `docker inspect
 
 Automated Rust + frontend + visual evidence:
 https://github.com/pas7-studio/PaSSH7/actions/runs/39039408111
+
+## Additional Windows agent runtime smoke
+
+- AGENT-WIN-11: Create a fake/nonworking `claude.cmd` in SSH account user
+  bin. The CLI must show **needs repair** and stay disabled, not installed.
+- AGENT-WIN-12: With desktop-only Codex/Claude/OpenCode, choose **Prepare RDP
+  tunnel**. Port Forwarding displays 13389 -> 127.0.0.1:3389 but does not
+  start until user explicitly requests. With RDP enabled, connect using
+  `mstsc /v:127.0.0.1:13389`.
+- AGENT-WIN-13: WindowsApps App Execution Alias alone must not be treated as a
+  runnable CLI. A successful `--version` is required for installed status.
+
+Automated unit/UI/visual PASS:
+https://github.com/pas7-studio/PaSSH7/actions/runs/39040275865
