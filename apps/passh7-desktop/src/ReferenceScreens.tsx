@@ -4,17 +4,23 @@
  * No real Vault, SSH session or Docker daemon is opened by this page.
  */
 import {useState} from "react";
-import {Bot,ChevronDown,Command,Container,FileText,FolderClosed,LockKeyhole,Network,Search,Server,Settings2,ShieldCheck,TerminalSquare} from "lucide-react";
+import {Activity,Bot,ChevronDown,Command,Container,FileText,FolderClosed,LockKeyhole,Network,Search,Server,Settings2,ShieldCheck,TerminalSquare} from "lucide-react";
 import RemoteFilesWorkspace from "./RemoteFilesWorkspace";
 import DockerWorkspace from "./DockerWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
+import ConnectionsWorkspace from "./ConnectionsWorkspace";
+import PortForwardingWorkspace from "./PortForwardingWorkspace";
+import SnippetsWorkspace from "./SnippetsWorkspace";
+import AgentWorkspace from "./AgentWorkspace";
+import {AGENTS} from "./integrations";
 import {defaultPreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import type {SftpEntry,BuildInfo,DockerDetails,DockerRuntimeStats} from "./backend";
 import type {TransferJob} from "./useSftpTransferQueue";
 
-type Screen="settings"|"files"|"docker";
+type Screen="connections"|"terminal"|"files"|"docker"|"ports"|"snippets"|"agent"|"settings";
 const screenNames:{key:Screen;name:string}[]=[
-  {key:"settings",name:"Settings"},{key:"files",name:"Remote Files"},{key:"docker",name:"Docker"}
+  {key:"connections",name:"Connections"},{key:"terminal",name:"Terminal"},{key:"files",name:"Remote Files"},{key:"docker",name:"Docker"},
+  {key:"ports",name:"Port Forwarding"},{key:"snippets",name:"Snippets"},{key:"agent",name:"AI Agents"},{key:"settings",name:"Settings"}
 ];
 const fixtures:SftpEntry[]=[
   {name:"src",isDir:true,sizeBytes:null,modifiedAt:1792100200,unixPermissions:0o755,ownerId:1000,groupId:1000},
@@ -87,6 +93,8 @@ export default function ReferenceScreens(){
   const [sort,setSort]=useState<AppPreferences["sftpSort"]>("folders");
   const [preview,setPreview]=useState<{session:string;path:string;body:string;kind:"image"|"text"}|null>(null);
   const [chosenContainer,setChosenContainer]=useState(containerRows[0]);
+  const [agent,setAgent]=useState(AGENTS[0].kind);
+  const [selectedHost,setSelectedHost]=useState("dev-server");
   const [transferJobs]=useState<TransferJob[]>([
     {id:"fixture-complete",session:"visual-fixture",host:"dev-server",direction:"download",path:"/home/deploy/README.md",name:"README.md",status:"completed",bytes:8432,totalBytes:8432,result:"Downloaded",createdAt:1792100200000}
   ]);
@@ -108,14 +116,13 @@ export default function ReferenceScreens(){
     </header>
     <div className="workspace workspaceFull">
       <aside className="sidebar"><nav className="workspaceNav" aria-label="Reference fixture workspaces">
-        <button disabled><Server size={16}/>Connections</button>
-        <button disabled><TerminalSquare size={16}/>Terminal</button>
-        <button className={screen==="files"?"active":""} onClick={()=>choose("files")}><FolderClosed size={16}/>Remote Files</button>
-        <button className={screen==="docker"?"active":""} onClick={()=>choose("docker")}><Container size={16}/>Docker</button>
-        <button disabled><Network size={16}/>Port Forwarding</button>
-        <button disabled><FileText size={16}/>Snippets</button>
-        <button disabled><Bot size={16}/>AI Agents</button>
-        <button className={screen==="settings"?"active":""} onClick={()=>choose("settings")}><Settings2 size={16}/>Settings</button>
+        {screenNames.map(item=>{
+          const Icon=item.key==="connections"?Server:item.key==="terminal"?TerminalSquare:item.key==="files"?FolderClosed:
+            item.key==="docker"?Container:item.key==="ports"?Activity:item.key==="snippets"?FileText:
+            item.key==="agent"?Bot:Settings2;
+          return <button key={item.key} className={screen===item.key?"active":""} onClick={()=>choose(item.key)}>
+            <Icon size={16}/>{item.name}</button>;
+        })}
       </nav>
       <div className="sectionHeading"><span>YOUR HOSTS</span></div>
       <label className="search"><Search size={15}/><input disabled value="" readOnly placeholder="Search hosts"/></label>
