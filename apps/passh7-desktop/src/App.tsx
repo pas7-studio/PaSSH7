@@ -642,8 +642,7 @@ export default function App(){
     if(!window.confirm("Run "+name+" on "+session.alias+" in your existing SSH terminal? This agent runs with the FULL permissions of the remote SSH account, not inside a PaSSH7 sandbox."))return;
     try{
       await writeSshSession(session.id,command+"\r");
-      setAgentStatus("Launch command sent to "+session.alias+". Check terminal output to confirm the CLI started.");
-      setPanel("terminal");
+      setAgentStatus("Launch command sent to "+session.alias+". Check the interactive terminal below to confirm the CLI started.");
     }catch(error){setAgentStatus("Could not send agent launch command: "+String(error))}
   };
   const [error,setError]=useState("");
@@ -1158,6 +1157,7 @@ export default function App(){
  agent={agent} onAgent={setAgent}
  availability={agentAvailability} checking={agentProbeBusy}
  error={agentProbeError} status={agentStatus} context={context}
+ liveTerminal={true} onSessionClosed={onSessionClosed}
  onCheck={()=>void checkRemoteAgents()}
  onLaunch={()=>void launchRemoteAgent()}
  onTerminal={()=>setPanel("terminal")}
