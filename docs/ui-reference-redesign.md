@@ -36,8 +36,8 @@ Migration layer: apps/passh7-desktop/src/reference-ui.css, loaded after legacy s
 | --- | --- | --- |
 | AppShell | single left rail, true active-host header, page navigation | comprehensive keyboard/accessibility and screenshot audit |
 | Settings | 12 sections with functional collapsible cards, remembered category, live xterm font/cursor controls, inspector rail, import/export and pane reset | native config/log folders and advanced backend settings |
-| Remote Files | lazy SFTP tree with active-path reveal, file metadata/preview, history, resizeable tree/inspector, context menu and Vault backups | batch queue, multi-select, image preview |
-| Docker | resource tabs, state actions, six native KPIs, per-container sampled CPU/RAM sortable table, toolbar auto-refresh, sanitized inspector, fullscreen logs, split sizes and confirmation-gated container shell | Compose workflows, richer metrics and Windows live verification |
+| Remote Files | lazy SFTP tree with active-path reveal, file metadata/preview, history, resizable tree/inspector, multiselect, bounded serial transfer queue (pause pending, cancel, retry, progress/history) and Vault backups | multi-file native upload picker, pause/resume active transfer, large files, image preview |
+| Docker | resource tabs, native KPIs, CPU/RAM sortable inventory, sanitized inspector, live/fullscreen logs, split sizes, confirmed container shell, read-only Compose project discovery and project-container listing | Compose service controls, mutations, richer metrics and Windows live verification |
 | Connections | Vault hosts, fingerprint state, connection and terminal actions | host groups/tags, favorites |
 | Snippets | command cards, user-entered command with explicit SSH confirmation | encrypted reusable user snippets, platform-aware templates |
 | Port Forwarding | standalone native SSH forwarding workspace | presets and recovery experience |
@@ -47,9 +47,9 @@ Migration layer: apps/passh7-desktop/src/reference-ui.css, loaded after legacy s
 
 - Credentials, SSH identities and verified pins remain in the Rust encrypted Vault. Only non-secret view preferences belong to browser local storage.
 - Agent CLIs and snippets run with the remote SSH user's privileges, NOT a PaSSH7 sandbox.
-- Native SFTP transfer size is currently 64 MiB; never show fake 1.2 GiB uploads. Transfer cancellation works; native pause/retry/concurrent queue are future work.
+- Native SFTP transfers are limited to 64 MiB per file. The UI queue serializes native dialog-based operations and supports cancelling an active transfer, pausing *pending* work, and retrying as a new job. Active bytes cannot be paused/resumed. Every download still requires a system Save dialog; batch upload selection and large-file resume are future work.
 - Docker stats is a single read-only sample collected using a fixed SSH command; CPU is aggregate container percent, not host CPU. Memory is summed reported container usage, not total host RAM.
-- Docker logs stream on a dedicated native SSH exec channel. Follow is cancelled on host/container/workspace change or Vault lock; static logs remain available for stopped containers.
+- Docker Compose project discovery runs a fixed read-only command; project container listing uses validated project names and Docker labels without opening YAML/.env files. Docker logs stream on a dedicated native SSH exec channel. Follow is cancelled on host/container/workspace change or Vault lock; static logs remain available for stopped containers.
 - All real connection/authentication paths require independently verified pinned host keys. No mock data can imply a live connection.
 
 ### Resize and launch behaviors
