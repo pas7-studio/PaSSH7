@@ -42,6 +42,23 @@ export default function RemoteFilesWorkspace(p:Props){
   const [selectedNames,setSelectedNames]=useState<string[]>([]);
   const selectionAnchor=useRef<string>("");
   const [fileMenu,setFileMenu]=useState<{name:string;x:number;y:number}|null>(null);
+  const fileMenuRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!fileMenu)return;
+    const dismiss=(event:PointerEvent)=>{
+      if(!fileMenuRef.current?.contains(event.target as Node))setFileMenu(null);
+    };
+    const escape=(event:KeyboardEvent)=>{if(event.key==="Escape")setFileMenu(null)};
+    document.addEventListener("pointerdown",dismiss);
+    document.addEventListener("keydown",escape);
+    window.addEventListener("resize",escapeMenu);
+    function escapeMenu(){setFileMenu(null)}
+    return()=>{
+      document.removeEventListener("pointerdown",dismiss);
+      document.removeEventListener("keydown",escape);
+      window.removeEventListener("resize",escapeMenu);
+    };
+  },[fileMenu]);
   const [treeWidth,setTreeWidth]=useState(p.paneSizes.filesTree);
   const [inspectorWidth,setInspectorWidth]=useState(p.paneSizes.filesInspector);
   useEffect(()=>setTreeWidth(p.paneSizes.filesTree),[p.paneSizes.filesTree]);
@@ -162,14 +179,14 @@ export default function RemoteFilesWorkspace(p:Props){
             onContextMenu={e=>{e.preventDefault();selectItem(item.name,false,false);setFileMenu({name:item.name,x:Math.max(8,Math.min(e.clientX,window.innerWidth-216)),y:Math.max(8,Math.min(e.clientY,window.innerHeight-260))})}}
             onDoubleClick={()=>item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
             onKeyDown={e=>{
-              if(e.key==="Enter"){e.preventDefault();setSelected(item.name);item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
-              else if(e.key===" "){e.preventDefault();setSelected(item.name)}
+              if(e.key==="Enter"){e.preventDefault();selectItem(item.name,false,false);item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
+              else if(e.key===" "){e.preventDefault();selectItem(item.name,e.ctrlKey||e.metaKey,e.shiftKey)}
               else if(e.key==="ArrowDown"||e.key==="ArrowUp"){
                 e.preventDefault();
                 const offset=e.key==="ArrowDown"?1:-1;
                 const next=renderedItems[Math.max(0,Math.min(renderedItems.length-1,renderedItems.indexOf(item)+offset))];
                 if(next){
-                  setSelected(next.name);
+                  selectItem(next.name,false,false);
                   const rows=e.currentTarget.closest("tbody")?.querySelectorAll<HTMLTableRowElement>("tr[tabindex]");
                   const target=rows?.[renderedItems.indexOf(next)];
                   target?.focus();target?.scrollIntoView({block:"nearest"});
@@ -209,7 +226,7 @@ export default function RemoteFilesWorkspace(p:Props){
         </>:<div className="workspaceEmpty">Select a file to see details and preview its contents.</div>}
       </aside>
     </div>
-    {fileMenu&&items.some(item=>item.name===fileMenu.name)&&<div className="fileContextMenu" role="menu" aria-label={"Actions for "+fileMenu.name}
+    {fileMenu&&items.some(item=>item.name===fileMenu.name)&&<div ref={fileMenuRef} className="fileContextMenu" role="menu" aria-label={"Actions for "+fileMenu.name}
       style={{left:fileMenu.x,top:fileMenu.y}} onClick={e=>e.stopPropagation()}>
       {(()=>{
         const item=items.find(item=>item.name===fileMenu.name)!;
