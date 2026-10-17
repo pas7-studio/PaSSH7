@@ -49,8 +49,13 @@ export default function RemoteFilesWorkspace(p:Props){
   useEffect(()=>{setVisibleLimit(250);},[p.session,path,p.filter,p.sort,p.showHidden]);
   const open=(next:string)=>{
     setSelected("");
-    if(next!==path){const nextHistory=[...history.slice(0,historyIndex+1),next].slice(-60);
-      setHistory(nextHistory);setHistoryIndex(nextHistory.length-1);}
+    if(next!==path){
+      // Include the initial folder so Back can return to it.
+      const previous=historyIndex>=0?history.slice(0,historyIndex+1):[path];
+      const chain=previous.at(-1)===path?previous:[...previous,path];
+      const nextHistory=[...chain,next].slice(-60);
+      setHistory(nextHistory);setHistoryIndex(nextHistory.length-1);
+    }
     p.navigate(next);
   };
   const items=useMemo(()=>[...(dir?.items||[])].filter(item=>
@@ -124,6 +129,17 @@ export default function RemoteFilesWorkspace(p:Props){
             onKeyDown={e=>{
               if(e.key==="Enter"){e.preventDefault();setSelected(item.name);item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
               else if(e.key===" "){e.preventDefault();setSelected(item.name)}
+              else if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+                e.preventDefault();
+                const offset=e.key==="ArrowDown"?1:-1;
+                const next=renderedItems[Math.max(0,Math.min(renderedItems.length-1,renderedItems.indexOf(item)+offset))];
+                if(next){
+                  setSelected(next.name);
+                  const rows=e.currentTarget.closest("tbody")?.querySelectorAll<HTMLTableRowElement>("tr[tabindex]");
+                  const target=rows?.[renderedItems.indexOf(next)];
+                  target?.focus();target?.scrollIntoView({block:"nearest"});
+                }
+              }
               else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="c"){e.preventDefault();void navigator.clipboard.writeText(full(path,item.name))}
             }}>
             <td><span className="fileName">{item.isDir?<FolderClosed size={15}/>:<FileText size={15}/>} {item.name}</span></td>
