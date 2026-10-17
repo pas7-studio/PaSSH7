@@ -3,7 +3,6 @@ import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Play,
 import {AGENTS,type AgentKind} from "./integrations";
 import type {RemoteAgentAvailability} from "./backend";
 import {WorkspaceHeader,WorkspaceStatus} from "./WorkspaceChrome";
-import TerminalView from "./TerminalView";
 
 export type AgentProbeState=RemoteAgentAvailability&{session:string};
 type Props={
@@ -14,7 +13,7 @@ type Props={
   checking:boolean;error:string;status:string;context:string;
   onCheck:()=>void;onLaunch:()=>void;onTerminal:()=>void;onSession:(id:string)=>void;
   onPrepareRdp:()=>void;
-  liveTerminal?:boolean;onSessionClosed?:(id:string,detail?:string)=>void;
+  liveTerminal?:boolean;onTerminalDock?:(node:HTMLDivElement|null)=>void;
 };
 export default function AgentWorkspace(p:Props){
   const [copyFeedback,setCopyFeedback]=useState("");
@@ -132,9 +131,7 @@ export default function AgentWorkspace(p:Props){
               <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
             </div>
           </div>
-          <div className="agentTerminalFrame" ref={terminalPane}>
-            <TerminalView id={p.sessionId} active={true} onClosed={p.onSessionClosed||(()=>{})}/>
-          </div>
+          <div className="agentTerminalFrame" ref={node=>{terminalPane.current=node;p.onTerminalDock?.(node)}}/>
           <p className="agentHint">Type directly in this terminal. Select another SSH session above to change the active console. Nothing is executed without your action.</p>
         </section>}
         <section className="agentSection">
