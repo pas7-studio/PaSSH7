@@ -19,8 +19,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
       - name: TypeScript and Vite build
         working-directory: apps/passh7-desktop
         run: |
           npm install --no-audit --no-fund
           npm run build
+      - name: Generate Tauri test icon
+        run: python3 apps/passh7-desktop/scripts/create_icon.py
+      - name: Rust Docker allowlist unit tests
+        run: cargo test --manifest-path apps/passh7-desktop/src-tauri/Cargo.toml --bin passh7-desktop docker_catalog_tests
