@@ -1,9 +1,9 @@
 import {useRef,useState} from "react";
-import {Activity, Bot, Container, FolderClosed, LockKeyhole, Monitor, Settings2, ShieldCheck, TerminalSquare} from "lucide-react";
+import {Activity, Bot, Command, Container, FolderClosed, LockKeyhole, Monitor, Settings2, ShieldCheck, TerminalSquare} from "lucide-react";
 import {type AppPreferences,defaultPreferences,validatePreferences} from "./preferences";
 import type {BuildInfo} from "./backend";
 
-type Section="general"|"terminal"|"files"|"docker"|"security"|"network"|"agents"|"diagnostics";
+type Section="general"|"terminal"|"files"|"docker"|"security"|"network"|"agents"|"shortcuts"|"diagnostics";
 const sections:{id:Section;label:string;hint:string;Icon:typeof Settings2}[]=[
   {id:"general",label:"General",hint:"Workspace & appearance",Icon:Settings2},
   {id:"terminal",label:"Terminal",hint:"Fonts and scrolling",Icon:TerminalSquare},
@@ -12,6 +12,7 @@ const sections:{id:Section;label:string;hint:string;Icon:typeof Settings2}[]=[
   {id:"security",label:"Vault & Security",hint:"Encrypted credentials",Icon:LockKeyhole},
   {id:"network",label:"SSH & Networking",hint:"Jump routes and forwards",Icon:Activity},
   {id:"agents",label:"AI Agents",hint:"Remote CLI diagnostics",Icon:Bot},
+  {id:"shortcuts",label:"Keyboard Shortcuts",hint:"Fast workspace navigation",Icon:Command},
   {id:"diagnostics",label:"About & Diagnostics",hint:"Build information",Icon:ShieldCheck}
 ];
 type Props={preferences:AppPreferences;onChange:(p:AppPreferences)=>void;
@@ -104,6 +105,22 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
         {section==="agents"&&<section className="settingsCard"><h3>Remote CLI agents</h3>
           <p>Codex, Claude Code and OpenCode run with your remote SSH account permissions. The detection probe searches the remote login-interactive PATH, not local Windows installations.</p>
           <p className="prefInfo">A failed version probe does not block manual agent launch. Configure provider credentials on each server and inspect the command in its SSH terminal.</p>
+        </section>}
+        {section==="shortcuts"&&<section className="settingsCard"><h3>Keyboard shortcuts</h3>
+          <p className="prefInfo">The primary workspace shortcuts are deliberately not intercepted by SSH unless Ctrl/Cmd and Shift are held together. Terminal input, including ordinary Ctrl shortcuts, continues to go to the remote shell.</p>
+          <div className="shortcutTable">{[
+            ["Ctrl/Cmd + K","Open or close command palette"],
+            ["Ctrl/Cmd + Shift + 1","Open Terminal workspace"],
+            ["Ctrl/Cmd + Shift + 2","Open Remote Files workspace"],
+            ["Ctrl/Cmd + Shift + 3","Open Docker workspace"],
+            ["Ctrl/Cmd + Shift + 4","Open Port Forwarding workspace"],
+            ["Ctrl/Cmd + Shift + 5","Open Settings workspace"],
+            ["Enter (focused file row)","Open folder or preview file"],
+            ["Space (focused file row)","Select a remote file"],
+            ["Ctrl/Cmd + C (focused file row)","Copy remote file path"],
+            ["Escape","Dismiss command palette"]
+          ].map(([shortcut,meaning])=><div className="shortcutRow" key={shortcut}><kbd>{shortcut}</kbd><span>{meaning}</span></div>)}</div>
+          <p className="prefInfo">Custom shortcut remapping is not implemented yet. All shortcuts here perform real actions in the app.</p>
         </section>}
         {section==="diagnostics"&&<section className="settingsCard"><h3>Build details</h3>
           <dl className="diagnosticList"><dt>Version</dt><dd>{buildInfo?.version||"Unknown"}</dd><dt>Publisher</dt><dd>{buildInfo?.publisher||"PAS7 Studio"}</dd><dt>Target</dt><dd>{buildInfo?.target||"Unknown"}</dd><dt>Built at</dt><dd>{buildInfo?.builtAt||"Unknown"}</dd><dt>Commit</dt><dd>{buildInfo?.commit?.slice(0,16)||"Unknown"}</dd><dt>Build</dt><dd>{buildInfo?.runNumber||"Unknown"}</dd></dl>
