@@ -830,3 +830,21 @@
 @media(prefers-reduced-motion:reduce){
   .shell .widePage button:not(.workspacePrimary):active:not(:disabled){transform:none}
 }
+
+
+/* Dev reference output shares the real terminal chrome; never invokes a PTY. */
+.referenceFixture .referenceTerminalMain{width:100%;min-height:calc(100vh - 100px);padding-bottom:0}
+.referenceFixture .referenceTerminalMain .terminal{min-height:420px}
+.referenceTerminalText{
+  padding:20px 22px;white-space:pre;overflow:auto;min-height:400px;flex:1;
+  background:#081522;color:#bfdaef;
+  font:12.5px/1.7 "Cascadia Code",Consolas,monospace;
+}
+.referenceTerminalPrompt{color:#74dca7}
+.referenceTerminalPrompt>span{color:#dbe9f9}
+.referenceTerminalPrompt .terminalCaret{color:#7bacff}
+.referenceFixture .workspacePageHeading h1{overflow-wrap:anywhere}
+@media(max-width:900px){
+  .referenceFixture .referenceTerminalMain .identity{display:flex;flex-wrap:wrap}
+  .referenceTerminalText{padding:14px;font-size:11px}
+}
