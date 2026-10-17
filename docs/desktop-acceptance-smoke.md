@@ -215,3 +215,16 @@ On Windows 11 verify real Terminal: switching multiple SSH tabs preserves PTY ou
 | UI-KB-06 | Select a host result in Quick Switch | Selection changes, but no credentials are sent and no SSH session is opened implicitly |
 
 Headless UI keyboard and appearance test PASS: https://github.com/pas7-studio/PaSSH7/actions/runs/39035191959.
+
+
+## Docker Inspect shell-agnostic regression
+
+| Case | Procedure | Expected |
+| --- | --- | --- |
+| DOCKER-INSPECT-01 | On a real Linux Docker host, select a running container and press Inspect | Detail fields render; no Go-template parse errors |
+| DOCKER-INSPECT-02 | On a Windows OpenSSH host with Docker, repeat Inspect | Uses the same `docker container inspect <validated hex ID>` command, without PowerShell/cmd Go-template quoting |
+| DOCKER-INSPECT-03 | Inspect a stopped container | Image, lifecycle timestamps, restart policy and networks are shown where available |
+| DOCKER-INSPECT-04 | Try a missing/deleted container | Native Docker exit error appears and Retry remains available, not a fake empty detail |
+| DOCKER-INSPECT-05 | Inspect an image with `Config.Env`, `Config.Labels` and command arguments | Only the explicit allowlisted detail fields reach the WebView; environment/labels and commands are excluded |
+
+Underlying fix: use Docker's normal JSON array output instead of `docker inspect --format '{{json .}}'`. Parse the array and reduce to the existing allowlisted detail shape in the native SSH actor. No secrets, arbitrary shell strings or Go templates are accepted as JavaScript inputs.
