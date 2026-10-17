@@ -23,7 +23,7 @@ type Preview={session:string;path:string;body:string}|null;
 type Props={
   session:string;host:string;connected:boolean;
   pathInput:string;setPathInput:(value:string)=>void;
-  entries:Entries;busy:boolean;error:string;
+  entries:Entries;busy:boolean;error:string;notice:string;
   filter:string;setFilter:(s:string)=>void;
   sort:"folders"|"name"|"size"|"modified";setSort:(s:Props["sort"])=>void;
   showHidden:boolean;navigate:(path:string)=>void;
@@ -143,6 +143,7 @@ export default function RemoteFilesWorkspace(p:Props){
       <select value={p.sort} onChange={e=>p.setSort(e.target.value as Props["sort"])} aria-label="File sorting"><option value="folders">Folders first</option><option value="name">By name</option><option value="size">Largest first</option><option value="modified">Newest first</option></select>
     </div>
     {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
+    {p.notice&&<div className="workspaceNotice" role="status">{p.notice}</div>}
     <div className="filesGrid resizableFilesGrid" style={{gridTemplateColumns:`minmax(150px,${treeWidth}px) 7px minmax(210px,1fr) 7px minmax(245px,${inspectorWidth}px)`}}>
       <div className="filesFolders"><RemoteDirectoryTree session={p.session} connected={p.connected} currentPath={path} onNavigate={open}/>
         <div className="remoteCurrentFolder"><strong>CURRENT DIRECTORY</strong>
