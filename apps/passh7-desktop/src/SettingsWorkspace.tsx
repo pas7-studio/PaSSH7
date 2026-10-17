@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState,type ReactNode} from "react";
 import {WorkspaceHeader} from "./WorkspaceChrome";
+import ConnectionDiagnostics from "./ConnectionDiagnostics";
 import {Activity,Bell,Bot,ChevronDown,Clipboard,Container,Download,FolderClosed,Info,Keyboard,LockKeyhole,Monitor,Palette,RefreshCw,Settings2,ShieldCheck,TerminalSquare,Upload} from "lucide-react";
 import {type AppPreferences,defaultPreferences,defaultPaneSizes,validatePreferences} from "./preferences";
 import type {BuildInfo} from "./backend";
@@ -20,8 +21,9 @@ const sections:{id:Section;label:string;hint:string;Icon:typeof Settings2}[]=[
   {id:"diagnostics",label:"About & Diagnostics",hint:"Version, logs and support",Icon:Info}
 ];
 type Props={preferences:AppPreferences;onChange:(p:AppPreferences)=>void;
- buildInfo:BuildInfo|null;vaultUnlocked:boolean;onLock:()=>void;onExport:()=>void;onRestore:()=>void};
-export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultUnlocked,onLock,onExport,onRestore}:Props){
+ buildInfo:BuildInfo|null;vaultUnlocked:boolean;host:string;session:string;connected:boolean;
+ onLock:()=>void;onExport:()=>void;onRestore:()=>void};
+export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultUnlocked,host,session,connected,onLock,onExport,onRestore}:Props){
   const [section,setSection]=useState<Section>(()=>{
     try{
       const saved=localStorage.getItem("passh7.settings.section.v1");
@@ -213,6 +215,7 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
           </>)}
         </>}
         {section==="diagnostics"&&<>
+          {sectionCard("Live SSH host health",<ConnectionDiagnostics host={host} session={session} connected={connected} vaultUnlocked={vaultUnlocked} version={buildInfo?.version||"Unknown"} target={buildInfo?.target||"Unknown"}/>)}
           {sectionCard("Build details",<>
             <dl className="diagnosticList"><dt>Version</dt><dd>{buildInfo?.version||"Unknown"}</dd><dt>Publisher</dt><dd>{buildInfo?.publisher||"PAS7 Studio"}</dd><dt>Target</dt><dd>{buildInfo?.target||"Unknown"}</dd><dt>Built at</dt><dd>{buildInfo?.builtAt||"Unknown"}</dd><dt>Commit</dt><dd>{buildInfo?.commit?.slice(0,16)||"Unknown"}</dd><dt>Build</dt><dd>{buildInfo?.runNumber||"Unknown"}</dd></dl>
             <button onClick={()=>void navigator.clipboard.writeText(JSON.stringify({build:buildInfo,preferences},null,2)).then(()=>setNotice("Non-secret diagnostics copied.")).catch(error=>setNotice(String(error)))}><Clipboard size={15}/> Copy diagnostics</button>
