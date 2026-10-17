@@ -3,6 +3,7 @@ import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Play,
 import {AGENTS,type AgentKind} from "./integrations";
 import type {RemoteAgentAvailability} from "./backend";
 import {WorkspaceHeader,WorkspaceStatus} from "./WorkspaceChrome";
+import TerminalView from "./TerminalView";
 
 export type AgentProbeState=RemoteAgentAvailability&{session:string};
 type Props={
@@ -13,6 +14,7 @@ type Props={
   checking:boolean;error:string;status:string;context:string;
   onCheck:()=>void;onLaunch:()=>void;onTerminal:()=>void;onSession:(id:string)=>void;
   onPrepareRdp:()=>void;
+  liveTerminal?:boolean;onSessionClosed?:(id:string,detail?:string)=>void;
 };
 export default function AgentWorkspace(p:Props){
   const [copyFeedback,setCopyFeedback]=useState("");
@@ -117,6 +119,16 @@ export default function AgentWorkspace(p:Props){
           {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>}
           {p.status&&<p role="status" className="workspaceNotice">{p.status}</p>}
         </section>
+        {p.liveTerminal&&connected&&<section className="agentSection agentEmbeddedTerminal" aria-label="Live agent SSH terminal">
+          <div className="agentSectionHead"><div><h2><TerminalSquare size={17}/> Interactive SSH terminal</h2>
+            <p>Connected to {p.host}. Commands and agent output use your existing authenticated PTY session.</p></div>
+            <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
+          </div>
+          <div className="agentTerminalFrame">
+            <TerminalView id={p.sessionId} active={true} onClosed={p.onSessionClosed||(()=>{})}/>
+          </div>
+          <p className="agentHint">Type directly in this terminal. Select another SSH session above to change the active console. Nothing is executed without your action.</p>
+        </section>}
         <section className="agentSection">
           <div className="agentSectionHead"><div><h2>SSH context</h2><p>Review the non-secret information PaSSH7 displays. This preview is not automatically sent to any agent.</p></div>
             <button type="button" onClick={()=>void copyContext()}><Clipboard size={14}/> Copy context</button></div>
