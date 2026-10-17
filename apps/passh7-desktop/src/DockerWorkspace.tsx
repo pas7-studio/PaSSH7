@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useState} from "react";
-import {listDockerCatalog,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
+import {listDockerCatalog,listComposeProjectContainers,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
 import PaneResizeHandle from "./PaneResizeHandle";
 import {defaultPaneSizes,type PaneSizes} from "./preferences";
 import {Clipboard,Container,Cpu,Download,HardDrive,Layers,Maximize2,Minimize2,Network,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
@@ -42,6 +42,10 @@ export default function DockerWorkspace(p:Props){
   const [catalogBusy,setCatalogBusy]=useState(false);
   const [catalogError,setCatalogError]=useState("");
   const [catalogSearch,setCatalogSearch]=useState("");
+  const [composeSelected,setComposeSelected]=useState("");
+  const [composeMembers,setComposeMembers]=useState<{session:string;project:string;rows:Record<string,string>[]} |null>(null);
+  const [composeBusy,setComposeBusy]=useState(false);
+  const [composeError,setComposeError]=useState("");
   const loadCatalog=async(kind:DockerCatalogKind)=>{
     if(!p.connected||!p.session)return;
     setCatalogBusy(true);setCatalogError("");
@@ -57,6 +61,18 @@ export default function DockerWorkspace(p:Props){
     void loadCatalog(tab);
   },[tab,p.session,p.connected]);
   const displayCatalog=catalog?.session===p.session&&catalog.kind===tab?catalog.rows:null;
+  const activeComposeProject=tab==="compose"&&displayCatalog?.some(row=>row.Name===composeSelected)
+    ?composeSelected:"";
+  useEffect(()=>{
+    if(!p.connected||!p.session||!activeComposeProject)return;
+    let cancelled=false;
+    setComposeBusy(true);setComposeError("");
+    void listComposeProjectContainers(p.session,activeComposeProject).then(rows=>{
+      if(!cancelled)setComposeMembers({session:p.session,project:activeComposeProject,rows});
+    }).catch(error=>{if(!cancelled)setComposeError(String(error))})
+      .finally(()=>{if(!cancelled)setComposeBusy(false)});
+    return()=>{cancelled=true};
+  },[p.connected,p.session,activeComposeProject]);
   const filteredCatalog=(displayCatalog||[]).filter(row=>
     Object.values(row).join(" ").toLocaleLowerCase().includes(catalogSearch.toLocaleLowerCase())
   );
@@ -227,7 +243,11 @@ export default function DockerWorkspace(p:Props){
       {catalogError&&<div className="workspaceError" role="alert">{catalogError}</div>}
       <div className="dockerTableScroll">
       <table className="workspaceTable"><thead><tr>{catalogColumns[tab].map(name=><th key={name}>{name}</th>)}</tr></thead><tbody>
-        {filteredCatalog.map((row,index)=><tr key={(row.ID||row.Name||row.Repository||"")+index}>
+        {filteredCatalog.map((row,index)=><tr key={(row.ID||row.Name||row.Repository||"")+index}
+          className={tab==="compose"&&row.Name===activeComposeProject?"selected":""}
+          tabIndex={tab==="compose"?0:undefined}
+          onClick={tab==="compose"?()=>setComposeSelected(row.Name||""):undefined}
+          onKeyDown={tab==="compose"?e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setComposeSelected(row.Name||"")}}:undefined}>
           {catalogColumns[tab].map(key=><td key={key} title={row[key]||""}>{row[key]||"—"}</td>)}
         </tr>)}
       </tbody></table>
@@ -235,8 +255,20 @@ export default function DockerWorkspace(p:Props){
         displayCatalog&&filteredCatalog.length===0?<div className="workspaceEmpty">No matching {tab}.</div>:
         !displayCatalog&&!catalogBusy?<div className="workspaceEmpty">Select Refresh to load {tab}.</div>:null}
       </div>
+      {tab==="compose"&&<section className="dockerComposeMembers">
+        <div className="dockerComposeMembersHeader">
+          <div><strong>Project containers</strong><small>{activeComposeProject||"Select a Compose project above"}</small></div>
+          <span>{composeBusy?"Loading…":composeMembers?.session===p.session&&composeMembers.project===activeComposeProject?composeMembers.rows.length+" containers":"Read-only"}</span>
+        </div>
+        {composeError&&<div className="workspaceError" role="alert">Cannot inspect Compose containers: {composeError}</div>}
+        {activeComposeProject&&composeMembers?.session===p.session&&composeMembers.project===activeComposeProject?
+          <div className="dockerTableScroll"><table className="workspaceTable"><thead><tr><th>Name</th><th>State</th><th>Image</th><th>Ports</th><th>Status</th></tr></thead>
+            <tbody>{composeMembers.rows.map((row,index)=><tr key={(row.ID||"")+index}><td>{row.Names||row.ID?.slice(0,12)||"—"}</td><td>{row.State||"—"}</td><td>{row.Image||"—"}</td><td>{row.Ports||"—"}</td><td>{row.Status||"—"}</td></tr>)}</tbody></table>
+            {!composeMembers.rows.length&&<div className="workspaceEmpty">No containers found with this Compose project label.</div>}
+          </div>:<div className="workspaceEmpty">{activeComposeProject?"Reading project containers through SSH…":"Select a project to list its containers without reading compose YAML or .env files."}</div>}
+      </section>}
       <p className="prefInfo">{tab==="compose"
-        ?"Read-only Docker Compose project discovery via docker compose ls. Services, compose up/down, and project mutations are not available here yet."
+        ?"Read-only Compose discovery and project-labelled containers. Compose up/down, YAML editing, and mutations are not enabled."
         :"Read-only "+tab+" inventory using the connected SSH account. No resource is modified by browsing."}</p>
     </section>}
   </div>;
