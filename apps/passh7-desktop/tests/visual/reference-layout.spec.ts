@@ -57,6 +57,8 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
         }else if(screen.name==="agent"){
           await expect(page.locator(".agentCard")).toHaveCount(3);
           await expect(page.locator(".agentWorkspaceSide")).toBeVisible();
+          await expect(page.locator(".agentEmbeddedTerminal")).toBeVisible();
+          await expect(page.locator(".agentDevTerminalPreview")).toContainText("Not a live SSH connection");
         }else{
           await expect(page.locator(".referenceTerminalText")).toContainText("docker ps");
         }
@@ -175,6 +177,11 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
     await page.locator(".agentCard.claude").click();
     await expect(page.locator(".agentDiscovery")).toContainText("User installation outside SSH PATH");
+    await expect(page.locator(".agentDevTerminalPreview")).toContainText("Claude Code CLI");
+    await page.getByRole("button",{name:"Expand console"}).click();
+    await expect(page.locator(".agentTerminalFrame")).toHaveClass(/expanded/);
+    await page.getByRole("button",{name:"Compact console"}).click();
+    await expect(page.locator(".agentTerminalFrame")).not.toHaveClass(/expanded/);
     await expect(page.locator(".agentDiscovery")).toContainText("claude.cmd");
     await expect(page.getByRole("button",{name:/Launch CLI in Terminal/})).toBeEnabled();
     await page.locator(".agentCard.opencode").click();
