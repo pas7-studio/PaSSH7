@@ -312,7 +312,7 @@ export async function runNativeAppSession(page:Page){
   // SSH tunnel start on Linux can be delayed while Windows starts a separate
   // tunnel. The stale A operation must not disable B, steal B's forwards or
   // show an A-only error on B. Display both Linux PTY tunnels on the same host.
-  await page.locator(".workspaceNav button").filter({hasText:"Ports"}).click();
+  await page.locator(".workspaceNav button").filter({hasText:"Port Forwarding"}).click();
   await page.getByRole("spinbutton",{name:"Local TCP port"}).fill("19001");
   await page.getByRole("button",{name:"Start forwarding"}).click();
   await expect.poll(()=>page.evaluate(()=>
@@ -333,7 +333,7 @@ export async function runNativeAppSession(page:Page){
   await expect(page.locator(".forwardTableWrap")).not.toContainText("19002");
   await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
   await page.locator(".sshTab").filter({hasText:"linux-test"}).first().click();
-  await page.locator(".workspaceNav button").filter({hasText:"Ports"}).click();
+  await page.locator(".workspaceNav button").filter({hasText:"Port Forwarding"}).click();
   await page.getByRole("spinbutton",{name:"Local TCP port"}).fill("19003");
   await page.getByRole("button",{name:"Start forwarding"}).click();
   await expect(page.locator(".forwardTableWrap")).toContainText("127.0.0.1:19003");
