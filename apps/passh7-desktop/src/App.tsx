@@ -320,6 +320,12 @@ export default function App(){
   const [sftpPath,setSftpPath]=useState(".");
   const [sftpEntries,setSftpEntries]=useState<{session:string;path:string;items:SftpEntry[]}|null>(null);
   const [sftpBusy,setSftpBusy]=useState(false);
+  const sftpBrowseRequestRef=useRef(0);
+  const sftpContextRef=useRef({session:activeSsh,host:selected});
+  sftpContextRef.current={session:activeSsh,host:selected};
+  const sftpRequestCurrent=(request:number,session:string,host:string)=>
+    request===sftpBrowseRequestRef.current&&
+    sftpContextRef.current.session===session&&sftpContextRef.current.host===host;
   const [sftpFilter,setSftpFilter]=useState("");
   const [sftpOrder,setSftpOrder]=useState<"folders"|"name"|"size"|"modified">(()=>loadPreferences().sftpSort);
   const visibleSftpEntries=useMemo(()=>{
@@ -342,6 +348,14 @@ export default function App(){
   const [sftpPreviewError,setSftpPreviewError]=useState<{session:string;path:string;message:string}|null>(null);
   const sftpPreviewRequestRef=useRef(0);
   const [sftpPreviewBusy,setSftpPreviewBusy]=useState(false);
+  useEffect(()=>{
+    // Invalidate SFTP navigation/preview results as soon as the user selects
+    // another host or PTY. Late responses may not replace the new server's view.
+    sftpBrowseRequestRef.current++;
+    sftpPreviewRequestRef.current++;
+    setSftpBusy(false);setSftpPreviewBusy(false);
+    setSftpError("");setSftpPreviewError(null);
+  },[activeSsh,selected]);
   const transferSessionRef=useRef(activeSsh);
   transferSessionRef.current=activeSsh;
   const transferFolderRef=useRef({session:activeSsh,path:sftpEntries?.session===activeSsh?sftpEntries.path:sftpPath});
@@ -550,18 +564,18 @@ export default function App(){
   const readSftpPreview=async(path:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Select an active SSH session first.");return}
-    const request=++sftpPreviewRequestRef.current;
+    const request=++sftpPreviewRequestRef.current,host=session.alias;
+    const stillCurrent=()=>request===sftpPreviewRequestRef.current&&
+      sftpContextRef.current.session===session.id&&sftpContextRef.current.host===host;
     const image=/\.(png|jpe?g|gif|webp)$/i.test(path);
     setSftpPreviewBusy(true);setSftpPreview(null);setSftpPreviewError(null);
     try{
       const body=image?await readSftpImage(session.id,path):await readSftpText(session.id,path);
-      if(request===sftpPreviewRequestRef.current)
-        setSftpPreview({session:session.id,path,body,kind:image?"image":"text"});
+      if(stillCurrent())setSftpPreview({session:session.id,path,body,kind:image?"image":"text"});
     }catch(error){
-      if(request===sftpPreviewRequestRef.current)
-        setSftpPreviewError({session:session.id,path,message:String(error)});
+      if(stillCurrent())setSftpPreviewError({session:session.id,path,message:String(error)});
     }finally{
-      if(request===sftpPreviewRequestRef.current)setSftpPreviewBusy(false);
+      if(stillCurrent())setSftpPreviewBusy(false);
     }
   };
 
@@ -582,12 +596,21 @@ export default function App(){
     finally{setSftpMutationBusy(false)}
   };
   const browseSftp=async(path:string)=>{
-    const session=sshTabs.find(t=>t.id===activeSsh && t.alias===selected);
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setSftpError("Connect to the selected host first.");return}
+    const request=++sftpBrowseRequestRef.current,host=session.alias;
     setSftpBusy(true);setSftpError("");
-    try{const items=await listSftpDirectory(session.id,path);setSftpEntries({session:session.id,path,items});setSftpPath(path)}
-    catch(e){setSftpError(String(e))}
-    finally{setSftpBusy(false)}
+    try{
+      const items=await listSftpDirectory(session.id,path);
+      if(sftpRequestCurrent(request,session.id,host)){
+        setSftpEntries({session:session.id,path,items});
+        setSftpPath(path);
+      }
+    }catch(error){
+      if(sftpRequestCurrent(request,session.id,host))setSftpError("Could not list remote directory "+path+": "+String(error));
+    }finally{
+      if(sftpRequestCurrent(request,session.id,host))setSftpBusy(false);
+    }
   };
   const [tunnelLocalPort,setTunnelLocalPort]=useState(18080);
   const [tunnelRemoteHost,setTunnelRemoteHost]=useState("127.0.0.1");
