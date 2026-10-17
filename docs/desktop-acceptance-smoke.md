@@ -103,6 +103,10 @@ during this checklist. Use a throwaway identity and Docker container.
 | PORT-01 | Bind local port and request remote test service | Service reachable from local `127.0.0.1:<port>`; no public bind |
 | PORT-02 | Stop tunnel, lock Vault | Listener disappears and cannot be reached |
 | PORT-03 | Start two local forwards, reload only the WebView, then open Ports | Native forward inventory restores both active listeners; Refresh forwards matches backend; listeners still work |
+| PORT-04 | With two live SSH PTYs on one host, create one localhost forward in each and open Port Forwarding | Both native listeners are visible on that host, with a distinction between the selected terminal and another PTY. Other hosts' tunnels remain hidden |
+| PORT-05 | Delay a tunnel start on host A, switch to B and start another tunnel before A finishes | B remains interactive and its Start button is not disabled by A's operation. Completing A cannot replace B's list/error/loading state; returning to A reveals its forward |
+| PORT-06 | Disconnect one SSH PTY while another on the same host continues, then Refresh forwards | Each PTY inventory is reconciled independently. One failed/disconnected PTY does not erase healthy forwards owned by its sibling, and no detached native listener is claimed active |
+
 | AI-01 | Launch installed Codex/Claude/OpenCode CLI | Command goes only to selected terminal; CLI runs with SSH account permissions |
 | AI-02 | Check an uninstalled CLI | Native version probe returns Not detected; Launch shows actionable message instead of claiming success |
 | AI-03 | Check installed Codex, Claude Code and OpenCode CLIs on Linux and Windows OpenSSH | Installed/version indicators reflect remote `--version`; each probe times out independently without blocking terminal input |
