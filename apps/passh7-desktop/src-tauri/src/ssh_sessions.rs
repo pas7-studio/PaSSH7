@@ -1374,7 +1374,7 @@ fn docker_catalog_command(kind:&str)->Option<String>{
 }
 fn valid_compose_project_name(name:&str)->bool{
     !name.is_empty()&&name.len()<=128&&
-    name.as_bytes()[0].is_ascii_lowercase()&&
+    (name.as_bytes()[0].is_ascii_lowercase()||name.as_bytes()[0].is_ascii_digit())&&
     name.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_'||b==b'-')
 }
 
