@@ -104,3 +104,26 @@ and use `apps/passh7-desktop/tests/visual` for isolated Playwright tests.
 - The screenshot fixture for Terminal contains only illustrative text, not a running PTY. Other screens use real React components with synthetic data only in the DEV fixture. All fixtures remain excluded from the production bundle by CI.
 - Last 24-screenshot validation: https://github.com/pas7-studio/PaSSH7/actions/runs/39033405449. This verifies browser layout, not Windows WebView2 fonts/metrics or real SSH behavior.
 
+
+
+## Keyboard navigation, modal focus and terminal Appearance (2026-10-17)
+
+- `Ctrl/Cmd+K` opens a searchable command palette for all 8 workspaces and
+  saved SSH host aliases/address/user. Keyboard Up/Down/Enter navigates results;
+  selecting a host changes the selection but does **not** silently connect.
+  The global shortcut works when focus is on `body` or within the terminal.
+- Modal focus management is shared across SSH login, key trust, Vault unlock,
+  host onboarding, import, Windows Access and Quick Switch. Tab is contained in
+  the active dialog; Escape invokes its own enabled Close/Cancel handler,
+  preserving protection for in-progress operations. Focus returns to the opener.
+  Nested dialogs retarget the focus manager without trapping focus in an old dialog.
+- The live xterm palette now switches in place with light/dark Appearance
+  preferences while keeping the same SSH PTY and scrollback. Light mode uses
+  readable ANSI colors, selection and cursor styling rather than a forced
+  dark terminal surface.
+- Validated with a real offline App interaction test (Ctrl+K, search, Enter,
+  Shift+Tab wrap, Escape, focus restoration) and DEV appearance light-mode
+  visual test: https://github.com/pas7-studio/PaSSH7/actions/runs/39035191959.
+  The full screenshot suite still covers all 8 screens at three viewports.
+- Packaged Windows WebView2 accessibility and two-host live acceptance remain
+  pending and cannot be inferred from the Chromium run.
