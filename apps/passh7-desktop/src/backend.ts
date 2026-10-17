@@ -163,6 +163,16 @@ export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey
 export async function listDockerContainers(sessionId:string):Promise<string>{
   return invoke<string>("ssh_session_docker_list",{id:sessionId});
 }
+export type DockerDetails={
+  created:string|null;startedAt:string|null;finishedAt:string|null;restartPolicy:string|null;image:string|null;
+  mounts:{type:string|null;source:string|null;destination:string|null;rw:boolean|null}[];
+  networks:string[];
+};
+/** Only a Rust-projected safe subset of docker inspect is exposed; Env and Labels are excluded. */
+export async function inspectDockerContainer(sessionId:string,containerId:string):Promise<DockerDetails>{
+  const json=await invoke<string>("ssh_session_docker_inspect",{id:sessionId,containerId});
+  return JSON.parse(json) as DockerDetails;
+}
 export type DockerRuntimeStats={ID?:string;Name?:string;CPUPerc?:string;MemUsage?:string;MemPerc?:string};
 /** Single read-only sample from docker stats; neither secrets nor inspect Env are requested. */
 export async function listDockerStats(sessionId:string):Promise<DockerRuntimeStats[]>{
