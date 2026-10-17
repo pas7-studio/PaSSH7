@@ -789,8 +789,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                         Some(SessionCommand::AgentProbe(binary,response)) => {
                             // Probe both Windows and Unix using independent SSH exec channels.
                             // A desktop Start Menu app alone does not satisfy the CLI check.
+                            // Binary enters this actor only through the native allowlist.
                             let windows_command=windows_agent_probe_command(&binary)
-                                .ok_or("Unsupported agent probe".to_owned())?;
+                                .expect("agent kind validated by native IPC allowlist");
                             let unix_command=format!(
                                 "${{SHELL:-/bin/sh}} -lic 'command -v {binary} >/dev/null 2>&1 && {binary} --version' 2>/dev/null || {binary} --version"
                             );
