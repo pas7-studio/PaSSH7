@@ -126,5 +126,30 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await expect(page.locator(".snippetCard")).toHaveCount(3);
   });
 
+  await test.step("real offline App command palette: keyboard search and workspace switch",async()=>{
+    await page.goto("/",{waitUntil:"domcontentloaded"});
+    await page.keyboard.press("Control+k");
+    const palette=page.getByRole("dialog",{name:"Quick switch"});
+    await expect(palette).toBeVisible();
+    const search=page.getByRole("textbox",{name:"Search hosts and workspaces"});
+    await expect(search).toBeFocused();
+    await search.fill("docker");
+    await expect(palette.getByRole("option")).toHaveCount(1);
+    await search.press("Enter");
+    await expect(palette).toHaveCount(0);
+    await expect(page.locator(".workspaceNav button.active")).toHaveText("Docker");
+    await page.getByRole("button",{name:"Quick switch"}).click();
+    await expect(palette).toBeVisible();
+    // The modal is keyboard-contained: reverse Tab wraps from close to the
+    // final option, and Escape uses the native Close handler.
+    const close=palette.getByRole("button",{name:"Close"});
+    await close.focus();
+    await page.keyboard.press("Shift+Tab");
+    await expect(palette.getByRole("option").last()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(palette).toHaveCount(0);
+    await expect(page.getByRole("button",{name:"Quick switch"})).toBeFocused();
+  });
+
   expect(failures,"uncaught React/browser errors").toEqual([]);
 });
