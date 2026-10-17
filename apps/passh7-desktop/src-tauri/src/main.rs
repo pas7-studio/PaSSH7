@@ -219,6 +219,72 @@ async fn vault_export_encrypted_backup(
     Ok(Some(format!("Encrypted Vault exported and verified ({} bytes)",data.len())))
 }
 
+/// Produce a filename safe on both Windows and Unix, including reserved DOS
+/// device names. Docker container names are untrusted display data, not paths.
+fn docker_log_file_name(container_name:&str)->String {
+    let fragment:String=container_name.chars().filter(|ch|
+        ch.is_ascii_alphanumeric()||matches!(ch,'-'|'_')
+    ).take(56).collect();
+    let value=if fragment.is_empty() {"container"}else{fragment.as_str()};
+    format!("passh7-{value}-logs.txt")
+}
+
+/// Save only the currently visible/filtered Docker log lines using the OS
+/// dialog. No browser blob download or implicit overwrite is attempted.
+#[tauri::command]
+async fn docker_save_visible_logs(
+    app:tauri::AppHandle,container_name:String,contents:String
+)->Result<Option<String>,String>{
+    use tauri_plugin_dialog::DialogExt;
+    use std::io::Write;
+    if contents.is_empty(){return Err("No visible Docker log lines to save".into());}
+    if contents.len()>8*1024*1024{
+        return Err("Visible Docker log export exceeds the 8 MiB safety limit".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    app.dialog().file().set_file_name(docker_log_file_name(&container_name))
+        .save_file(move|selected|{let _=tx.send(selected);});
+    let chosen=rx.await.map_err(|_|"Docker log Save As dialog failed")?;
+    let Some(chosen)=chosen else{return Ok(None)};
+    let target=chosen.into_path().map_err(|_|"Choose a local filesystem path")?;
+    let mut created=false;
+    let result=(||->Result<(),String>{
+        let mut file=std::fs::OpenOptions::new().create_new(true).write(true)
+            .open(&target).map_err(|error|
+                format!("Cannot create log file (existing files are not overwritten): {error}")
+            )?;
+        created=true;
+        file.write_all(contents.as_bytes()).map_err(|error|
+            format!("Could not write Docker log file: {error}")
+        )?;
+        file.sync_all().map_err(|error|format!("Could not sync Docker log file: {error}"))?;
+        drop(file);
+        let readback=std::fs::read(&target).map_err(|error|
+            format!("Could not verify saved Docker logs: {error}")
+        )?;
+        if readback!=contents.as_bytes(){
+            return Err("Saved log bytes did not match the requested export".into());
+        }
+        Ok(())
+    })();
+    if result.is_err()&&created{let _=std::fs::remove_file(&target);}
+    result?;
+    Ok(Some(format!("Saved {} UTF-8 bytes to {}",contents.len(),target.display())))
+}
+
+#[cfg(test)]
+mod docker_log_filename_tests {
+    use super::docker_log_file_name;
+    #[test]
+    fn never_uses_container_names_as_paths(){
+        assert_eq!(docker_log_file_name("../api:prod\\\\secrets"),"passh7-apiprodsecrets-logs.txt");
+        assert_eq!(docker_log_file_name("CON"),"passh7-CON-logs.txt");
+        assert_eq!(docker_log_file_name(""),"passh7-container-logs.txt");
+        assert_eq!(docker_log_file_name("...."),"passh7-container-logs.txt");
+        assert!(docker_log_file_name(&"x".repeat(100)).len()<80);
+    }
+}
+
 fn prepare_vault_restore_preview(
     bytes:Vec<u8>,sessions:&SessionStore,pending:&PendingVaultRestore
 )->Result<VaultRestorePreview,String>{
@@ -1043,7 +1109,7 @@ fn main() {
         .manage(PendingVaultRestore::default())
         .manage(SshSessionManager::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
