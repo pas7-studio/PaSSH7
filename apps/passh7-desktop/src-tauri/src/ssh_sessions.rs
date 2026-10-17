@@ -1109,11 +1109,8 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             (&mut remote).take((MAX+1) as u64).read_to_end(&mut bytes).await
                                                 .map_err(|_|"Could not read remote image".to_owned())?;
                                             if bytes.len()>MAX{return Err("Image preview limit is 768 KiB. Download the full file instead.".into());}
-                                            let mime=if bytes.starts_with(b"\x89PNG\r\n\x1a\n"){"image/png"}
-                                                else if bytes.starts_with(b"\xff\xd8\xff"){"image/jpeg"}
-                                                else if bytes.starts_with(b"GIF87a")||bytes.starts_with(b"GIF89a"){"image/gif"}
-                                                else if bytes.len()>=12&&bytes.starts_with(b"RIFF")&& &bytes[8..12]==b"WEBP"{"image/webp"}
-                                                else{return Err("Only PNG, JPEG, GIF and WebP image previews are supported.".into())};
+                                            let mime=verified_preview_image_mime(&bytes)
+                                                .ok_or("Only PNG, JPEG, GIF and WebP image previews are supported.")?;
                                             Ok::<String,String>(format!("data:{mime};base64,{}",STANDARD.encode(bytes)))
                                         }).await.unwrap_or_else(|_|Err("SFTP image preview timed out".into()));
                                         let _=response.send(result);
@@ -1691,6 +1688,30 @@ pub async fn ssh_session_sftp_read_image(id:String,path:String,manager:State<'_,
     rx.await.map_err(|_|"SFTP image preview interrupted".to_owned())?
 }
 
+
+fn verified_preview_image_mime(bytes:&[u8])->Option<&'static str>{
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n"){Some("image/png")}
+    else if bytes.starts_with(b"\xff\xd8\xff"){Some("image/jpeg")}
+    else if bytes.starts_with(b"GIF87a")||bytes.starts_with(b"GIF89a"){Some("image/gif")}
+    else if bytes.len()>=12&&bytes.starts_with(b"RIFF")&& &bytes[8..12]==b"WEBP"{Some("image/webp")}
+    else{None}
+}
+
+#[cfg(test)]
+mod preview_image_tests {
+    use super::verified_preview_image_mime;
+    #[test]
+    fn only_allow_bitmap_image_signatures(){
+        assert_eq!(verified_preview_image_mime(b"\x89PNG\r\n\x1a\npayload"),Some("image/png"));
+        assert_eq!(verified_preview_image_mime(b"\xff\xd8\xffpayload"),Some("image/jpeg"));
+        assert_eq!(verified_preview_image_mime(b"GIF89apayload"),Some("image/gif"));
+        assert_eq!(verified_preview_image_mime(b"RIFF1234WEBPdata"),Some("image/webp"));
+        assert_eq!(verified_preview_image_mime(b"<svg onload='alert(1)'>"),None);
+        assert_eq!(verified_preview_image_mime(b"<!doctype html>"),None);
+        assert_eq!(verified_preview_image_mime(b"RIFF1234AVI payload"),None);
+        assert_eq!(verified_preview_image_mime(b""),None);
+    }
+}
 
 fn valid_transfer_id(id:&str)->bool{
     (8..=96).contains(&id.len()) &&
