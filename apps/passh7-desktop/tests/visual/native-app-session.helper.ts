@@ -18,6 +18,7 @@ export async function runNativeAppSession(page:Page){
     const resized:Array<{id:string;cols:number;rows:number}>=[];
     const ready:string[]=[];
     const delayedWrites:Array<()=>void>=[];
+    let dockerListFailure="";
     const exports:Array<{containerName:string;contents:string}>=[];
     const delayedSftp:Array<()=>void>=[];
     const file=(name:string)=>({name,isDir:false,sizeBytes:100,modifiedAt:null,
@@ -54,7 +55,9 @@ export async function runNativeAppSession(page:Page){
           writes.push({id:String(args.id),data:String(args.data)});
           if(args.data==="queue-block")await new Promise<void>(resolve=>delayedWrites.push(resolve));
           return null;
-        case "ssh_session_docker_list":return JSON.stringify({
+        case "ssh_session_docker_list":
+          if(dockerListFailure)throw Error(dockerListFailure);
+          return JSON.stringify({
           ID:"aaaaaaaaaaaa",Names:"api-test",Image:"api:latest",State:"running",Status:"Up 1 hour",Ports:""
         });
         case "ssh_session_docker_catalog":return "";
@@ -94,6 +97,7 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
       writes,resized,ready,exports,
+      failDockerList(message:string){dockerListFailure=message;},
       pendingWrites(){return delayedWrites.length;},
       releaseWrites(){for(const done of delayedWrites.splice(0))done();},
       pendingSftp(){return delayedSftp.length;},
@@ -283,5 +287,23 @@ export async function runNativeAppSession(page:Page){
   await expect(page.locator(".terminalSessionSurface .xterm")).toHaveCount(2);
   await page.getByRole("button",{name:"Dismiss session notice"}).click();
   await expect(page.locator(".globalSessionNotice")).toHaveCount(0);
+
+  // Diagnose actual native Docker errors instead of presenting an empty host.
+  await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
+  await page.locator(".workspaceNav button").filter({hasText:"Docker"}).click();
+  await page.evaluate(()=>{
+    (window as unknown as {__mockSshBridge:{failDockerList:(value:string)=>void}})
+      .__mockSshBridge.failDockerList("Got permission denied while connecting to Docker daemon");
+  });
+  await page.getByRole("button",{name:/Refresh/}).first().click();
+  await expect(page.locator(".dockerActionableError")).toContainText("Docker inventory unavailable");
+  await expect(page.locator(".dockerActionableError")).toContainText("Verify its Docker permissions");
+  await page.evaluate(()=>{
+    (window as unknown as {__mockSshBridge:{failDockerList:(value:string)=>void}})
+      .__mockSshBridge.failDockerList("");
+  });
+  await page.getByRole("button",{name:"Retry inventory"}).click();
+  await expect(page.locator(".dockerTableScroll tbody tr")).toHaveCount(1);
+  await expect(page.locator(".dockerActionableError")).toHaveCount(0);
   expect(browserErrors).toEqual([]);
 }
