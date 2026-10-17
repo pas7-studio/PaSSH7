@@ -168,3 +168,14 @@ during this checklist. Use a throwaway identity and Docker container.
 | COMPOSE-02 | Select Compose project, inspect its containers | Only containers with that Compose project label appear; UI shows real names, states, images, ports; no .env file or config values displayed |
 | COMPOSE-03 | Host without Compose plugin or denied Docker rights | Actionable read-only error appears; other Docker tabs remain usable |
 | COMPOSE-04 | Malicious/unexpected Compose project name from result | Project member query is rejected by both TS and Rust input validation; command injection is impossible |
+
+
+## Raster image preview and context menu handling
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| FILE-IMAGE-01 | Select a PNG/JPEG/GIF/WebP under 768 KiB on the authenticated SSH server and click Preview | Real image shown within right inspector; aspect ratio preserved and inspector width bounds respected |
+| FILE-IMAGE-02 | Rename an HTML/SVG file to .png, or supply malformed image bytes | Native signature validation rejects unsupported format; no HTML/SVG or embedded script is passed to preview surface |
+| FILE-IMAGE-03 | Preview a 769 KiB raster image, large text file or unsupported binary | Clear inline error with Retry; SFTP connection and file actions remain usable |
+| FILE-IMAGE-04 | Preview on host A, switch to host B while read is pending | Previous host's image/text never appears in host B inspector; concurrent completions cannot overwrite newer preview |
+| FILE-MENU-01 | Right-click a remote file, click outside, open again and press Escape | Context menu closes on outside interaction, resize and Escape; underlying selection remains consistent |
