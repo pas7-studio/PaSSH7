@@ -124,3 +124,19 @@ during this checklist. Use a throwaway identity and Docker container.
 | DOCKER-INSPECT-03 | Deny Docker daemon permissions or disconnect during read-only stats and inspect | Containers view keeps usable prior data where safe, shows explicit errors and offers Retry; native SSH terminal remains responsive |
 | DOCKER-INSPECT-04 | Switch between two hosts while inspector request or live logs are running | Old host's inspect/logs are never shown for the newly selected session, and previous live log stream is cancelled |
 | DOCKER-LOG-UI-01 | Follow logs, search, choose another container, expand fullscreen and exit | Search, changing container and full-screen toggle work; output remains bounded and belongs to the selected container |
+
+
+## Persisted split panes and daily file/Docker actions
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| LAYOUT-01 | Drag Files folder-tree and details inspector separators at 1440×900 | Smooth independent resizing; file table remains readable; no table resize causes SFTP reconnect |
+| LAYOUT-02 | Drag Docker inspector and logs separators, then switch to Settings and back | Chosen widths/heights persist across workspace switches and window reload; follow stream remains bound to original SSH session |
+| LAYOUT-03 | Focus each separator and press arrows / Shift+arrows / Enter | Arrow = 8px; Shift = 32px; Enter resets the specific panel; screen reader announces separator and value |
+| LAYOUT-04 | Export non-secret UI settings, reset all panel sizes in Appearance, then import exported settings | Default sizes are restored and exported sizes reappear after import; SSH credentials and Vault data remain unchanged |
+| LAYOUT-05 | Shrink window below 1080 / 960 / 800 px | Files and Docker fall back to responsive stacked layouts; separators disappear where split panels no longer fit |
+| FILE-ACTIONS-01 | Navigate from /home to /home/user, press Back | Back returns to the starting directory and Forward returns to the destination |
+| FILE-ACTIONS-02 | Right-click a file; choose Preview, Copy path, Rename and Delete in a disposable fixture | All menu actions target clicked file; mutations keep confirmation and native SFTP validation; F2/Delete keyboard routes behave identically |
+| FILE-ACTIONS-03 | Enter /home/user/projects/myapp in file path | Directory tree reveals only ancestors on current path, not unrelated branches; lazy SFTP calls are bounded by depth |
+| DOCKER-SHELL-01 | Choose running fixture container and click Open shell, then reject confirmation | No terminal command executes and the current PTY remains unchanged |
+| DOCKER-SHELL-02 | Choose running fixture container and accept shell launch while at SSH shell prompt | Validated container ID and one docker exec command written to current connected PTY; Terminal workspace shown |
