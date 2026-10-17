@@ -1112,7 +1112,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             let mime=if bytes.starts_with(b"\x89PNG\r\n\x1a\n"){"image/png"}
                                                 else if bytes.starts_with(b"\xff\xd8\xff"){"image/jpeg"}
                                                 else if bytes.starts_with(b"GIF87a")||bytes.starts_with(b"GIF89a"){"image/gif"}
-                                                else if bytes.len()>=12&&bytes.starts_with(b"RIFF")&&&bytes[8..12]==b"WEBP"{"image/webp"}
+                                                else if bytes.len()>=12&&bytes.starts_with(b"RIFF")&& &bytes[8..12]==b"WEBP"{"image/webp"}
                                                 else{return Err("Only PNG, JPEG, GIF and WebP image previews are supported.".into())};
                                             Ok::<String,String>(format!("data:{mime};base64,{}",STANDARD.encode(bytes)))
                                         }).await.unwrap_or_else(|_|Err("SFTP image preview timed out".into()));
