@@ -861,7 +861,6 @@ export default function App(){
   useEffect(()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session)return;
-    if(panel==="docker"&&dockerInventory?.session!==session.id){void refreshDocker()}
     if(panel==="files"&&sftpEntries?.session!==session.id){void browseSftp(".")}
   },[panel,activeSsh,selected]);
   const confirmRemove=async()=>{
