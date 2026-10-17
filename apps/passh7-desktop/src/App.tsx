@@ -318,8 +318,20 @@ export default function App(){
   const [step,setStep]=useState(0);
   const [draft,setDraft]=useState<HostDraft>({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});
   const [sftpPath,setSftpPath]=useState(".");
+  // A connected SSH terminal keeps its own last successful directory.
+  // Switching hosts must not reuse another user's path or reset navigation.
+  const lastSftpDirectory=useRef(new Map<string,string>());
   const [sftpEntries,setSftpEntries]=useState<{session:string;path:string;items:SftpEntry[]}|null>(null);
   const [sftpBusy,setSftpBusy]=useState(false);
+  useEffect(()=>{
+    const alive=new Set(sshTabs.map(tab=>tab.id));
+    for(const sessionId of lastSftpDirectory.current.keys()){
+      if(!alive.has(sessionId))lastSftpDirectory.current.delete(sessionId);
+    }
+  },[sshTabs]);
+  useEffect(()=>{
+    setSftpPath(lastSftpDirectory.current.get(activeSsh)||".");
+  },[activeSsh,selected]);
   const sftpBrowseRequestRef=useRef(0);
   const sftpContextRef=useRef({session:activeSsh,host:selected});
   sftpContextRef.current={session:activeSsh,host:selected};
@@ -603,6 +615,7 @@ export default function App(){
     try{
       const items=await listSftpDirectory(session.id,path);
       if(sftpRequestCurrent(request,session.id,host)){
+        lastSftpDirectory.current.set(session.id,path);
         setSftpEntries({session:session.id,path,items});
         setSftpPath(path);
       }
@@ -988,7 +1001,7 @@ export default function App(){
   useEffect(()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session)return;
-    if(panel==="files"&&sftpEntries?.session!==session.id){void browseSftp(".")}
+    if(panel==="files"&&sftpEntries?.session!==session.id){void browseSftp(lastSftpDirectory.current.get(session.id)||".")}
   },[panel,activeSsh,selected]);
   const confirmRemove=async()=>{
     if(!deleteTarget || !desktopAvailable() || !vaultUnlocked)return;
