@@ -941,3 +941,57 @@
 .shell.light .referenceTerminalPrompt{color:#156f50}
 .shell.light .referenceTerminalPrompt>span{color:#264462}
 .shell.light .referenceTerminalPrompt .terminalCaret{color:#1d75d9}
+
+
+/* Remote Windows agent discovery: explicit terminal CLI vs desktop-only state. */
+.agentDiscovery{
+  display:grid;gap:0;margin:12px 0;border:1px solid #315470;border-radius:9px;
+  background:#0a2036;overflow:hidden;
+}
+.agentDiscovery>div{
+  display:grid;grid-template-columns:minmax(105px,135px) minmax(0,1fr);
+  gap:12px;padding:9px 12px;border-bottom:1px solid #203b56;
+  font-size:11px;align-items:start;
+}
+.agentDiscovery>div:last-of-type{border-bottom:0}
+.agentDiscovery strong{color:#91afd0;font-size:10px;font-weight:650}
+.agentDiscovery span{color:#d7e9fb;overflow-wrap:anywhere}
+.agentDiscovery code{
+  font-family:"Cascadia Code",Consolas,monospace;font-size:10px;
+  color:#acd6ff;overflow-wrap:anywhere;word-break:break-word;
+}
+.agentDiscovery>p{
+  border-top:1px solid #294760;background:#102b45;color:#b8d1ea;
+  margin:0;padding:10px 12px;font-size:11px;line-height:1.65;
+}
+.agentInstallHelp{
+  display:grid;gap:10px;padding:14px;
+  border:1px solid #66543b;border-radius:8px;background:#292419;
+  color:#e9d2aa;font-size:11px;
+}
+.agentInstallHelp>strong{color:#f6d6a0;font-size:12px}
+.agentInstallHelp p{line-height:1.7;margin:0;color:#dcc6a3}
+.agentInstallHelp>div{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.agentInstallHelp code{
+  font:11px/1.5 "Cascadia Code",Consolas,monospace;color:#ffdfae;
+  overflow-wrap:anywhere;flex:1;min-width:185px;
+}
+.agentInstallHelp button{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.agentInstallHelp a{
+  display:inline-flex;align-items:center;gap:6px;
+  color:#88bdff;text-decoration:underline;text-underline-offset:3px;
+  width:max-content;max-width:100%;
+}
+.shell.light .agentDiscovery{background:#fff;border-color:#c4d7e8}
+.shell.light .agentDiscovery>div{border-color:#dce6ef}
+.shell.light .agentDiscovery strong{color:#536f8b}
+.shell.light .agentDiscovery span{color:#25435f}
+.shell.light .agentDiscovery code{color:#2968a5}
+.shell.light .agentDiscovery>p{background:#f1f6fb;color:#3a5a76;border-color:#c5d7eb}
+.shell.light .agentInstallHelp{background:#fff8ed;color:#754f20;border-color:#e3cda9}
+.shell.light .agentInstallHelp>strong,.shell.light .agentInstallHelp code{color:#7f531b}
+.shell.light .agentInstallHelp p{color:#755a37}
+.shell.light .agentInstallHelp a{color:#2168bd}
+@media(max-width:750px){
+  .agentDiscovery>div{grid-template-columns:minmax(0,1fr);gap:5px}
+}
