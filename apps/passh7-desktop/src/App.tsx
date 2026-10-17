@@ -658,6 +658,46 @@ export default function App(){
   const updatePreferences=(value:AppPreferences)=>{
     setPreferences(value);savePreferences(value);setSftpOrder(value.sftpSort);setTheme(value.theme);
   };
+  // Vault auto-lock is opt-in. Only real user input counts as activity;
+  // incoming SSH/Docker output never extends the idle deadline. On resume
+  // from sleep or focus after time away, check the deadline before resetting it.
+  useEffect(()=>{
+    if(!vaultUnlocked||!desktopAvailable())return;
+    const minutes=preferences.vaultAutoLockMinutes;
+    if(minutes===0&&!preferences.vaultLockOnBlur)return;
+    let activityAt=Date.now();
+    let locking=false;
+    let closed=false;
+    const attemptLock=()=>{
+      if(closed||locking)return;
+      locking=true;
+      void lockVault().catch(error=>setError(
+        "Vault auto-lock failed: "+String(error)
+      )).finally(()=>{locking=false;activityAt=Date.now()});
+    };
+    const checkIdle=()=>{
+      if(minutes>0&&Date.now()-activityAt>=minutes*60_000)attemptLock();
+    };
+    const onActivity=()=>{activityAt=Date.now()};
+    const onFocus=()=>{checkIdle();if(!locking)activityAt=Date.now()};
+    const onBlur=()=>{if(preferences.vaultLockOnBlur)attemptLock()};
+    window.addEventListener("pointerdown",onActivity,true);
+    window.addEventListener("keydown",onActivity,true);
+    window.addEventListener("wheel",onActivity,true);
+    window.addEventListener("focus",onFocus);
+    window.addEventListener("blur",onBlur);
+    const interval=window.setInterval(checkIdle,10_000);
+    return ()=>{
+      closed=true;
+      window.clearInterval(interval);
+      window.removeEventListener("pointerdown",onActivity,true);
+      window.removeEventListener("keydown",onActivity,true);
+      window.removeEventListener("wheel",onActivity,true);
+      window.removeEventListener("focus",onFocus);
+      window.removeEventListener("blur",onBlur);
+    };
+  },[vaultUnlocked,preferences.vaultAutoLockMinutes,preferences.vaultLockOnBlur]);
+
   useEffect(()=>{
     try{if(preferences.rememberWorkspace)localStorage.setItem("passh7.workspace.v1",panel)}catch{/* local UI preference is best effort */}
   },[panel,preferences.rememberWorkspace]);
