@@ -81,5 +81,17 @@ test("reference layouts: nine screenshots and keyboard interactions",async({page
     await expect(page.locator(".dockerTableScroll .workspaceTable tbody tr")).toContainText("postgres");
   });
 
+  await test.step("real app sidebar preference survives reload",async()=>{
+    await page.goto("/",{waitUntil:"domcontentloaded"});
+    await page.getByRole("button",{name:"Settings",exact:true}).click();
+    await expect(page.locator(".sidebar")).toBeVisible();
+    await page.getByRole("checkbox",{name:/Show host sidebar/}).uncheck();
+    await expect(page.locator(".sidebar")).toHaveCount(0);
+    await page.reload({waitUntil:"domcontentloaded"});
+    await expect(page.locator(".sidebar")).toHaveCount(0);
+    await page.getByRole("button",{name:"Expand host sidebar"}).click();
+    await expect(page.locator(".sidebar")).toBeVisible();
+  });
+
   expect(failures,"uncaught React/browser errors").toEqual([]);
 });
