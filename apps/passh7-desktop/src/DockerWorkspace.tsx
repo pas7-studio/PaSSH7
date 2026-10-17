@@ -15,10 +15,17 @@ type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|nu
   logs:Logs;logsBusy:boolean;logsError:string;tail:number;follow:boolean;
   liveStatus:"off"|"connecting"|"streaming"|"closed"|"error";
   onFollow:(value:boolean)=>void;onTail:(value:number)=>void;
+  autoRefresh:boolean;onAutoRefresh:(value:boolean)=>void;
   onRefresh:()=>void;onAction:(id:string,name:string,action:"start"|"stop"|"restart")=>void;
   onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;
   onShell:(id:string,name:string)=>void;};
 const isRunning=(item:ContainerRow)=>(item.State||"").toLowerCase()==="running";
+const containerStat=(item:ContainerRow,stats:DockerRuntimeStats[]|null)=>{
+  if(!stats)return null;
+  const id=item.ID||"";
+  return stats.find(entry=>(id&&entry.ID&&(entry.ID.startsWith(id)||id.startsWith(entry.ID)))||
+    (entry.Name&&entry.Name===item.Names))||null;
+};
 const parseMemoryBytes=(text:string)=>{
   const match=text.split("/")[0]?.trim().match(/^([\d.]+)\s*([KMGT]?i?B|B)$/i);
   if(!match)return 0;
@@ -61,6 +68,12 @@ export default function DockerWorkspace(p:Props){
 
   const [selected,setSelected]=useState("");
   const [filter,setFilter]=useState<"all"|"running"|"stopped">("all");
+  const [sortBy,setSortBy]=useState<"name"|"cpu"|"memory">("name");
+  const [descending,setDescending]=useState(false);
+  const sortWith=(kind:typeof sortBy)=>{
+    if(kind===sortBy)setDescending(previous=>!previous);
+    else {setSortBy(kind);setDescending(kind!=="name");}
+  };
   const [logsSearch,setLogsSearch]=useState("");
   const [wrap,setWrap]=useState(false);
   const [level,setLevel]=useState<"all"|"error"|"warn">("all");
@@ -78,7 +91,13 @@ export default function DockerWorkspace(p:Props){
   const visible=useMemo(()=>(p.items||[]).filter(row=>
     (filter==="all"||(filter==="running"?isRunning(row):!isRunning(row))) &&
     (row.Names+" "+row.ID+" "+row.Image+" "+row.Status).toLowerCase().includes(search.toLowerCase())
-  ),[p.items,filter,search]);
+  ).sort((a,b)=>{
+    let comparison=0;
+    if(sortBy==="name")comparison=(a.Names||a.ID||"").localeCompare(b.Names||b.ID||"");
+    else if(sortBy==="cpu")comparison=(Number.parseFloat(containerStat(a,p.stats)?.CPUPerc||"")||0)-(Number.parseFloat(containerStat(b,p.stats)?.CPUPerc||"")||0);
+    else comparison=parseMemoryBytes(containerStat(a,p.stats)?.MemUsage||"")-parseMemoryBytes(containerStat(b,p.stats)?.MemUsage||"");
+    return descending?-comparison:comparison;
+  }),[p.items,p.stats,filter,search,sortBy,descending]);
   const chosen=p.items?.find(x=>x.ID===selected)||visible[0];
   const inspected=p.details?.session===p.session&&p.details.containerId===chosen?.ID?p.details.data:null;
   const inspectError=p.detailsError?.session===p.session&&p.detailsError.containerId===chosen?.ID?p.detailsError.message:"";
@@ -105,16 +124,30 @@ export default function DockerWorkspace(p:Props){
       style={{gridTemplateColumns:`minmax(250px,1fr) 7px minmax(265px,${inspectorWidth}px)`}}><section className="dockerContainersPane">
       <div className="dockerToolbar"><div className="filesSearch"><Search size={15}/><input placeholder="Search containers…" value={search} onChange={e=>setSearch(e.target.value)} aria-label="Search containers"/></div>
         <select aria-label="Container state filter" value={filter} onChange={e=>setFilter(e.target.value as typeof filter)}><option value="all">All containers</option><option value="running">Running</option><option value="stopped">Stopped / other</option></select>
+        <label className="compactToggle dockerAutoRefresh" title="Refresh container inventory automatically every 15 seconds."><input type="checkbox" checked={p.autoRefresh} onChange={e=>p.onAutoRefresh(e.target.checked)}/> Auto-refresh</label>
         <button onClick={p.onRefresh} disabled={!p.connected||p.loading}><RefreshCw size={15}/>{p.loading?" Loading…":" Refresh"}</button>
       </div>
       {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
       {p.actionStatus&&<div className="workspaceNotice" role="status">{p.actionStatus}</div>}
-      <div className="dockerTableScroll"><table className="workspaceTable"><thead><tr><th>Name</th><th>Status</th><th>Image</th><th>Ports</th><th>Uptime / detail</th></tr></thead><tbody>
-      {visible.map(row=><tr key={row.ID} className={row.ID===chosen?.ID?"selected":""} onClick={()=>setSelected(row.ID||"")}>
-        <td className="dockerContainerName"><Container size={15}/> {row.Names||row.ID?.slice(0,12)||"Unknown"}</td>
-        <td><span className={"dockerStatus "+(isRunning(row)?"running":"stopped")}>{isRunning(row)?"● Running":"● "+(row.State||"Other")}</span></td>
-        <td title={row.Image}>{row.Image||"—"}</td><td title={row.Ports}>{row.Ports||"—"}</td><td>{row.Status||"—"}</td>
-      </tr>)}</tbody></table>
+      <div className="dockerTableScroll"><table className="workspaceTable"><thead><tr>
+        <th><button className="dockerSort" aria-label="Sort containers by name" onClick={()=>sortWith("name")}>Name {sortBy==="name"?(descending?"↓":"↑"):""}</button></th>
+        <th>Status</th><th>Image</th><th>Ports</th>
+        <th><button className="dockerSort" aria-label="Sort containers by CPU usage" onClick={()=>sortWith("cpu")}>CPU {sortBy==="cpu"?(descending?"↓":"↑"):""}</button></th>
+        <th><button className="dockerSort" aria-label="Sort containers by memory usage" onClick={()=>sortWith("memory")}>Memory {sortBy==="memory"?(descending?"↓":"↑"):""}</button></th>
+        <th>Uptime / detail</th></tr></thead><tbody>
+      {visible.map(row=>{
+        const stat=containerStat(row,p.stats);
+        return <tr key={row.ID} tabIndex={0} className={row.ID===chosen?.ID?"selected":""}
+          onClick={()=>setSelected(row.ID||"")}
+          onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setSelected(row.ID||"")}}}>
+          <td className="dockerContainerName"><Container size={15}/> {row.Names||row.ID?.slice(0,12)||"Unknown"}</td>
+          <td><span className={"dockerStatus "+(isRunning(row)?"running":"stopped")}>{isRunning(row)?"● Running":"● "+(row.State||"Other")}</span></td>
+          <td title={row.Image}>{row.Image||"—"}</td><td title={row.Ports}>{row.Ports||"—"}</td>
+          <td className="dockerStatCell">{stat?.CPUPerc||"—"}</td>
+          <td className="dockerStatCell" title={stat?.MemUsage||""}>{stat?.MemUsage?.split("/")[0]?.trim()||"—"}</td>
+          <td>{row.Status||"—"}</td>
+        </tr>;
+      })}</tbody></table>
       {p.connected&&p.items&&!visible.length&&<div className="workspaceEmpty">No matching containers. Change the filter or search.</div>}
       {!p.connected&&<div className="workspaceEmpty">Connect to {p.host} to inspect remote Docker.</div>}
       {p.connected&&!p.items&&<div className="workspaceEmpty">Click Refresh to load containers from the remote host. Your SSH user needs Docker permissions.</div>}
