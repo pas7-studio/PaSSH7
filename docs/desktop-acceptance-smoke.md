@@ -108,3 +108,19 @@ during this checklist. Use a throwaway identity and Docker container.
 | AGENT-UI-05 | Choose an agent and press Launch; accept confirmation | Exactly the selected CLI command is written to the currently authenticated PTY; UI switches to Terminal, with no second SSH connection or fake MCP sandbox |
 | AGENT-UI-06 | Have two sessions for the same host and select one in AI Agent | Launch targets the explicitly selected session; no command is written to a different host |
 | AGENT-UI-07 | Copy SSH context; inspect remote terminal and settings | Context contains non-secret host and route information only; no passwords, private keys or Vault secrets are copied or supplied to the agent |
+
+
+## Reference UI and sanitized Docker inspection acceptance (2026-10-17)
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| REF-UI-01 | Open Settings, Remote Files and Docker at 1440×900 and 1920×1080 on packaged Windows 11 app | Shared left rail, connected-host header, consistent deep-navy tokens and responsive three-column settings/files/two-column Docker layouts; no unreadable control or clipped text |
+| REF-UI-02 | Toggle light theme, shrink window, return to dark | Controls keep readable contrast, keyboard focus visible, panes scroll without covering the Vault or login dialogs |
+| REF-UI-03 | Select two connected hosts in Connections, then open Files, Docker, Ports and Snippets | Every workspace targets only the currently selected authenticated session; no stale content or wrong-host mutations |
+| REF-UI-04 | Open Snippets, select a template, run with connected host, decline confirmation, then accept on next run | Decline sends no command; accept writes exactly one line into selected PTY and returns to Terminal |
+| REF-UI-05 | Open Port Forwarding, start loopback tunnel, refresh, stop | Native forward appears with correct local/remote endpoints and closes promptly; no non-loopback listener allowed |
+| DOCKER-INSPECT-01 | Select running/stopped container in Docker and open Details / Volumes / Network | Real Created/Started/Restart Policy/mount and network values appear from native Docker inspect; no fabricated fields |
+| DOCKER-INSPECT-02 | Inspect container with environment variables and labels containing known test canary | Sensitive Env, labels and full command args do not cross native Rust IPC, appear in UI or diagnostics |
+| DOCKER-INSPECT-03 | Deny Docker daemon permissions or disconnect during read-only stats and inspect | Containers view keeps usable prior data where safe, shows explicit errors and offers Retry; native SSH terminal remains responsive |
+| DOCKER-INSPECT-04 | Switch between two hosts while inspector request or live logs are running | Old host's inspect/logs are never shown for the newly selected session, and previous live log stream is cancelled |
+| DOCKER-LOG-UI-01 | Follow logs, search, choose another container, expand fullscreen and exit | Search, changing container and full-screen toggle work; output remains bounded and belongs to the selected container |
