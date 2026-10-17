@@ -6,6 +6,7 @@ import SettingsWorkspace from "./SettingsWorkspace";
 import AgentWorkspace from "./AgentWorkspace";
 import ConnectionsWorkspace from "./ConnectionsWorkspace";
 import SnippetsWorkspace from "./SnippetsWorkspace";
+import PortForwardingWorkspace from "./PortForwardingWorkspace";
 import {loadPreferences,savePreferences,type AppPreferences} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
@@ -1022,7 +1023,7 @@ export default function App(){
         <button type="button" className="iconbtn" title="Quick switch (Ctrl+K)" aria-label="Quick switch" onClick={()=>setCommandOpen(true)}><Command size={17}/></button>
       </div>
     </header>
-    <div className={"workspace "+(["connections","snippets","files","docker","agent","settings"].includes(panel)?"workspaceFull":"")}>
+    <div className={"workspace "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"workspaceFull":"")}>
       {sidebar&&<aside className="sidebar"><nav className="workspaceNav" aria-label="Workspaces">
 {([["connections","Connections",Server],["terminal","Terminal",TerminalSquare],["files","Remote Files",FolderClosed],["docker","Docker",Container],["ports","Port Forwarding",Activity],["snippets","Snippets",FileText],["agent","AI Agents",Bot],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=>
 <button type="button" key={id} className={panel===id?"active":""} onClick={()=>setPanel(id)}><Icon size={16}/>{label}</button>)}
@@ -1061,7 +1062,7 @@ export default function App(){
 <button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button></div>}{credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{connected?`${activeConnections} active session(s) on this host`:"NO ACTIVE SESSION ON THIS HOST"}</small>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar">{sshTabs.map(t=><button key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"} onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}>{t.alias} <span role="button" title="Disconnect" onClick={e=>{e.stopPropagation();void closeInteractive(t.id)}}>×</span></button>)}</div>}{sshTabs.map(t=><TerminalView key={t.id} id={t.id} active={t.id===activeSsh} onClosed={onSessionClosed}/>)}{!connected&&<div className="terminalEmpty"><div className="terminalGlyph"><TerminalSquare size={28}/></div><h2>{sshTabs.length?"No active terminal for this host":"Your terminal starts here"}</h2><p>{sshTabs.length?"Other SSH sessions remain open. Choose a connected tab or connect to this host to use Files, Docker, tunnels and AI tools here.":"Choose a host and unlock your vault to open a secure SSH session. Connect to your saved host to open an interactive SSH terminal."}</p><div className="statusline"><LockKeyhole size={14}/> {vaultUnlocked?"Vault unlocked":"Vault locked"} <span>·</span> SSH requires a pinned host key</div>{authResult&&<p role="status" className="note">{authResult}</p>}{probeResult?.alias===selected&&<p className="note" role="status">SSH service responded in {probeResult.data.elapsedMs} ms: {probeResult.data.banner}. Identity and host key have NOT been verified.</p>}{probeError&&<p className="wizardError" role="alert">{probeError}</p>}</div>}</div>
         <footer><span className="footerBrand"><span className="statusDot" style={{background:connected?"#22c55e":undefined}}/> {connected?"SSH connected":desktopAvailable()?"No active SSH session":"Offline preview"}</span><span>{active.label} · {activeConnections} on host · {sshTabs.length} total</span><span>{buildInfo?.publisher ?? "PAS7 Studio"} · {buildInfo?.target ?? "Loading build info"}</span></footer>
       </main>
-      <aside className={"context "+(["connections","snippets","files","docker","agent","settings"].includes(panel)?"fullContext":"")}><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
+      <aside className={"context "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"fullContext":"")}><div className="contextHeader"><span>CONTEXT</span><CircleHelp size={16}/></div><div className="contextTabs">{tabs.map(({id,label,Icon})=><button key={id} className={panel===id?"active":""} title={label} aria-label={label} onClick={()=>setPanel(id)}><Icon size={17}/></button>)}</div><div className="contextBody">
         {panel==="connections"?<ConnectionsWorkspace
   hosts={hosts} selected={selected} connectedAliases={sshTabs.map(t=>t.alias)} vaultUnlocked={vaultUnlocked}
   onSelect={setSelected} onConnect={alias=>void connectFromConnections(alias)}
@@ -1190,6 +1191,15 @@ export default function App(){
  onLock={()=>void lockVault()}
  onExport={()=>void exportVaultBackup()}
  onRestore={()=>{setPanel("files");void inspectVaultRestore()}}
+ />:
+        panel==="ports"?<PortForwardingWorkspace
+ host={active.label} connected={connected} session={activeSsh}
+ forwards={tunnels} busy={tunnelBusy} error={tunnelError}
+ localPort={tunnelLocalPort} remoteHost={tunnelRemoteHost} remotePort={tunnelRemotePort}
+ onLocalPort={setTunnelLocalPort} onRemoteHost={setTunnelRemoteHost} onRemotePort={setTunnelRemotePort}
+ onStart={()=>void addTunnel()} onRefresh={()=>void refreshLocalForwarding()}
+ onStop={(session,localPort)=>void removeTunnel(session,localPort)}
+ onTerminal={()=>setPanel("terminal")}
  />:
         panel==="terminal"?<div className="terminalContext">
  <div className="contextTitle"><TerminalSquare size={18}/><h3>SSH session</h3></div>
