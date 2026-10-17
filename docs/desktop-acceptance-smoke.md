@@ -201,3 +201,17 @@ SFTP transfer queue, real Docker stats/logs, and switching two pinned hosts.
 Run manual `PaSSH7 reference UI screenshot smoke` and compare the 24 images: Connections, Terminal (visual-only fixture), Files, Docker, Port Forwarding, Snippets, AI Agents and Settings at 1440x900, 1920x1080 and 900x720. Latest green evidence: https://github.com/pas7-studio/PaSSH7/actions/runs/39033405449.
 
 On Windows 11 verify real Terminal: switching multiple SSH tabs preserves PTY output; close buttons are independently keyboard accessible; Session details opens/closes without disconnect; selected host, info header and xterm resize stay consistent. Verify Connections filters, Snippets search/copy/confirmation, Ports copy/stop, Agent missing-CLI message and all native modal contrast. Real native smoke is not replaced by headless fixtures.
+
+
+## Command palette, dialogs and Appearance
+
+| Case | Procedure | Expected |
+| --- | --- | --- |
+| UI-KB-01 | Focus empty desktop canvas, press Ctrl+K; search Docker, press Enter | Palette opens globally and switches workspace without opening an SSH session |
+| UI-KB-02 | Open Quick Switch with mouse; focus Close; Shift+Tab; Escape | Focus wraps within dialog then returns to the actual button that opened it |
+| UI-KB-03 | Open Vault/login/host trust dialogs; press Escape and Tab | Focus remains inside dialog; Escape uses the dialog's Close/Cancel, blocked when an operation is busy |
+| UI-KB-04 | With Vault dialog open, press Ctrl+K | Quick Switch does not open on top of sensitive authentication flow |
+| UI-KB-05 | While a real SSH PTY is connected, change Appearance from dark to light and back | PTY is not disconnected, scrollback persists, text/cursor/ANSI colors remain readable |
+| UI-KB-06 | Select a host result in Quick Switch | Selection changes, but no credentials are sent and no SSH session is opened implicitly |
+
+Headless UI keyboard and appearance test PASS: https://github.com/pas7-studio/PaSSH7/actions/runs/39035191959.
