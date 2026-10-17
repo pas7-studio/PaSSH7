@@ -223,6 +223,11 @@
 .topWorkspaces button.active{background:var(--accentSoft);color:var(--accent)}
 .topactions{flex:none}
 .topbar .brand{flex:none}
+.shortcutTable{display:grid;gap:4px;margin-top:12px}
+.shortcutRow{display:grid;grid-template-columns:minmax(145px,210px) minmax(0,1fr);gap:12px;align-items:center;padding:9px 8px;border-bottom:1px solid var(--border);font-size:12px}
+.shortcutRow kbd{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;display:inline-flex;align-items:center;width:max-content;max-width:100%;padding:5px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--fg);font-size:11px;overflow-wrap:anywhere}
+.shortcutRow span{color:var(--muted);line-height:1.45}
+@media(max-width:560px){.shortcutRow{grid-template-columns:1fr;gap:6px}}
 .settingsImportBar{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 .settingsImportBar button{min-height:34px}
 .settingsImportBar .workspaceError{flex-basis:100%}

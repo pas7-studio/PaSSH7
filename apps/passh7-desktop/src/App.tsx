@@ -658,6 +658,46 @@ export default function App(){
   const updatePreferences=(value:AppPreferences)=>{
     setPreferences(value);savePreferences(value);setSftpOrder(value.sftpSort);setTheme(value.theme);
   };
+  // Vault auto-lock is opt-in. Only real user input counts as activity;
+  // incoming SSH/Docker output never extends the idle deadline. On resume
+  // from sleep or focus after time away, check the deadline before resetting it.
+  useEffect(()=>{
+    if(!vaultUnlocked||!desktopAvailable())return;
+    const minutes=preferences.vaultAutoLockMinutes;
+    if(minutes===0&&!preferences.vaultLockOnBlur)return;
+    let activityAt=Date.now();
+    let locking=false;
+    let closed=false;
+    const attemptLock=()=>{
+      if(closed||locking)return;
+      locking=true;
+      void lockVault().catch(error=>setError(
+        "Vault auto-lock failed: "+String(error)
+      )).finally(()=>{locking=false;activityAt=Date.now()});
+    };
+    const checkIdle=()=>{
+      if(minutes>0&&Date.now()-activityAt>=minutes*60_000)attemptLock();
+    };
+    const onActivity=()=>{activityAt=Date.now()};
+    const onFocus=()=>{checkIdle();if(!locking)activityAt=Date.now()};
+    const onBlur=()=>{if(preferences.vaultLockOnBlur)attemptLock()};
+    window.addEventListener("pointerdown",onActivity,true);
+    window.addEventListener("keydown",onActivity,true);
+    window.addEventListener("wheel",onActivity,true);
+    window.addEventListener("focus",onFocus);
+    window.addEventListener("blur",onBlur);
+    const interval=window.setInterval(checkIdle,10_000);
+    return ()=>{
+      closed=true;
+      window.clearInterval(interval);
+      window.removeEventListener("pointerdown",onActivity,true);
+      window.removeEventListener("keydown",onActivity,true);
+      window.removeEventListener("wheel",onActivity,true);
+      window.removeEventListener("focus",onFocus);
+      window.removeEventListener("blur",onBlur);
+    };
+  },[vaultUnlocked,preferences.vaultAutoLockMinutes,preferences.vaultLockOnBlur]);
+
   useEffect(()=>{
     try{if(preferences.rememberWorkspace)localStorage.setItem("passh7.workspace.v1",panel)}catch{/* local UI preference is best effort */}
   },[panel,preferences.rememberWorkspace]);
@@ -961,7 +1001,7 @@ export default function App(){
   const activeConnections=sshTabs.filter(t=>t.alias===active.id).length;
   const connected=activeConnections>0;
   const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: "+(connected?`connected (${activeConnections} SSH session${activeConnections===1?"":"s"})`:"disconnected")+"\nVault: "+(vaultUnlocked?"unlocked":"locked")+"\nPermissions: "+(connected?"Remote SSH account privileges (not sandboxed)":"No active SSH account")+"\nSelected resources: none"+"\nSSH route: "+(active.jumpAlias?"via "+active.jumpAlias+" (gateway LAN → "+active.address+":"+active.port+")":"direct");
-  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if(e.key==="Escape"){setCommandOpen(false);}}}>
+  return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setCommandOpen(v=>!v)}if((e.ctrlKey||e.metaKey)&&e.shiftKey&&/^[1-5]$/.test(e.key)){e.preventDefault();setPanel((["agent","files","docker","ports","settings"] as const)[Number(e.key)-1]);}if(e.key==="Escape"){setCommandOpen(false);}}}>
     <header className="topbar"><div className="brand"><div className="brandicon"><TerminalSquare size={19}/></div><strong>PaSSH7</strong><span className="alpha">v{buildInfo?.version ?? "0.1.0"} · PREVIEW</span></div><nav className="topWorkspaces" aria-label="Main workspace navigation">{([["agent","Terminal",TerminalSquare],["files","Files",FolderClosed],["docker","Docker",Container],["ports","Forwarding",Activity],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=><button type="button" key={id} aria-current={panel===id?"page":undefined} className={panel===id?"active":""} onClick={()=>setPanel(id)}><Icon size={15}/><span>{label}</span></button>)}</nav><div className="topactions"><button className="lock" onClick={()=>{if(desktopAvailable()){if(vaultUnlocked){void lockVault()}else{setVaultDialog(true)}}}}><LockKeyhole size={14}/> {vaultUnlocked?"Lock vault":desktopAvailable()?"Unlock vault":"Vault unavailable"}</button><button className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button><button className="iconbtn" title="Settings" aria-label="Settings" onClick={()=>setPanel("settings")}><Settings2 size={17}/></button></div></header>
     <div className={"workspace "+(["files","docker","settings"].includes(panel)?"workspaceFull":"")}>
       {sidebar&&<aside className="sidebar"><nav className="workspaceNav" aria-label="Workspaces">

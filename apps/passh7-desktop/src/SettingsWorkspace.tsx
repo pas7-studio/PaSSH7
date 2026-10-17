@@ -1,9 +1,9 @@
 import {useRef,useState} from "react";
-import {Activity, Bot, Container, FolderClosed, LockKeyhole, Monitor, Settings2, ShieldCheck, TerminalSquare} from "lucide-react";
+import {Activity, Bot, Command, Container, FolderClosed, LockKeyhole, Monitor, Settings2, ShieldCheck, TerminalSquare} from "lucide-react";
 import {type AppPreferences,defaultPreferences,validatePreferences} from "./preferences";
 import type {BuildInfo} from "./backend";
 
-type Section="general"|"terminal"|"files"|"docker"|"security"|"network"|"agents"|"diagnostics";
+type Section="general"|"terminal"|"files"|"docker"|"security"|"network"|"agents"|"shortcuts"|"diagnostics";
 const sections:{id:Section;label:string;hint:string;Icon:typeof Settings2}[]=[
   {id:"general",label:"General",hint:"Workspace & appearance",Icon:Settings2},
   {id:"terminal",label:"Terminal",hint:"Fonts and scrolling",Icon:TerminalSquare},
@@ -12,6 +12,7 @@ const sections:{id:Section;label:string;hint:string;Icon:typeof Settings2}[]=[
   {id:"security",label:"Vault & Security",hint:"Encrypted credentials",Icon:LockKeyhole},
   {id:"network",label:"SSH & Networking",hint:"Jump routes and forwards",Icon:Activity},
   {id:"agents",label:"AI Agents",hint:"Remote CLI diagnostics",Icon:Bot},
+  {id:"shortcuts",label:"Keyboard Shortcuts",hint:"Fast workspace navigation",Icon:Command},
   {id:"diagnostics",label:"About & Diagnostics",hint:"Build information",Icon:ShieldCheck}
 ];
 type Props={preferences:AppPreferences;onChange:(p:AppPreferences)=>void;
@@ -64,7 +65,7 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
       <nav className="settingsNav" aria-label="Settings categories">{sections.map(({id,label,hint,Icon})=>
         <button key={id} className={section===id?"selected":""} onClick={()=>setSection(id)}><Icon size={18}/><span><strong>{label}</strong><small>{hint}</small></span></button>)}</nav>
       <div className="settingsContent">
-        <div className="settingsHeading"><div><h2>{sections.find(s=>s.id===section)?.label}</h2><p>Changes apply immediately. Options not supported by the SSH backend are not presented as active controls.</p></div><button disabled={!["general","terminal","files","docker"].includes(section)} onClick={()=>{switch(section){case "general":onChange({...preferences,theme:defaultPreferences.theme,density:defaultPreferences.density,rememberWorkspace:defaultPreferences.rememberWorkspace});break;case "terminal":onChange({...preferences,terminalFontSize:defaultPreferences.terminalFontSize,terminalScrollback:defaultPreferences.terminalScrollback});break;case "files":onChange({...preferences,sftpShowHidden:defaultPreferences.sftpShowHidden,sftpSort:defaultPreferences.sftpSort,confirmTransfer:defaultPreferences.confirmTransfer});break;case "docker":onChange({...preferences,dockerTail:defaultPreferences.dockerTail,dockerAutoRefresh:defaultPreferences.dockerAutoRefresh,dockerFollowLogs:defaultPreferences.dockerFollowLogs});break;default:break}}}>Reset section</button></div>
+        <div className="settingsHeading"><div><h2>{sections.find(s=>s.id===section)?.label}</h2><p>Changes apply immediately. Options not supported by the SSH backend are not presented as active controls.</p></div><button disabled={!["general","terminal","files","docker"].includes(section)} onClick={()=>{switch(section){case "general":onChange({...preferences,theme:defaultPreferences.theme,density:defaultPreferences.density,rememberWorkspace:defaultPreferences.rememberWorkspace});break;case "terminal":onChange({...preferences,terminalFontSize:defaultPreferences.terminalFontSize,terminalScrollback:defaultPreferences.terminalScrollback});break;case "files":onChange({...preferences,sftpShowHidden:defaultPreferences.sftpShowHidden,sftpSort:defaultPreferences.sftpSort,confirmTransfer:defaultPreferences.confirmTransfer});break;case "docker":onChange({...preferences,dockerTail:defaultPreferences.dockerTail,dockerAutoRefresh:defaultPreferences.dockerAutoRefresh,dockerFollowLogs:defaultPreferences.dockerFollowLogs});break;case "security":onChange({...preferences,vaultAutoLockMinutes:defaultPreferences.vaultAutoLockMinutes,vaultLockOnBlur:defaultPreferences.vaultLockOnBlur});break;default:break}}}>Reset section</button></div>
         {section==="general"&&<section className="settingsCard"><h3>Workspace & appearance</h3>
           {toggle("Remember workspace","Reopen the selected Files, Docker or Terminal page after restart.","rememberWorkspace")}
           <label className="prefRow"><span><strong>Theme</strong><small>Choose the app's appearance.</small></span><select value={preferences.theme} onChange={e=>update("theme",e.target.value as AppPreferences["theme"])}><option value="dark">Dark</option><option value="light">Light</option></select></label>
@@ -83,11 +84,17 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
         {section==="docker"&&<section className="settingsCard"><h3>Container operations & logs</h3>
           <label className="prefRow"><span><strong>Log tail</strong><small>How many of the latest lines to request (bounded by native Rust).</small></span><select value={preferences.dockerTail} onChange={e=>update("dockerTail",Number(e.target.value))}>{[50,100,200,500,1000].map(x=><option value={x} key={x}>{x} lines</option>)}</select></label>
           {toggle("Auto-refresh inventory","Reload remote containers every 15 seconds while Docker is open.","dockerAutoRefresh")}
-          {toggle("Follow recent logs","Poll for updated bounded log tail while a container is selected.","dockerFollowLogs")}
-          <p className="prefInfo">These operations use your connected SSH user's Docker privileges. Follow mode polls the server and can be disabled at any time.</p>
+          {toggle("Follow live logs","Stream Docker logs over a dedicated SSH channel while a container is selected.","dockerFollowLogs")}
+          <p className="prefInfo">These operations use your connected SSH user's Docker privileges. Follow live opens a cancellable remote SSH exec channel and can be disabled at any time.</p>
         </section>}
         {section==="security"&&<section className="settingsCard"><h3>Encrypted Vault</h3>
           <p className="prefInfo">Keys, passwords and verified SSH host pins are stored only in the native encrypted Vault. These browser preferences contain no secrets.</p>
+          <label className="prefRow"><span><strong>Auto-lock after inactivity</strong><small>Lock the native Vault after no keyboard, mouse or scroll interaction in PaSSH7. Running terminals and port forwards close when the Vault locks.</small></span>
+            <select aria-label="Vault idle auto-lock duration" value={preferences.vaultAutoLockMinutes} onChange={e=>update("vaultAutoLockMinutes",Number(e.target.value) as AppPreferences["vaultAutoLockMinutes"])}>
+              <option value={0}>Off</option><option value={5}>5 minutes</option><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>60 minutes</option>
+            </select></label>
+          {toggle("Lock when app loses focus","Immediately lock the Vault when switching to another app or desktop. This closes active SSH sessions, including Docker log streams.","vaultLockOnBlur")}
+          <p className="prefInfo">The idle deadline is checked when returning to the app after sleep. Settings contain only local timeout preferences, never a master password. Lock-on-blur is off by default because native file dialogs and switching apps may interrupt active SSH sessions.</p>
           <div className="settingsActions"><button onClick={onExport} disabled={!vaultUnlocked}>Export encrypted backup…</button><button onClick={onRestore} disabled={!vaultUnlocked}>Inspect and restore backup…</button><button onClick={onLock} disabled={!vaultUnlocked}>Lock Vault now</button></div>
           <p className="prefInfo">For remote backups, use Remote Files on a connected server. Restore requires explicit confirmation; it does not silently merge changes.</p>
         </section>}
@@ -98,6 +105,22 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
         {section==="agents"&&<section className="settingsCard"><h3>Remote CLI agents</h3>
           <p>Codex, Claude Code and OpenCode run with your remote SSH account permissions. The detection probe searches the remote login-interactive PATH, not local Windows installations.</p>
           <p className="prefInfo">A failed version probe does not block manual agent launch. Configure provider credentials on each server and inspect the command in its SSH terminal.</p>
+        </section>}
+        {section==="shortcuts"&&<section className="settingsCard"><h3>Keyboard shortcuts</h3>
+          <p className="prefInfo">The primary workspace shortcuts are deliberately not intercepted by SSH unless Ctrl/Cmd and Shift are held together. Terminal input, including ordinary Ctrl shortcuts, continues to go to the remote shell.</p>
+          <div className="shortcutTable">{[
+            ["Ctrl/Cmd + K","Open or close command palette"],
+            ["Ctrl/Cmd + Shift + 1","Open Terminal workspace"],
+            ["Ctrl/Cmd + Shift + 2","Open Remote Files workspace"],
+            ["Ctrl/Cmd + Shift + 3","Open Docker workspace"],
+            ["Ctrl/Cmd + Shift + 4","Open Port Forwarding workspace"],
+            ["Ctrl/Cmd + Shift + 5","Open Settings workspace"],
+            ["Enter (focused file row)","Open folder or preview file"],
+            ["Space (focused file row)","Select a remote file"],
+            ["Ctrl/Cmd + C (focused file row)","Copy remote file path"],
+            ["Escape","Dismiss command palette"]
+          ].map(([shortcut,meaning])=><div className="shortcutRow" key={shortcut}><kbd>{shortcut}</kbd><span>{meaning}</span></div>)}</div>
+          <p className="prefInfo">Custom shortcut remapping is not implemented yet. All shortcuts here perform real actions in the app.</p>
         </section>}
         {section==="diagnostics"&&<section className="settingsCard"><h3>Build details</h3>
           <dl className="diagnosticList"><dt>Version</dt><dd>{buildInfo?.version||"Unknown"}</dd><dt>Publisher</dt><dd>{buildInfo?.publisher||"PAS7 Studio"}</dd><dt>Target</dt><dd>{buildInfo?.target||"Unknown"}</dd><dt>Built at</dt><dd>{buildInfo?.builtAt||"Unknown"}</dd><dt>Commit</dt><dd>{buildInfo?.commit?.slice(0,16)||"Unknown"}</dd><dt>Build</dt><dd>{buildInfo?.runNumber||"Unknown"}</dd></dl>
