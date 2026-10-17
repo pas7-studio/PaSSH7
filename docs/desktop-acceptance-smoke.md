@@ -95,3 +95,16 @@ during this checklist. Use a throwaway identity and Docker container.
 - Never upload private SSH keys, passwords, token files, raw authorization headers or
   unredacted environment-variable dumps to issues/logs.
 - Do not mark real-server E2E **passed** until these checks are actually run.
+
+
+## AI Agent workspace smoke (October 2026)
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| AGENT-UI-01 | Open Terminal, AI Agent, Docker, Files, then Terminal via top navigation | Terminal and AI Agent are separate tabs; AI Agent is full-size; switching does not disconnect or recreate the native SSH session |
+| AGENT-UI-02 | Lock Vault or choose an unconnected host and open AI Agent | Clearly says no active authenticated SSH session; checking and launching are disabled; Open Terminal takes user to connection flow |
+| AGENT-UI-03 | Connect to a host with Codex/Claude/OpenCode in an interactive shell; run Check installed tools | Results are scoped to the *active session*; versions are shown where available; failures are actionable, never represented as successful detection |
+| AGENT-UI-04 | Remote CLI is in interactive PATH but not found by version probe | Agent is still selectable and Launch remains possible; the UI explains the probe limitation |
+| AGENT-UI-05 | Choose an agent and press Launch; accept confirmation | Exactly the selected CLI command is written to the currently authenticated PTY; UI switches to Terminal, with no second SSH connection or fake MCP sandbox |
+| AGENT-UI-06 | Have two sessions for the same host and select one in AI Agent | Launch targets the explicitly selected session; no command is written to a different host |
+| AGENT-UI-07 | Copy SSH context; inspect remote terminal and settings | Context contains non-secret host and route information only; no passwords, private keys or Vault secrets are copied or supplied to the agent |
