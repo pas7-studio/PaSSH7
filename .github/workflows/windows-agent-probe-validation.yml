@@ -1,0 +1,52 @@
+name: PaSSH7 Windows SSH agent CLI validation
+on:
+  push:
+    branches:
+      - feat/dedicated-ai-agent-workspace
+permissions:
+  contents: read
+concurrency:
+  group: passh7-agent-cli-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build TypeScript and production Vite
+        run: |
+          npm install --no-audit --no-fund --prefix apps/passh7-desktop
+          npm run build --prefix apps/passh7-desktop
+      - name: Generate icon for Rust tests
+        run: python3 apps/passh7-desktop/scripts/create_icon.py
+      - name: Native agent probe and command safety tests
+        run: cargo test --manifest-path apps/passh7-desktop/src-tauri/Cargo.toml --bin passh7-desktop
+      - name: Install isolated Chromium visual runner
+        run: npm install --no-audit --no-fund --prefix apps/passh7-desktop/tests/visual
+      - name: Windows agent diagnostics and full screenshot regression
+        run: |
+          set -e
+          npm run dev --prefix apps/passh7-desktop -- --host 127.0.0.1 --port 4187 --strictPort >/tmp/passh7-agent-ui.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:4187/?__reference=1 >/dev/null; then break; fi
+            sleep 1
+          done
+          cd apps/passh7-desktop/tests/visual
+          ./node_modules/.bin/playwright test
+      - name: Keep screenshot evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaSSH7-Windows-Agent-Probe-Screenshots
+          path: apps/passh7-desktop/tests/visual/test-results
+          if-no-files-found: warn
+          retention-days: 7
