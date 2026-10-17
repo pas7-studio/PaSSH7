@@ -103,6 +103,20 @@
 .agentPage .agentCard{background:#13273e}
 .agentPage .agentCard.active{background:#17447d}
 .agentContextPreview,.agentLaunchCommand{background:#081728}
+.agentEmbeddedTerminal{gap:10px;min-width:0}
+.agentEmbeddedTerminal .agentSectionHead h2{display:flex;align-items:center;gap:8px}
+.agentEmbeddedTerminal .agentSectionHead h2 svg{color:#72b8ff}
+.agentTerminalFrame{
+  height:clamp(320px,46vh,580px);min-height:320px;min-width:0;
+  background:#081522;border:1px solid #30516f;border-radius:8px;
+  overflow:hidden;
+}
+.agentTerminalFrame .liveTerminal{height:100%;min-height:0;padding:8px}
+.agentTerminalFrame .xterm{height:100%}
+.agentEmbeddedTerminal .agentHint{margin:0;color:var(--muted);font-size:11px;line-height:1.5}
+.shell.light .agentTerminalFrame{background:#f7fbff;border-color:#bad1e5}
+@media(max-width:900px){.agentTerminalFrame{height:360px;min-height:300px}}
+
 .settingsPage .settingsLayout{grid-template-columns:minmax(190px,220px) minmax(0,1fr) minmax(270px,310px);gap:12px}
 .settingsPage .settingsNav{border:1px solid #2a405a;border-radius:9px;background:#0d1e30;padding:7px;align-self:start;gap:3px}
 .settingsPage .settingsNav button{text-align:left;align-items:center;gap:11px;padding:10px;border-radius:6px;min-height:54px;border:1px solid transparent;background:transparent}
