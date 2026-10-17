@@ -31,6 +31,7 @@ enum SessionCommand {
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerCatalog(String,tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerInspect(String,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogs(String,u32,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogStart(String,u32,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogStop(String,tokio::sync::oneshot::Sender<Result<(),String>>),
@@ -626,6 +627,70 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                         },
                         Some(SessionCommand::DockerLogFinished(stream_id))=>{
                             docker_log_streams.remove(&stream_id);
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerInspect(container_id,response)) => {
+                            // The input is a previously selected hex Docker ID; shell tokens
+                            // and arbitrary inspection templates never come from JavaScript.
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker inspection channel".to_owned())?;
+                                let command=format!("docker inspect --format '{{{{json .}}}}' {container_id}");
+                                channel.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"SSH server refused Docker inspection".to_owned())?;
+                                Ok::<_,String>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker inspection SSH setup timed out".into()));
+                            match setup {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let mut output=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await{
+                                                match message{
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if output.len().saturating_add(data.len())>1024*1024{
+                                                            return Err("Docker inspection exceeded 1 MiB".to_owned());
+                                                        }
+                                                        output.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
+                                            }
+                                            let text=String::from_utf8_lossy(&output);
+                                            if exit_status.is_some_and(|code|code!=0){
+                                                return Err(format!("Docker inspect failed: {}",text.chars().take(400).collect::<String>()));
+                                            }
+                                            let value:serde_json::Value=serde_json::from_str(text.trim())
+                                                .map_err(|_|"Docker returned invalid inspect JSON".to_owned())?;
+                                            // Deliberately omit Config.Env, Config.Labels, full command
+                                            // arguments and any other inspect data which may contain secrets.
+                                            let mounts=value.get("Mounts").and_then(|v|v.as_array())
+                                                .map(|items|items.iter().take(100).map(|item|serde_json::json!({
+                                                    "type":item.get("Type"),"source":item.get("Source"),
+                                                    "destination":item.get("Destination"),"rw":item.get("RW")
+                                                })).collect::<Vec<_>>()).unwrap_or_default();
+                                            let networks=value.pointer("/NetworkSettings/Networks")
+                                                .and_then(|v|v.as_object())
+                                                .map(|m|m.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
+                                            let safe=serde_json::json!({
+                                                "created":value.get("Created"),
+                                                "startedAt":value.pointer("/State/StartedAt"),
+                                                "finishedAt":value.pointer("/State/FinishedAt"),
+                                                "restartPolicy":value.pointer("/HostConfig/RestartPolicy/Name"),
+                                                "image":value.pointer("/Config/Image"),
+                                                "mounts":mounts,
+                                                "networks":networks
+                                            });
+                                            serde_json::to_string(&safe).map_err(|_|"Could not serialize safe Docker inspection".to_owned())
+                                        }).await.unwrap_or_else(|_|Err("Docker inspection timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::DockerLogs(container_id,tail,response)) => {
@@ -1341,6 +1406,19 @@ pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionMa
 // Names, flags and shell input are intentionally rejected.
 fn valid_docker_container_id(id: &str) -> bool {
     (12..=64).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_hexdigit())
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_inspect(
+    id:String,container_id:String,manager:State<'_,SshSessionManager>
+)->Result<String,String>{
+    if !valid_docker_container_id(&container_id){
+        return Err("Invalid Docker container ID".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerInspect(container_id,tx)).await
+        .map_err(|_|"SSH session closed before Docker inspection")?;
+    rx.await.map_err(|_|"Docker inspection interrupted")?
 }
 
 #[tauri::command]
