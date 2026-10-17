@@ -1507,7 +1507,53 @@ pub async fn ssh_session_docker_catalog(
 
 #[cfg(test)]
 mod docker_catalog_tests{
-    use super::docker_catalog_command;
+    use super::{docker_catalog_command,safe_docker_json_lines};
+    #[test]
+    fn shell_neutral_json_does_not_need_quoted_go_templates(){
+        for kind in ["images","volumes","networks","stats","compose","compose-project:my_project"]{
+            let command=docker_catalog_command(kind).unwrap();
+            assert!(command.ends_with("--format json"),"{command}");
+            assert!(!command.contains("{{"),"{command}");
+            assert!(!command.contains("'"),"{command}");
+            assert!(!command.contains('"'),"{command}");
+        }
+    }
+    #[test]
+    fn json_catalog_projection_excludes_labels_and_commands(){
+        let row=r#"{"ID":"012345abcdef","Names":"api","Image":"api:1",
+            "State":"running","Status":"Up 3h","Ports":"8080/tcp",
+            "Labels":"SECRET_LABEL_VALUE","Command":"SECRET_ARGUMENT_VALUE"}"#;
+        let safe=safe_docker_json_lines("containers",row).unwrap();
+        assert!(!safe.contains("SECRET"));
+        assert!(!safe.contains("Labels"));
+        assert!(!safe.contains("Command"));
+        let value:serde_json::Value=serde_json::from_str(safe.trim()).unwrap();
+        assert_eq!(value["ID"],"012345abcdef");
+        assert_eq!(value["Names"],"api");
+        let another=r#"{"ID":"abcdef123456","Names":"db"}"#;
+        let listing=safe_docker_json_lines("compose-project:test",&format!("{row}\\n{another}").replace("\\n","\n")).unwrap();
+        assert_eq!(listing.lines().count(),2);
+    }
+    #[test]
+    fn compose_project_json_array_is_reduced_before_webview(){
+        let raw=r#"[{"Name":"project-a","Status":"running(2)",
+          "ConfigFiles":"compose.yaml","Environment":"SECRET_ENV"},
+          {"Name":"project-b","Status":"exited(1)"}]"#;
+        let reduced=safe_docker_json_lines("compose",raw).unwrap();
+        assert!(!reduced.contains("SECRET_ENV"));
+        let values:Vec<serde_json::Value>=serde_json::from_str(&reduced).unwrap();
+        assert_eq!(values.len(),2);
+        assert_eq!(values[0]["Name"],"project-a");
+        assert_eq!(values[1]["Status"],"exited(1)");
+    }
+    #[test]
+    fn invalid_json_is_reported_without_leaking_remote_data(){
+        let error=safe_docker_json_lines("stats","not json SECRET").unwrap_err();
+        assert!(error.contains("--format json"));
+        assert!(!error.contains("SECRET"));
+        assert_eq!(safe_docker_json_lines("stats","").unwrap(),"");
+        assert!(safe_docker_json_lines("compose","{}").is_err());
+    }
     #[test]
     fn only_fixed_read_only_catalog_commands_are_accepted(){
         for kind in ["images","volumes","networks","stats","compose"]{
