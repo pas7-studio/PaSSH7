@@ -502,3 +502,18 @@
   .transferQueueItemHeading{flex-wrap:wrap;gap:3px}
   .transferQueueItemHeading strong{max-width:100%}
 }
+
+
+/* Docker Compose: read-only project discovery and project-labelled containers. */
+.dockerCatalogWorkspace:has(.dockerComposeMembers){min-height:500px}
+.dockerCatalogWorkspace:has(.dockerComposeMembers) .dockerTableScroll .workspaceTable tr[tabindex]{cursor:pointer}
+.dockerCatalogWorkspace:has(.dockerComposeMembers) .dockerTableScroll .workspaceTable tr[tabindex]:focus-visible{outline:2px solid #65aaff;outline-offset:-2px}
+.dockerComposeMembers{margin:12px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#0d1d30;min-height:165px}
+.dockerComposeMembersHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 13px;border-bottom:1px solid var(--border);background:#142841}
+.dockerComposeMembersHeader>div{display:grid;gap:4px}
+.dockerComposeMembersHeader strong{font-size:12px}
+.dockerComposeMembersHeader small,.dockerComposeMembersHeader>span{font-size:10px;color:var(--muted)}
+.dockerComposeMembers .dockerTableScroll{max-height:310px;overflow:auto}
+.dockerComposeMembers .workspaceEmpty{padding:22px 15px}
+.shell.light .dockerComposeMembers{background:#fff}
+.shell.light .dockerComposeMembersHeader{background:#edf5ff}
