@@ -69,6 +69,7 @@ export default function RemoteFilesWorkspace(p:Props){
   const dir=p.entries?.session===p.session?p.entries:null;
   const path=dir?.path||p.pathInput;
   useEffect(()=>{setSelected("");setSelectedNames([]);selectionAnchor.current="";setHistory([]);setHistoryIndex(-1);},[p.session]);
+  useEffect(()=>{setSelected("");setSelectedNames([]);setFileMenu(null);selectionAnchor.current="";},[path]);
   useEffect(()=>{setVisibleLimit(250);},[p.session,path,p.filter,p.sort,p.showHidden]);
   const open=(next:string)=>{
     setSelected("");setSelectedNames([]);setFileMenu(null);
@@ -113,6 +114,23 @@ export default function RemoteFilesWorkspace(p:Props){
   const selectedPath=selected?full(path,selected):"";
   const preview=p.preview?.session===p.session&&p.preview.path===selectedPath?p.preview:null;
   const previewError=p.previewError?.session===p.session&&p.previewError.path===selectedPath?p.previewError.message:"";
+  const readPreviewRef=useRef(p.readPreview);
+  readPreviewRef.current=p.readPreview;
+  const autoPreviewRequested=useRef("");
+  useEffect(()=>{
+    if(!selectedItem||selectedItem.isDir||!p.connected||!p.session||!selectedPath)return;
+    const image=/\.(png|jpe?g|gif|webp)$/i.test(selectedItem.name);
+    const text=/(\.(json|jsonl|md|txt|log|ya?ml|toml|ini|conf|xml|csv|ts|tsx|js|jsx|mjs|cjs|css|html|sh|bash|py|rs|go|java|kt|c|h|cpp|hpp|sql|dockerfile|gitignore)|^(\.env.*|Dockerfile|Makefile|README))$/i.test(selectedItem.name);
+    const maximum=image?768*1024:256*1024;
+    if((!image&&!text)||selectedItem.sizeBytes===null||selectedItem.sizeBytes>maximum)return;
+    const timer=window.setTimeout(()=>{
+      if(autoPreviewRequested.current===selectedPath)return;
+      autoPreviewRequested.current=selectedPath;
+      readPreviewRef.current(selectedPath);
+    },350);
+    return()=>window.clearTimeout(timer);
+  },[selectedPath,selectedItem?.name,selectedItem?.isDir,selectedItem?.sizeBytes,p.session,p.connected]);
+
   const renameFile=(item:SftpEntry)=>{
     setFileMenu(null);
     if(!p.connected||p.mutationBusy||p.busy)return;
@@ -177,7 +195,7 @@ export default function RemoteFilesWorkspace(p:Props){
           {renderedItems.map(item=><tr key={item.name} tabIndex={0} role="row" aria-selected={selectedNames.includes(item.name)} className={selectedNames.includes(item.name)?"selected":""}
             onClick={e=>{selectItem(item.name,e.ctrlKey||e.metaKey,e.shiftKey);setFileMenu(null)}}
             onContextMenu={e=>{e.preventDefault();selectItem(item.name,false,false);setFileMenu({name:item.name,x:Math.max(8,Math.min(e.clientX,window.innerWidth-216)),y:Math.max(8,Math.min(e.clientY,window.innerHeight-260))})}}
-            onDoubleClick={()=>item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
+            onDoubleClick={()=>{if(item.isDir)open(full(path,item.name));else {const destination=full(path,item.name);autoPreviewRequested.current=destination;p.readPreview(destination)}}}
             onKeyDown={e=>{
               if(e.key==="Enter"){e.preventDefault();selectItem(item.name,false,false);item.isDir?open(full(path,item.name)):p.readPreview(full(path,item.name))}
               else if(e.key===" "){e.preventDefault();selectItem(item.name,e.ctrlKey||e.metaKey,e.shiftKey)}
@@ -216,7 +234,7 @@ export default function RemoteFilesWorkspace(p:Props){
         {selectedItem?<><div className="inspectorFile"><FileText size={28}/><strong>{selectedItem.name}</strong><small>{selectedItem.isDir?"Directory":"Remote file"}</small></div>
           <dl><dt>Size</dt><dd>{size(selectedItem.sizeBytes)}</dd><dt>Modified</dt><dd>{selectedItem.modifiedAt!==null?new Date(selectedItem.modifiedAt*1000).toLocaleString():"Unknown"}</dd><dt>Permissions</dt><dd><code>{octalPermissions(selectedItem.unixPermissions)}</code></dd><dt>Owner ID</dt><dd>{selectedItem.ownerId??"Unknown"}</dd><dt>Group ID</dt><dd>{selectedItem.groupId??"Unknown"}</dd><dt>Path</dt><dd className="filePath">{selectedPath}</dd></dl>
           <div className="inspectorActions"><button onClick={()=>navigator.clipboard.writeText(selectedPath)}><Clipboard size={14}/> Copy path</button>
-          {selectedItem.isDir?<button onClick={()=>open(selectedPath)}>Open folder</button>:<><button onClick={()=>p.readPreview(selectedPath)} disabled={p.previewBusy}>Preview</button><button onClick={()=>p.download(selectedPath)}>Download</button></>}</div>
+          {selectedItem.isDir?<button onClick={()=>open(selectedPath)}>Open folder</button>:<><button onClick={()=>{autoPreviewRequested.current=selectedPath;p.readPreview(selectedPath)}} disabled={p.previewBusy}>Preview</button><button onClick={()=>p.download(selectedPath)}>Download</button></>}</div>
           {!selectedItem.isDir&&<div className="fileCodePreview"><strong>READ-ONLY PREVIEW</strong>
             {p.previewBusy?<p>Loading preview from the remote host…</p>:
              previewError?<div className="filePreviewError" role="alert">{previewError}<button type="button" onClick={()=>p.readPreview(selectedPath)}>Retry</button></div>:
