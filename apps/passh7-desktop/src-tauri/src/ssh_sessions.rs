@@ -715,8 +715,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 }
                                             }
                                             let text=String::from_utf8_lossy(&output);
-                                            if exit_status.is_some_and(|code|code!=0){
-                                                return Err(format!("Docker inspect failed: {}",text.chars().take(400).collect::<String>()));
+                                            if exit_status!=Some(0){
+                                                return Err(format!("Docker inspect failed (SSH exit {:?}): {}",
+                                                    exit_status,text.chars().take(400).collect::<String>()));
                                             }
                                             safe_docker_inspect_json(&text)
                                         }).await.unwrap_or_else(|_|Err("Docker inspection timed out".into()));
