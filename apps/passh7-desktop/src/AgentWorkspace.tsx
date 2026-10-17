@@ -96,13 +96,13 @@ export default function AgentWorkspace(p:Props){
         </section>
         <section className="agentSection agentLaunch">
           <div className="agentSectionHead"><div><h2>Launch {selected.name}</h2>
-              <p>Run the remote CLI in your selected authenticated terminal. Desktop apps cannot display through an SSH PTY.</p>
+              <p>Run the remote CLI in the interactive SSH console below. Desktop apps cannot display through an SSH PTY.</p>
             </div></div>
           <div className="agentLaunchRow"><div className="agentLaunchCommand"><span>{probe?.platform==="windows"?"WINDOWS REMOTE CLI":"REMOTE SHELL"}</span>
               <code>{probe?.installed&&probe.platform==="windows"?"Detected CLI path":p.agent}</code></div>
             <button type="button" className="workspacePrimary"
               disabled={!connected||(probe?.platform==="windows"&&!probe.installed)}
-              onClick={p.onLaunch}><Play size={16}/> Launch CLI in Terminal</button></div>
+              onClick={p.onLaunch}><Play size={16}/> Launch CLI here</button></div>
           <p className="agentHint">{probe?.installed?"PaSSH7 detected a CLI for this SSH account.":"CLI detection distinguishes shell commands from graphical Windows apps."} Ensure the terminal is at a shell prompt before launching an agent.</p>
           {probe&&<div className="agentDiscovery" aria-label="Remote CLI discovery">
             <div><strong>Detected platform</strong><span>{probe.platform==="windows"?"Windows SSH":probe.platform==="unix"?"Unix SSH":"Unknown"}</span></div>
@@ -159,7 +159,7 @@ export default function AgentWorkspace(p:Props){
             <div><ShieldAlert size={16}/><span>No scoped MCP broker, command approvals or resource grants are active yet.</span></div></div>
         </section>
         <section className="agentSection"><h2>How it works</h2>
-          <ol className="agentSteps"><li>Connect to the remote host in Terminal.</li><li>Choose an agent and optionally check installation.</li><li>Launch; PaSSH7 switches back to that SSH terminal.</li></ol>
+          <ol className="agentSteps"><li>Connect to the remote host in Terminal.</li><li>Choose an agent and optionally check installation.</li><li>Launch in this embedded SSH terminal; switch workspaces without interrupting the CLI.</li></ol>
           <button type="button" onClick={p.onTerminal}><TerminalSquare size={15}/> View SSH sessions</button>
         </section>
       </aside>
