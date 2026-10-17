@@ -25,6 +25,10 @@ during this checklist. Use a throwaway identity and Docker container.
 | JUMP-03 | Drop/lock gateway, attempt private target connection while gateway is offline | Actionable gateway-not-connected error; dependent nested session exits instead of falsely staying connected |
 | JUMP-04 | Configure self-hop, missing gateway, gateway without host-key pin, or two-hop cycle | Vault refuses configuration; existing route remains intact |
 | JUMP-05 | Reject target fingerprint, force forwarding disabled in gateway sshd, change internal target address | Independent target pin is never bypassed; actionable SSH forwarding/network failure, no fallback to direct or TOFU trust |
+| DOCKER-LIVE-01 | Select a running container, read its recent logs, then enable Follow live while generating new lines | New lines appear incrementally without periodic full-tail polling; visible lines and memory remain bounded |
+| DOCKER-LIVE-02 | Switch container, host or workspace while following, or lock Vault | Old remote `docker logs --follow` SSH channel is cancelled, no late lines render for another container; normal SSH terminal continues |
+| DOCKER-LIVE-03 | Docker daemon permission denied, invalid container, stopped container with no new logs, and failed SSH exec | UI shows actionable error/closed state; no misleading Connected/Streaming state and no silent infinite loader |
+| DOCKER-LIVE-04 | Click Follow off, refresh recent logs, then follow again | No duplicate or leaked background Docker log streams; manual static tail continues to work |
 | SSH-01 | Unlock vault with correct password; list hosts | Saved hosts/identities appear, no secrets are rendered |
 | SSH-01A | Create a new Windows/Linux host using **Password only** with no generated or imported SSH identity | Host saves, independent host-key pin is verified, password login opens PTY and works |
 | SSH-01B | Generate/import a key after initial password login, install PUBLIC key remotely, attach it to the existing host | Host keeps same alias; key-based or key+password authentication works without creating a duplicate profile |
