@@ -64,7 +64,7 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
     switch(section){
       case "general":onChange({...preferences,rememberWorkspace:defaultPreferences.rememberWorkspace});break;
       case "appearance":onChange({...preferences,theme:defaultPreferences.theme,density:defaultPreferences.density,paneSizes:{...defaultPaneSizes}});break;
-      case "terminal":onChange({...preferences,terminalFontSize:defaultPreferences.terminalFontSize,terminalScrollback:defaultPreferences.terminalScrollback});break;
+      case "terminal":onChange({...preferences,terminalFontSize:defaultPreferences.terminalFontSize,terminalScrollback:defaultPreferences.terminalScrollback,terminalFontFamily:defaultPreferences.terminalFontFamily,terminalCursorStyle:defaultPreferences.terminalCursorStyle,terminalCursorBlink:defaultPreferences.terminalCursorBlink,terminalLineHeight:defaultPreferences.terminalLineHeight});break;
       case "files":onChange({...preferences,sftpShowHidden:defaultPreferences.sftpShowHidden,sftpSort:defaultPreferences.sftpSort,confirmTransfer:defaultPreferences.confirmTransfer,paneSizes:{...preferences.paneSizes,filesTree:defaultPaneSizes.filesTree,filesInspector:defaultPaneSizes.filesInspector}});break;
       case "docker":onChange({...preferences,dockerTail:defaultPreferences.dockerTail,dockerAutoRefresh:defaultPreferences.dockerAutoRefresh,dockerFollowLogs:defaultPreferences.dockerFollowLogs,paneSizes:{...preferences.paneSizes,dockerInspector:defaultPaneSizes.dockerInspector,dockerLogs:defaultPaneSizes.dockerLogs}});break;
       default:break;
@@ -118,10 +118,16 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
           </>)}
         </>}
         {section==="terminal"&&<>
-          {sectionCard("Terminal rendering",<>
-            <label className="prefRow"><span><strong>Font size</strong><small>Applied immediately to all mounted xterm terminal instances.</small></span><input type="number" min={10} max={22} value={preferences.terminalFontSize} onChange={e=>update("terminalFontSize",Math.max(10,Math.min(22,Number(e.target.value)||13)))}/></label>
+          {sectionCard("Terminal font and spacing",<>
+            <label className="prefRow"><span><strong>Font family</strong><small>Missing fonts fall back to an available system monospace.</small></span><select value={preferences.terminalFontFamily} onChange={e=>update("terminalFontFamily",e.target.value as AppPreferences["terminalFontFamily"])}><option value="cascadia">Cascadia Code</option><option value="consolas">Consolas</option><option value="jetbrains">JetBrains Mono</option><option value="monospace">System monospace</option></select></label>
+            <label className="prefRow"><span><strong>Font size</strong><small>Applied immediately to all mounted SSH terminal instances.</small></span><input type="number" min={10} max={22} value={preferences.terminalFontSize} onChange={e=>update("terminalFontSize",Math.max(10,Math.min(22,Number(e.target.value)||13)))}/></label>
+            <label className="prefRow"><span><strong>Line height</strong><small>Controls readability and vertical spacing in the PTY.</small></span><select value={preferences.terminalLineHeight} onChange={e=>update("terminalLineHeight",Number(e.target.value))}>{[1,1.1,1.15,1.2,1.3,1.5].map(n=><option key={n} value={n}>{n.toFixed(2)}×</option>)}</select></label>
             <label className="prefRow"><span><strong>Scrollback</strong><small>Maximum lines kept per interactive SSH terminal.</small></span><select value={preferences.terminalScrollback} onChange={e=>update("terminalScrollback",Number(e.target.value))}>{[1000,5000,10000,20000].map(n=><option key={n} value={n}>{n.toLocaleString()} lines</option>)}</select></label>
-            {infoRow("Terminal engine","Native SSH PTY with xterm.js, ANSI output and keyboard input.","xterm.js")}
+          </>)}
+          {sectionCard("Cursor and interaction",<>
+            <label className="prefRow"><span><strong>Cursor style</strong><small>Choose the visible insertion-point shape.</small></span><select value={preferences.terminalCursorStyle} onChange={e=>update("terminalCursorStyle",e.target.value as AppPreferences["terminalCursorStyle"])}><option value="block">Block</option><option value="underline">Underline</option><option value="bar">Bar</option></select></label>
+            {switchRow("Blinking cursor","Blink the cursor while the terminal is active.","terminalCursorBlink")}
+            {infoRow("Terminal engine","Native SSH PTY with xterm.js, ANSI output, font selection and keyboard input.","xterm.js")}
           </>)}
         </>}
         {section==="files"&&<>
