@@ -1153,7 +1153,25 @@ export default function App(){
     try{await writeSshSession(session.id,'net user "'+profile.user+'" *\r')}
     catch(e){setProbeError(String(e))}
   };
-  const closeInteractive=async(id:string)=>{try{await closeSshSession(id)}catch(e){setProbeError(String(e))}onSessionClosed(id)};
+  const closeInteractive=async(id:string)=>{
+    const alias=sshTabsRef.current.find(tab=>tab.id===id)?.alias||"SSH host";
+    try{
+      await closeSshSession(id);
+      onSessionClosed(id);
+    }catch(error){
+      // Do not optimistically erase a live remote shell when native IPC
+      // rejected Close. A failed close can otherwise orphan an active PTY
+      // and leave the UI falsely reporting Disconnected.
+      try{
+        const live=await listLiveSshSessions();
+        if(!live.some(tab=>tab.id===id)){
+          onSessionClosed(id);
+          return;
+        }
+      }catch{/* Cannot establish backend state: preserve the visible session. */}
+      setSessionNotice({alias,detail:"Could not confirm SSH disconnect; session may still be active. "+String(error)});
+    }
+  };
   const active=hosts.find(h=>h.id===selected) || {id:"",label:"No host selected",address:"",user:"",port:22,group:"Workspace",fingerprint:false};
   const filtered=useMemo(()=>hosts.filter(h=>(h.label+" "+h.address+" "+h.group).toLowerCase().includes(query.trim().toLowerCase())),[hosts,query]);
   const activeConnections=sshTabs.filter(t=>t.alias===active.id).length;
