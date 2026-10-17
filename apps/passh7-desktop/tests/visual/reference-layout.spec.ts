@@ -157,7 +157,7 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
   await test.step("Appearance light theme reaches terminal and workspace chrome",async()=>{
     await page.goto("/?__reference=1&screen=settings",{waitUntil:"domcontentloaded"});
     await expect(page.locator(".settingsNav")).toBeVisible();
-    await page.locator(".settingsNav button").filter({hasText:"Appearance"}).click();
+    await page.locator(".settingsNav button").filter({hasText:"Theme and layout"}).click();
     await page.locator(".prefRow").filter({hasText:"Switch between deep navy"}).locator("select").selectOption("light");
     await expect(page.locator(".shell")).toHaveClass(/light/);
     await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
