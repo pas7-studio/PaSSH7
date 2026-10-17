@@ -85,7 +85,12 @@ test("reference layouts: nine screenshots and keyboard interactions",async({page
     await page.goto("/",{waitUntil:"domcontentloaded"});
     await page.getByRole("button",{name:"Settings",exact:true}).click();
     await expect(page.locator(".sidebar")).toBeVisible();
-    await page.getByRole("checkbox",{name:/Show host sidebar/}).uncheck();
+    // A prior fixture deliberately selected Terminal, and Settings preserves
+    // that category across reloads. Explicitly select General here.
+    await page.locator(".settingsNav button").filter({hasText:"General"}).click();
+    const sidebarToggle=page.getByRole("checkbox",{name:/Show host sidebar/});
+    await expect(sidebarToggle).toBeVisible();
+    await sidebarToggle.uncheck();
     await expect(page.locator(".sidebar")).toHaveCount(0);
     await page.reload({waitUntil:"domcontentloaded"});
     await expect(page.locator(".sidebar")).toHaveCount(0);
