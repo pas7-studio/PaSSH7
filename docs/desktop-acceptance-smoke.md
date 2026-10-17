@@ -179,3 +179,19 @@ during this checklist. Use a throwaway identity and Docker container.
 | FILE-IMAGE-03 | Preview a 769 KiB raster image, large text file or unsupported binary | Clear inline error with Retry; SFTP connection and file actions remain usable |
 | FILE-IMAGE-04 | Preview on host A, switch to host B while read is pending | Previous host's image/text never appears in host B inspector; concurrent completions cannot overwrite newer preview |
 | FILE-MENU-01 | Right-click a remote file, click outside, open again and press Escape | Context menu closes on outside interaction, resize and Escape; underlying selection remains consistent |
+
+## Visual fixture screenshots vs native Windows acceptance
+
+The on-demand `PaSSH7 reference UI screenshot smoke` workflow captures 9 screenshots
+from development-only fixtures and verifies keyboard resize, Docker search,
+Settings accordion and real offline App sidebar persistence.
+Latest passed run: https://github.com/pas7-studio/PaSSH7/actions/runs/39031809762
+
+Compare generated screenshots side by side with the 3 approved mockups.
+Look at hierarchy, font scaling, contrast, table/inspector proportions,
+transfer queue, Docker KPIs, logs height and responsive fallbacks.
+A green screenshot smoke is NOT proof of pixel-perfect parity.
+
+On packaged Windows 11 WebView2, separately verify native rendering,
+keyboard and pointer interactions, font fallback, Vault locking, file dialogs,
+SFTP transfer queue, real Docker stats/logs, and switching two pinned hosts.
