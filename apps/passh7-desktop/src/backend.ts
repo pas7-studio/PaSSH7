@@ -221,7 +221,12 @@ export async function controlDockerContainer(sessionId:string,containerId:string
   return invoke<string>("ssh_session_docker_action",{id:sessionId,containerId,action});
 }
 
-export type RemoteAgentAvailability={installed:boolean;version:string|null};
+export type RemoteAgentAvailability={
+  installed:boolean;version:string|null;
+  platform:"windows"|"unix";
+  source:string|null;location:string|null;
+  desktopApp:string|null;launchCommand:string|null;diagnostic:string|null;
+};
 export async function probeRemoteAgent(sessionId:string,agent:"codex"|"claude"|"opencode"):Promise<RemoteAgentAvailability>{
   return invoke<RemoteAgentAvailability>("ssh_session_agent_probe",{id:sessionId,agent});
 }
