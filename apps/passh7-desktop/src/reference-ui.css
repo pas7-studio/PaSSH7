@@ -116,6 +116,7 @@
 .terminalDockSlot .liveTerminal,
 .terminalSessionSurface>.liveTerminal{height:100%;min-height:0}
 .terminalParked{display:none}
+.agentTerminalFrame.expanded{height:clamp(490px,78vh,980px)}
 .agentTerminalFrame>.terminalSessionSurface{height:100%;width:100%}
 .agentTerminalFrame .liveTerminal{height:100%;min-height:0;padding:8px}
 .agentTerminalFrame .xterm{height:100%}
