@@ -1,4 +1,4 @@
-import {useCallback,useRef,useState} from "react";
+import {useCallback,useRef,useState,type ReactNode} from "react";
 import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Maximize2, Minimize2, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
 import type {RemoteAgentAvailability} from "./backend";
@@ -14,6 +14,7 @@ type Props={
   onCheck:()=>void;onLaunch:()=>void;onTerminal:()=>void;onSession:(id:string)=>void;
   onPrepareRdp:()=>void;
   liveTerminal?:boolean;onTerminalDock?:(node:HTMLDivElement|null)=>void;
+  terminalPreview?:ReactNode;
 };
 export default function AgentWorkspace(p:Props){
   const [copyFeedback,setCopyFeedback]=useState("");
@@ -128,7 +129,7 @@ export default function AgentWorkspace(p:Props){
           {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>}
           {p.status&&<p role="status" className="workspaceNotice">{p.status}</p>}
         </section>
-        {p.liveTerminal&&connected&&<section className="agentSection agentEmbeddedTerminal" aria-label="Live agent SSH terminal">
+        {(p.liveTerminal||p.terminalPreview)&&connected&&<section className="agentSection agentEmbeddedTerminal" aria-label="Live agent SSH terminal">
           <div className="agentSectionHead"><div><h2><TerminalSquare size={17}/> Interactive SSH terminal</h2>
             <p>Connected to {p.host}. Commands and agent output use your existing authenticated PTY session.</p></div>
             <div className="agentTerminalActions">
@@ -140,7 +141,7 @@ export default function AgentWorkspace(p:Props){
               <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
             </div>
           </div>
-          <div className={"agentTerminalFrame"+(expandedConsole?" expanded":"")} ref={setDock}/>
+          <div className={"agentTerminalFrame"+(expandedConsole?" expanded":"")} ref={setDock}>{p.terminalPreview}</div>
           <p className="agentHint">Type directly in this terminal. Select another SSH session above to change the active console. Nothing is executed without your action.</p>
         </section>}
         <section className="agentSection">
