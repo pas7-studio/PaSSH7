@@ -14,11 +14,6 @@ import SnippetsWorkspace from "./SnippetsWorkspace";
 import AgentWorkspace from "./AgentWorkspace";
 import TerminalReference from "./TerminalReference";
 import {AGENTS} from "./integrations";
-import ConnectionsWorkspace from "./ConnectionsWorkspace";
-import PortForwardingWorkspace from "./PortForwardingWorkspace";
-import SnippetsWorkspace from "./SnippetsWorkspace";
-import AgentWorkspace from "./AgentWorkspace";
-import {AGENTS} from "./integrations";
 import {defaultPreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import type {SftpEntry,BuildInfo,DockerDetails,DockerRuntimeStats} from "./backend";
 import type {TransferJob} from "./useSftpTransferQueue";
@@ -109,8 +104,6 @@ export default function ReferenceScreens(){
   const [sort,setSort]=useState<AppPreferences["sftpSort"]>("folders");
   const [preview,setPreview]=useState<{session:string;path:string;body:string;kind:"image"|"text"}|null>(null);
   const [chosenContainer,setChosenContainer]=useState(containerRows[0]);
-  const [agent,setAgent]=useState(AGENTS[0].kind);
-  const [selectedHost,setSelectedHost]=useState("dev-server");
   const [agent,setAgent]=useState(AGENTS[0].kind);
   const [selectedHost,setSelectedHost]=useState("dev-server");
   const [transferJobs]=useState<TransferJob[]>([
