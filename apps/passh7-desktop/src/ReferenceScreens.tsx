@@ -4,7 +4,7 @@
  * No real Vault, SSH session or Docker daemon is opened by this page.
  */
 import {useState} from "react";
-import {Bot,ChevronDown,Command,Container,FolderClosed,LockKeyhole,Network,Search,Server,Settings2,ShieldCheck,TerminalSquare} from "lucide-react";
+import {Bot,ChevronDown,Command,Container,FileText,FolderClosed,LockKeyhole,Network,Search,Server,Settings2,ShieldCheck,TerminalSquare} from "lucide-react";
 import RemoteFilesWorkspace from "./RemoteFilesWorkspace";
 import DockerWorkspace from "./DockerWorkspace";
 import SettingsWorkspace from "./SettingsWorkspace";
@@ -110,11 +110,12 @@ export default function ReferenceScreens(){
       <aside className="sidebar"><nav className="workspaceNav" aria-label="Reference fixture workspaces">
         <button disabled><Server size={16}/>Connections</button>
         <button disabled><TerminalSquare size={16}/>Terminal</button>
-        {screenNames.map(item=><button key={item.key} className={screen===item.key?"active":""} onClick={()=>choose(item.key)}>
-          {item.key==="settings"?<Settings2 size={16}/>:item.key==="docker"?<Container size={16}/>:<FolderClosed size={16}/>}
-          {item.name}</button>)}
+        <button className={screen==="files"?"active":""} onClick={()=>choose("files")}><FolderClosed size={16}/>Remote Files</button>
+        <button className={screen==="docker"?"active":""} onClick={()=>choose("docker")}><Container size={16}/>Docker</button>
         <button disabled><Network size={16}/>Port Forwarding</button>
+        <button disabled><FileText size={16}/>Snippets</button>
         <button disabled><Bot size={16}/>AI Agents</button>
+        <button className={screen==="settings"?"active":""} onClick={()=>choose("settings")}><Settings2 size={16}/>Settings</button>
       </nav>
       <div className="sectionHeading"><span>YOUR HOSTS</span></div>
       <label className="search"><Search size={15}/><input disabled value="" readOnly placeholder="Search hosts"/></label>
