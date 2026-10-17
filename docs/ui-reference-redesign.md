@@ -37,7 +37,7 @@ Migration layer: apps/passh7-desktop/src/reference-ui.css, loaded after legacy s
 | AppShell | single left rail, true active-host header, page navigation | resize/persistence and accessibility audit |
 | Settings | 12 section categories, bound existing preferences, right information rail | native config/log folders and advanced backend settings |
 | Remote Files | lazy SSH SFTP tree, file metadata, preview, transfers and Vault backups | batch queue, multi-select, image preview, resizing |
-| Docker | resource tabs, state actions, six KPI cards with genuine stats sampling, live searchable/fullscreen logs | docker inspect details, Compose workflows and per-container metrics |
+| Docker | resource tabs, state actions, six KPI cards with genuine stats sampling, sanitized lifecycle/volumes/network inspector, live searchable/fullscreen logs | Compose workflows, per-container metrics and Windows live verification |
 | Connections | Vault hosts, fingerprint state, connection and terminal actions | host groups/tags, favorites |
 | Snippets | command cards, user-entered command with explicit SSH confirmation | encrypted reusable user snippets, platform-aware templates |
 | Port Forwarding | standalone native SSH forwarding workspace | presets and recovery experience |
