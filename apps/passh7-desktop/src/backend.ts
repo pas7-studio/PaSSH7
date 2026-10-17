@@ -163,6 +163,13 @@ export async function getPublicIdentity(alias:string):Promise<GeneratedPublicKey
 export async function listDockerContainers(sessionId:string):Promise<string>{
   return invoke<string>("ssh_session_docker_list",{id:sessionId});
 }
+export type DockerRuntimeStats={ID?:string;Name?:string;CPUPerc?:string;MemUsage?:string;MemPerc?:string};
+/** Single read-only sample from docker stats; neither secrets nor inspect Env are requested. */
+export async function listDockerStats(sessionId:string):Promise<DockerRuntimeStats[]>{
+  const raw=await invoke<string>("ssh_session_docker_catalog",{id:sessionId,kind:"stats"});
+  return raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean)
+    .map(line=>JSON.parse(line) as DockerRuntimeStats);
+}
 /** Returns at most 200 timestamped lines for one container. Does not start, stop or mutate Docker. */
 export type DockerCatalogKind="images"|"volumes"|"networks";
 export async function listDockerCatalog(sessionId:string,kind:DockerCatalogKind):Promise<Record<string,string>[]>{
