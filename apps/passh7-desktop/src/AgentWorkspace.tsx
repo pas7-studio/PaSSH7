@@ -1,6 +1,7 @@
 import {useState} from "react";
 import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
+import {WorkspaceHeader,WorkspaceStatus} from "./WorkspaceChrome";
 
 export type AgentProbeState={session:string;installed:boolean;version:string|null};
 type Props={
@@ -21,15 +22,13 @@ export default function AgentWorkspace(p:Props){
     catch(error){setCopyFeedback("Could not copy context: "+String(error))}
   };
   return <div className="widePage agentPage">
-    <div className="widePageTitle">
-      <Bot size={26}/>
-      <div><h1>AI Agent</h1><p>Run Codex, Claude Code or OpenCode on your connected SSH host.</p></div>
-      <span className={connected?"workspaceConnected":"workspaceOffline"}>{connected?"● SSH connected":"○ No active SSH session"}</span>
-    </div>
+    <WorkspaceHeader icon={Bot} title="AI Agents" description="Choose, verify and launch a coding assistant on your authenticated SSH server."
+      status={connected?"connected":"offline"} statusText={connected?"SSH connected · "+p.host:"No active SSH session"}/>
     <section className="agentHero" aria-label="Agent SSH connection">
       <div className="agentHeroIdentity"><span className="agentHeroIcon"><Server size={22}/></span>
         <div><small>ACTIVE TARGET</small><h2>{p.host}</h2><p>{p.username}@{p.address}:{p.port}</p></div></div>
-      <div className="agentHeroMeta"><span><Activity size={15}/>{p.route}</span><span>{p.sessions.length} terminal{p.sessions.length===1?"":"s"} for this host</span></div>
+      <div className="agentHeroMeta"><span><Activity size={15}/>{p.route}</span><span>{p.sessions.length} authenticated session{p.sessions.length===1?"":"s"}</span>
+        <WorkspaceStatus kind={connected?"connected":"offline"}>{connected?"Ready for agent launch":"Connect to continue"}</WorkspaceStatus></div>
       <div className="agentHeroActions">
         {p.sessions.length>1&&<label>SSH terminal
           <select aria-label="Choose SSH terminal for agent" value={p.sessionId} onChange={e=>p.onSession(e.target.value)}>
@@ -55,10 +54,9 @@ export default function AgentWorkspace(p:Props){
                 <span className={"agentMark "+a.kind}><Bot size={23}/></span>
                 <strong>{a.name}</strong>
                 <small>{a.description}</small>
-                <span className={"agentDetection "+(detected?.installed?"installed":detected?"unknown":"unchecked")}>
-                  {detected?.installed?<CheckCircle2 size={13}/>:<Activity size={13}/>}
-                  {detected?.installed?"Detected":detected?"Not found by probe":"Not checked"}
-                </span>
+                <span className="agentDetection"><WorkspaceStatus kind={detected?.installed?"connected":detected?"warning":"offline"}>
+                  {detected?.installed?"Installed":detected?"Not found":"Not checked"}
+                </WorkspaceStatus></span>
                 {detected?.installed&&detected.version&&<span className="agentVersion" title={detected.version}>{detected.version}</span>}
               </button>;
             })}
@@ -80,7 +78,7 @@ export default function AgentWorkspace(p:Props){
         </section>
       </div>
       <aside className="agentWorkspaceSide">
-        <section className="agentSection"><h2><ShieldAlert size={18}/> Permissions & safety</h2>
+        <section className="agentSection agentSafetyPanel"><h2><ShieldAlert size={18}/> Permissions & safety</h2>
           <p>Remote CLIs execute with the full permissions of <strong>{p.username||"your SSH account"}</strong> on the selected host. They are not sandboxed by PaSSH7.</p>
           <div className="agentSafetyRows"><div><CheckCircle2 size={16}/><span>SSH uses the host's verified fingerprint and native session.</span></div>
             <div><CheckCircle2 size={16}/><span>Your private SSH keys remain in the local encrypted Vault.</span></div>
