@@ -439,3 +439,25 @@
 .dockerTableScroll tr[tabindex]:focus-visible{outline:2px solid #62adff;outline-offset:-2px}
 .shell.light .dockerStatCell{color:#34516f}
 @media(max-width:1200px){.dockerToolbar{flex-wrap:wrap}.dockerToolbar .filesSearch{flex:1}}
+
+
+/* Working Settings accordion: all headings with chevrons are interactive. */
+.settingsContent .settingsCard>h3{padding:0;margin:0;border-bottom:0}
+.settingsCardToggle{
+  display:flex!important;align-items:center!important;justify-content:space-between!important;
+  width:100%;min-height:36px!important;
+  padding:7px 0 12px!important;margin:0!important;
+  text-align:left;color:var(--fg)!important;
+  background:transparent!important;border:0!important;
+  font-size:13px!important;font-weight:700;
+}
+.settingsCardToggle:hover:not(:disabled){color:#83bbff!important;background:transparent!important}
+.settingsCardToggle svg{color:#a9c5e4;transition:transform .15s ease}
+.settingsCardToggle svg.collapsed{transform:rotate(-90deg)}
+.settingsCardBody{border-top:1px solid var(--border);padding-top:2px}
+.settingsCardBody>.prefRow:first-of-type{border-top:0}
+.settingsCardBody .settingsActions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 0}
+.settingsCardBody>.prefInfo{padding:10px 0}
+.shell.light .settingsCardToggle{color:#1c3652!important}
+.shell.light .settingsCardToggle:hover:not(:disabled){color:#1b68c5!important}
+@media(prefers-reduced-motion:reduce){.settingsCardToggle svg{transition:none}}
