@@ -26,6 +26,7 @@ export type AppPreferences={
   sftpSort:"folders"|"name"|"size"|"modified";
   confirmTransfer:boolean;
   rememberWorkspace:boolean;
+  sidebarExpanded:boolean;
   paneSizes:PaneSizes;
 };
 export const defaultPreferences:AppPreferences={
@@ -33,7 +34,7 @@ export const defaultPreferences:AppPreferences={
   terminalFontFamily:"cascadia",terminalCursorStyle:"block",terminalCursorBlink:true,terminalLineHeight:1.15,
   dockerTail:200,dockerAutoRefresh:false,dockerFollowLogs:false,
   sftpShowHidden:true,sftpSort:"folders",confirmTransfer:true,
-  rememberWorkspace:true,paneSizes:{...defaultPaneSizes}
+  rememberWorkspace:true,sidebarExpanded:true,paneSizes:{...defaultPaneSizes}
 };
 const KEY="passh7.preferences.v1";
 // This is non-secret UI configuration only. SSH keys, passwords and host pins
@@ -60,6 +61,7 @@ export function validatePreferences(source:unknown):AppPreferences{
     sftpSort:["folders","name","size","modified"].includes(data.sftpSort??"")?data.sftpSort!:"folders",
     confirmTransfer:data.confirmTransfer!==false,
     rememberWorkspace:data.rememberWorkspace!==false,
+    sidebarExpanded:data.sidebarExpanded!==false,
     paneSizes:{
       filesTree:paneSize(layout?.filesTree,defaultPaneSizes.filesTree,150,360),
       filesInspector:paneSize(layout?.filesInspector,defaultPaneSizes.filesInspector,245,500),
