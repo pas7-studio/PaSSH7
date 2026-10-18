@@ -181,7 +181,7 @@ export default function DockerWorkspace(p:Props){
     activeLog?{session:p.session,id:activeLog.containerId,name:activeLog.containerName}:null;
   const paused=!!pausedSnapshot&&pausedSnapshot.session===p.session&&
     pausedSnapshot.id===displayedTarget?.id;
-  const logText=paused&&pausedSnapshot?pausedSnapshot.text:(activeLog?.containerId===displayedTarget?.id?activeLog.text:"");
+  const logText=paused&&pausedSnapshot?pausedSnapshot.text:(activeLog&&activeLog.containerId===displayedTarget?.id?activeLog.text:"");
   const logLines=useMemo(()=>logText.split(/\r?\n/)
     .filter(Boolean).filter(line=>line.toLowerCase().includes(logsSearch.toLowerCase()))
     .filter(line=>level==="all"||(level==="error"?/\berror\b|\bfatal\b|\bpanic\b/i.test(line):/\bwarn(ing)?\b/i.test(line)))
