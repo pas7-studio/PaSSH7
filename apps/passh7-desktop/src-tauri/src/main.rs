@@ -207,6 +207,7 @@ mod vault_local_activity_tests{
 #[serde(rename_all = "camelCase")]
 struct HostSummary {
     alias: String,
+    display_name: Option<String>,
     hostname: String,
     port: u16,
     username: String,
@@ -553,7 +554,8 @@ fn vault_list_hosts(sessions: State<'_, SessionStore>) -> Result<Vec<HostSummary
     sessions.use_password(|password| {
         let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         Ok(vault.hosts.into_iter().map(|h| HostSummary {
-            alias:h.alias,hostname:h.hostname,port:h.port,username:h.username,
+            alias:h.alias,display_name:h.extensions.get("passh7_display_name").and_then(|v|v.as_str()).map(str::to_owned),
+            hostname:h.hostname,port:h.port,username:h.username,
             identity_alias:h.identity_alias,host_key_pinned:h.pinned_host_key.is_some(),
             has_saved_credentials:h.extensions.contains_key("passh7_saved_auth"),
             saved_auth_mode:h.extensions.get("passh7_saved_auth").and_then(|v| v.get("mode")).and_then(|v| v.as_str()).map(str::to_owned),
@@ -586,13 +588,15 @@ fn vault_add_host(host: HostInput, sessions: State<'_, SessionStore>) -> Result<
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateHostInput {
-    alias:String, hostname:String, port:u16, username:String,
+    alias:String, display_name:String, hostname:String, port:u16, username:String,
     identity_alias:String, reset_host_key:bool, forget_credentials:bool,
 }
 #[tauri::command]
 fn vault_update_host(host:UpdateHostInput,sessions:State<'_,SessionStore>,
     ssh:State<'_,SshSessionManager>)->Result<(),String>{
-    if host.alias.trim().is_empty()||host.hostname.trim().is_empty()||
+    if host.alias.trim().is_empty()||host.display_name.trim().is_empty()||
+        host.display_name.trim().len()>80||host.display_name.chars().any(|c|c.is_control())||
+        host.hostname.trim().is_empty()||
         host.hostname.len()>253||host.hostname.chars().any(|c|c.is_whitespace()||c.is_control())||
         host.username.trim().is_empty()||host.username.len()>128||
         host.username.chars().any(|c|c.is_whitespace()||c.is_control())||host.port==0{
@@ -615,6 +619,12 @@ fn vault_update_host(host:UpdateHostInput,sessions:State<'_,SessionStore>,
             let endpoint_changed=current.hostname!=host.hostname||current.port!=host.port;
             let account_changed=current.username!=host.username||
                 current.identity_alias!=host.identity_alias;
+            if host.display_name.trim()==host.alias{
+                current.extensions.remove("passh7_display_name");
+            }else{
+                current.extensions.insert("passh7_display_name".into(),
+                    serde_json::Value::String(host.display_name.trim().to_owned()));
+            }
             current.hostname=host.hostname.clone();
             current.port=host.port;
             current.username=host.username.clone();
