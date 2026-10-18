@@ -1,4 +1,4 @@
-import {useState} from "react";
+import {useEffect,useState} from "react";
 import {Activity,Clipboard,ExternalLink,LockKeyhole,Network,Plus,RefreshCw,ShieldCheck,Square,TerminalSquare,WifiOff} from "lucide-react";
 import {WorkspaceEmpty,WorkspaceHeader,WorkspaceMetric} from "./WorkspaceChrome";
 
