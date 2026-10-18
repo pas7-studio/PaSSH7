@@ -1424,10 +1424,19 @@ export default function App(){
     if(!session)return;
     const sameHost=sshTabsRef.current.filter(tab=>tab.alias===session.alias);
     const number=sameHost.findIndex(tab=>tab.id===id)+1;
+    const boundTunnels=tunnels.filter(forward=>forward.session===id);
+    const dependentAliases=new Set(hosts.filter(host=>host.jumpAlias===session.alias).map(host=>host.id));
+    const dependentSessions=sshTabsRef.current.filter(tab=>dependentAliases.has(tab.alias));
+    const tunnelWarning=boundTunnels.length
+      ?"\n\nThis SSH session owns "+boundTunnels.length+" local TCP tunnel(s). Closing it will interrupt clients connected through those tunnels.":"";
+    const gatewayWarning=dependentSessions.length
+      ?"\n\nGATEWAY WARNING: "+dependentSessions.length+" SSH session(s) to downstream host(s) use "+session.alias+
+        " as a jump gateway. Closing the gateway connection they rely on may disconnect them too.":"";
     if(!window.confirm("Disconnect SSH session #"+number+" on "+session.alias+
-      "?\n\nThe running remote shell, active commands and session-bound tunnels may stop. "+
-      "Any local AI MCP grant bound to this session becomes unusable. "+
-      "Other SSH sessions are not intentionally disconnected."))return;
+      "?\n\nThe running remote shell and active commands will be interrupted. "+
+      "Any local AI MCP grant bound to this session becomes unusable."+
+      tunnelWarning+gatewayWarning+
+      "\n\nOther independent SSH sessions remain open."))return;
     void closeInteractive(id);
   };
   // User-initiated host changes update the alias and its PTY in one React
