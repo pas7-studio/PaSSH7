@@ -1437,7 +1437,7 @@ export default function App(){
         <button type="button" className="topQuickButton" disabled={!active.id} onClick={()=>setPanel("terminal")}><TerminalSquare size={15}/><span>Open in Terminal</span></button>
         <button type="button" className="topQuickButton topDisconnect" disabled={!connected||sshBusy} title="Disconnect the selected host's active SSH session" onClick={()=>{const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===active.id)||sshTabs.find(t=>t.alias===active.id);if(session)void closeInteractive(session.id)}}><X size={15}/><span>Disconnect</span></button>
         <button type="button" className="lock" onClick={()=>{if(!desktopAvailable())return;if(vaultUnlocked){void lockVault()}else setVaultDialog(true)}}><LockKeyhole size={14}/><span>{vaultUnlocked?"Lock Vault":"Unlock Vault"}</span></button>
-        <button type="button" className="iconbtn" title="Quick switch (Ctrl+K)" aria-label="Quick switch" onClick={()=>setCommandOpen(true)}><Command size={17}/></button>
+        <button type="button" className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Open command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button>
       </div>
     </header>
     {sessionNotice&&<div className="globalSessionNotice" role="alert" aria-live="polite">
@@ -1739,13 +1739,19 @@ export default function App(){
       <div className="wizardActions"><button onClick={()=>step===0?setAddOpen(false):setStep(step-1)}>{step===0?"Cancel":"Back"}</button><button className="primary" onClick={async()=>{const issue=validateHostDraft({...draft,fingerprint:step<2?"":draft.fingerprint,identity:step===0?"placeholder":draft.identity});if(step===0&&(!draft.label.trim()||!draft.hostname.trim()||!draft.username.trim()||draft.port<1||draft.port>65535)){setError("Complete the connection details");return}if(step>=1&&issue){setError(issue);return}setError("");if(step<3){setStep(step+1);return}if(desktopAvailable()){try{await addHost({alias:draft.label,hostname:draft.hostname,port:draft.port,username:draft.username,identityAlias:draft.auth==="password"?"":draft.identity,pinnedHostKey:draft.fingerprint||null});const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias})));setSelected(draft.label);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false)}catch(err){setError(String(err))}return}const id="preview-"+Date.now();setHosts(v=>[...v,{id,label:draft.label,address:draft.hostname,user:draft.username,port:draft.port,group:"My hosts",fingerprint:!!draft.fingerprint,identityAlias:draft.auth==="password"?"":draft.identity}]);setSelected(id);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false);}}> {step===3?(desktopAvailable()?"Save host":"Add to preview"):"Continue"} </button></div>
     </div></div>}
     {commandOpen&&<div className="overlay quickSwitchOverlay" onMouseDown={()=>setCommandOpen(false)}>
-      <div className="modal quickSwitchModal" role="dialog" aria-modal="true" aria-label="Quick switch"
+      <div className="modal quickSwitchModal" role="dialog" aria-modal="true" aria-label="Command palette"
         onMouseDown={e=>e.stopPropagation()}>
-        <div className="quickSwitchTitle"><Command size={17}/><strong>Quick switch</strong>
+        <div className="quickSwitchTitle"><Command size={17}/><strong>Quick actions</strong>
           <button type="button" aria-label="Close" onClick={()=>setCommandOpen(false)}><X size={17}/></button>
         </div>
-        <QuickSwitch hosts={hosts} connectedAliases={sshTabs.map(t=>t.alias)} selected={selected}
-          onChooseHost={setSelected}
+        <QuickSwitch hosts={hosts} sessions={sshTabs} connectedAliases={sshTabs.map(t=>t.alias)}
+          selected={selected} selectedSession={activeSsh} vaultUnlocked={vaultUnlocked}
+          onChooseHost={alias=>{selectHost(alias);setPanel("terminal")}}
+          onChooseSession={id=>{const session=sshTabs.find(t=>t.id===id);
+            if(session){setSelected(session.alias);setActiveSsh(session.id);setPanel("terminal")}}}
+          onConnectHost={alias=>void connectFromConnections(alias)}
+          onAddHost={()=>{if(!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}
+          onUnlockVault={()=>setVaultDialog(true)}
           onWorkspace={route=>setPanel(route)}
           onClose={()=>setCommandOpen(false)}/>
       </div>
