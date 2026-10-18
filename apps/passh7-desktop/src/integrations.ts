@@ -1,6 +1,7 @@
 /**
- * Informational client registry only.
- * No external agent configuration is written, no MCP session is opened.
+ * Agent metadata and installation references for PaSSH7 workspaces.
+ * Native Rust creates short-lived local MCP configuration on launch;
+ * this browser-side registry never manages SSH credentials or CLI logins.
  */
 export type AgentKind = "codex" | "claude" | "opencode";
 export interface AgentDefinition {
