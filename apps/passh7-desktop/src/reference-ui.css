@@ -1395,6 +1395,7 @@
 .editConnectionCheck input{width:16px!important;height:16px!important;margin:3px 0 0;
   flex:none;accent-color:var(--accent)}
 .editConnectionCheck span{display:grid;gap:5px}
+.editConnectionDirty{margin-right:auto;font-size:11px;font-weight:600;color:var(--accent);align-self:center}
 .editConnectionCheck strong{font-size:12px}
 .editConnectionCheck small{color:var(--muted);font-size:11px;font-weight:450;line-height:1.6}
 .connectionInspectorActions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
