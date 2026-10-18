@@ -31,6 +31,19 @@ export default function PortForwardingWorkspace(p:Props){
     setNotice(preset.name+" preset applied. Review the target, then start forwarding.");
   };
   const chosen=current.find(t=>t.session+":"+t.localPort===selected)||current[0];
+  const describeSession=(id:string)=>{
+    const index=p.sessions.indexOf(id);
+    return index<0?"Disconnected SSH session":"SSH #"+(index+1)+(id===p.session?" · selected":" · other PTY");
+  };
+  const confirmStop=(forward:Forward)=>{
+    if(!window.confirm("Stop the LOCAL port forward on "+p.host+"?\n\n"+
+      "Local: 127.0.0.1:"+forward.localPort+"\n"+
+      "Remote: "+forward.targetHost+":"+forward.remotePort+"\n"+
+      "Through: "+describeSession(forward.session)+"\n\n"+
+      "Existing database connections, RDP or web clients using this tunnel will be interrupted. "+
+      "The SSH terminal itself stays open."))return;
+    p.onStop(forward.session,forward.localPort);
+  };
   const copy=async(text:string)=>{
     try{await navigator.clipboard.writeText(text);setNotice("Local address copied.")}
     catch{setNotice("Clipboard unavailable; select and copy the address manually.")}
@@ -83,12 +96,12 @@ export default function PortForwardingWorkspace(p:Props){
             onClick={()=>setSelected(t.session+":"+t.localPort)}
             onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setSelected(t.session+":"+t.localPort)}}}>
             <td><code>127.0.0.1:{t.localPort}</code></td><td>{t.targetHost}:{t.remotePort}</td>
-            <td title={t.session}><span className="forwardSecure"><ShieldCheck size={13}/> {t.session===p.session?"Selected PTY":"Other PTY"}</span></td>
+            <td title={t.session}><span className="forwardSecure"><ShieldCheck size={13}/> {describeSession(t.session)}</span></td>
             <td><div className="forwardRowActions">
               <button aria-label={"Copy local address for port "+t.localPort} title="Copy local address"
-                onClick={()=>void copy("127.0.0.1:"+t.localPort)}><Clipboard size={14}/></button>
+                onClick={event=>{event.stopPropagation();void copy("127.0.0.1:"+t.localPort)}}><Clipboard size={14}/></button>
               <button aria-label={"Stop forward on port "+t.localPort} title="Stop local forward"
-                className="dangerButton" disabled={p.busySessions.includes(t.session)} onClick={()=>p.onStop(t.session,t.localPort)}>
+                className="dangerButton" disabled={p.busySessions.includes(t.session)} onClick={event=>{event.stopPropagation();confirmStop(t)}}>
                 <Square size={14}/> Stop</button>
             </div></td>
           </tr>)}</tbody></table>
@@ -100,7 +113,7 @@ export default function PortForwardingWorkspace(p:Props){
         {chosen&&<section className="forwardDetail" aria-label="Selected forward details">
           <div><small>SELECTED TUNNEL</small><strong>127.0.0.1:{chosen.localPort}</strong></div>
           <div><small>REMOTE ENDPOINT</small><strong>{chosen.targetHost}:{chosen.remotePort}</strong></div>
-          <div><small>SSH SESSION</small><strong>{chosen.session===p.session?"Selected terminal":"Another connected terminal"}</strong></div>
+          <div><small>SSH SESSION</small><strong>{describeSession(chosen.session)}</strong></div>
           <button title="Copy local endpoint" onClick={()=>void copy("127.0.0.1:"+chosen.localPort)}>
             <Clipboard size={14}/> Copy address</button>
         </section>}
