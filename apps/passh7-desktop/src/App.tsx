@@ -762,6 +762,8 @@ export default function App(){
   };
   const [agent,setAgent]=useState<AgentKind>("codex");
   const [agentStatus,setAgentStatus]=useState("");
+  const [agentLaunching,setAgentLaunching]=useState(false);
+  const agentLaunchRef=useRef(false);
   const [agentProbeBusy,setAgentProbeBusy]=useState(false);
   const [agentProbeError,setAgentProbeError]=useState("");
   const agentProbeGeneration=useRef(0);
@@ -803,6 +805,10 @@ export default function App(){
     setAgentProbeBusy(false);
   };
   const launchAgent=async()=>{
+    if(agentLaunchRef.current)return;
+    agentLaunchRef.current=true;
+    setAgentLaunching(true);
+    try{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentStatus("Connect to the selected SSH host before starting any agent.");return}
     if(agentMode==="local"){
@@ -833,7 +839,7 @@ export default function App(){
           if(!window.confirm("Remote "+agent+" CLI is not available. Start the already-signed-in LOCAL CLI and grant it command/file access to "+session.alias+" via this PaSSH7 SSH session?"))return;
           try{
             const notice=await launchLocalAgent(agent,session.id);
-        await refreshLocalAgentConnections();
+            await refreshLocalAgentConnections();
             if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)setAgentStatus(notice);
           }catch(error){
             if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
@@ -848,6 +854,10 @@ export default function App(){
       }
     }
     await launchRemoteAgent();
+    }finally{
+      agentLaunchRef.current=false;
+      setAgentLaunching(false);
+    }
   };
   const launchRemoteAgent=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -1485,11 +1495,11 @@ export default function App(){
  host={active.label} address={active.address} username={active.user} port={active.port}
  route={active.jumpAlias?"Via "+active.jumpAlias:"Direct SSH"}
  sessionId={sshTabs.some(t=>t.id===activeSsh&&t.alias===active.id)?activeSsh:""}
- sessions={sshTabs.filter(t=>t.alias===active.id)}
+ sessions={sshTabs.filter(t=>t.alias===active.id)} allSessions={sshTabs}
  vaultUnlocked={vaultUnlocked}
  agent={agent} onAgent={setAgent}
  availability={agentAvailability} checking={agentProbeBusy}
- error={agentProbeError} status={agentStatus} context={context}
+ error={agentProbeError} status={agentStatus} context={context} launching={agentLaunching}
  liveTerminal={true} onTerminalDock={agentTerminalDockRef}
  onCheck={()=>{void checkRemoteAgents();void checkLocalAgents()}}
  mode={agentMode} onMode={setAgentMode}
@@ -1504,7 +1514,7 @@ export default function App(){
    setTunnelRemotePort(3389);
    setPanel("ports");
  }}
- onSession={id=>{if(sshTabs.some(t=>t.id===id&&t.alias===active.id))setActiveSsh(id)}}
+ onSession={id=>{const target=sshTabs.find(t=>t.id===id);if(target){setSelected(target.alias);setActiveSsh(target.id)}}}
  />:
          panel==="files"?<RemoteFilesWorkspace
  paneSizes={preferences.paneSizes} onPaneSize={updatePaneSize}
