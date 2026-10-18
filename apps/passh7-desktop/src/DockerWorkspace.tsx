@@ -304,7 +304,7 @@ export default function DockerWorkspace(p:Props){
     <PaneResizeHandle label="Container logs panel height" direction="horizontal" value={logsHeight}
       min={240} max={620} invert defaultValue={defaultPaneSizes.dockerLogs}
       onPreview={setLogsHeight} onCommit={n=>{setLogsHeight(n);p.onPaneSize("dockerLogs",n)}}/>
-    <section className={"dockerLogViewer dockerLogsWorkspace "+(logsFullscreen?"dockerLogsFullscreen":"")} style={{height:logsFullscreen?undefined:Math.max(logsHeight,560)}}>
+    <section className={"dockerLogViewer dockerLogsWorkspace "+(logsFullscreen?"dockerLogsFullscreen":"")} style={{height:logsFullscreen?undefined:logsHeight}}>
       <div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
       <select aria-label="Container for log viewer" value={displayedTarget?.id||""} onChange={e=>{const row=p.items?.find(item=>item.ID===e.target.value);if(row?.ID)selectLogContainer(row.ID,row.Names||row.ID)}} disabled={!p.connected||p.logsBusy}>
         <option value="">Select container…</option>
