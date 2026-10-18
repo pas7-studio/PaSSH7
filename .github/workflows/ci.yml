@@ -1,7 +1,8 @@
 name: PaSSH7 Linux self-hosted build
 on:
   push:
-    branches: [main]
+    branches: [main, feat/dedicated-ai-agent-workspace]
+    paths: ['.github/workflows/ci.yml']
   workflow_dispatch:
 permissions:
   contents: read
