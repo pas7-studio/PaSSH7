@@ -13,6 +13,7 @@ type Props={
 export default function PortForwardingWorkspace(p:Props){
   const [selected,setSelected]=useState<string|null>(null);
   const [notice,setNotice]=useState("");
+  useEffect(()=>{setSelected(null);setNotice("")},[p.session]);
   const valid=p.localPort>=1&&p.localPort<=65535&&p.remotePort>=1&&p.remotePort<=65535
     &&p.remoteHost.trim().length>0&&p.remoteHost.length<=253&&!/[\r\n\s"';&|$<>]/.test(p.remoteHost);
   const current=p.forwards.filter(t=>p.sessions.includes(t.session));
