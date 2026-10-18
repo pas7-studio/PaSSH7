@@ -1418,6 +1418,18 @@ export default function App(){
       setClosingSessions(previous=>previous.filter(session=>session!==id));
     }
   };
+  const requestDisconnect=(id:string)=>{
+    if(sessionCloseInFlight.current.has(id))return;
+    const session=sshTabsRef.current.find(tab=>tab.id===id);
+    if(!session)return;
+    const sameHost=sshTabsRef.current.filter(tab=>tab.alias===session.alias);
+    const number=sameHost.findIndex(tab=>tab.id===id)+1;
+    if(!window.confirm("Disconnect SSH session #"+number+" on "+session.alias+
+      "?\n\nThe running remote shell, active commands and session-bound tunnels may stop. "+
+      "Any local AI MCP grant bound to this session becomes unusable. "+
+      "Other SSH sessions are not intentionally disconnected."))return;
+    void closeInteractive(id);
+  };
   // User-initiated host changes update the alias and its PTY in one React
   // event. Without this, quick SFTP/Docker navigation can land between
   // selected=newHost and activeSsh=oldHost and lose the action.
@@ -1445,7 +1457,7 @@ export default function App(){
       </div>
       <div className="topactions">
         <button type="button" className="topQuickButton" disabled={!active.id} onClick={()=>setPanel("terminal")}><TerminalSquare size={15}/><span>Open in Terminal</span></button>
-        <button type="button" className="topQuickButton topDisconnect" disabled={!connected||sshBusy} title="Disconnect the selected host's active SSH session" onClick={()=>{const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===active.id)||sshTabs.find(t=>t.alias===active.id);if(session)void closeInteractive(session.id)}}><X size={15}/><span>Disconnect</span></button>
+        <button type="button" className="topQuickButton topDisconnect" disabled={!connected||sshBusy} title="Disconnect the selected host's active SSH session" onClick={()=>{const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===active.id)||sshTabs.find(t=>t.alias===active.id);if(session)requestDisconnect(session.id)}}><X size={15}/><span>Disconnect</span></button>
         <button type="button" className="lock" onClick={()=>{if(!desktopAvailable())return;if(vaultUnlocked){void lockVault()}else setVaultDialog(true)}}><LockKeyhole size={14}/><span>{vaultUnlocked?"Lock Vault":"Unlock Vault"}</span></button>
         <button type="button" className="topCommandPalette" title="Search SSH sessions, hosts, workspaces and commands (Ctrl+K)" aria-label="Open command palette" onClick={()=>setCommandOpen(true)}><Search size={15}/><span>Search</span><kbd>Ctrl K</kbd></button>
       </div>
@@ -1464,16 +1476,7 @@ export default function App(){
       activeSession={activeSsh} selectedHost={selected} vaultUnlocked={vaultUnlocked}
       onSelect={id=>{const target=sshTabs.find(session=>session.id===id);
         if(target){setSelected(target.alias);setActiveSsh(id)}}}
-      onDisconnect={id=>{
-        const session=sshTabs.find(tab=>tab.id===id);
-        if(!session)return;
-        const other=sshTabs.filter(tab=>tab.alias===session.alias);
-        if(!window.confirm("Disconnect SSH session "+other.findIndex(tab=>tab.id===id)+1+
-          " on "+session.alias+"?\n\nRunning terminal processes and session-bound tunnels can be interrupted. "+
-          "The session's SFTP and local AI MCP access will become unavailable. "+
-          "Other SSH sessions stay connected."))return;
-        void closeInteractive(id);
-      }}
+      onDisconnect={requestDisconnect}
       onConnect={()=>{if(selected)void connectFromConnections(selected)}}
       onUnlock={()=>setVaultDialog(true)}
       onCommandPalette={()=>setCommandOpen(true)}/>}
@@ -1515,7 +1518,7 @@ export default function App(){
     onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}><span className="sshTabConnectionDot" aria-hidden="true"/>{t.alias}</button>
   <button type="button" className="sshTabClose" disabled={closingSessions.includes(t.id)}
     title={"Disconnect "+t.alias} aria-label={"Disconnect "+t.alias}
-    onClick={()=>void closeInteractive(t.id)}>{closingSessions.includes(t.id)?"…":<X size={14}/>}</button>
+    onClick={()=>requestDisconnect(t.id)}>{closingSessions.includes(t.id)?"…":<X size={14}/>}</button>
 </div>)}</div>}
         <div ref={mainTerminalDock} className="terminalDockSlot" style={{display:connected?"block":"none"}} aria-label="Interactive terminal session"/>
         <div ref={parkedTerminals} className="terminalParked" aria-hidden="true"/>
