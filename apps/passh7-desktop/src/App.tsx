@@ -1600,6 +1600,7 @@ export default function App(){
       onDisconnect={requestDisconnect}
       onConnect={()=>{if(selected)void connectFromConnections(selected)}}
       onUnlock={()=>setVaultDialog(true)}
+      onAddHost={()=>{setAddOpen(true);setStep(0);setError("")}}
       onCommandPalette={()=>openCommandPalette()}/>}
     <div className={"workspace "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"workspaceFull":"")}>
       {sidebar&&<aside className="sidebar"><nav className="workspaceNav" aria-label="Workspaces">
