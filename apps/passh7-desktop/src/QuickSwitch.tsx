@@ -102,7 +102,7 @@ export default function QuickSwitch(p:Props){
       ):commandOnly?hit.category==="actions"||hit.category==="workspaces":true);
     const ranked=allowed.map(hit=>({hit,score:matchScore(hit,terms)}))
       .filter(row=>row.score>=0);
-    const sections:Category[]=commandOnly?["actions","workspaces"]:targetOnly?["sessions","hosts","actions"]:
+    const sections:Category[]=commandOnly?["actions","workspaces"]:targetOnly?["hosts","sessions","actions"]:
       ["sessions","hosts","workspaces","actions"];
     const hits:Hit[]=[];
     for(const section of sections){
