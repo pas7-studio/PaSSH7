@@ -220,12 +220,30 @@ export default function App(){
     identityAlias:string;resetHostKey:boolean;forgetCredentials:boolean}|null>(null);
   const [editBusy,setEditBusy]=useState(false);
   const [editError,setEditError]=useState("");
+  const editOriginalRef=useRef<NonNullable<typeof editTarget>|null>(null);
+  const editIsDirty=Boolean(editTarget&&editOriginalRef.current&&(
+    editTarget.displayName!==editOriginalRef.current.displayName||
+    editTarget.hostname!==editOriginalRef.current.hostname||
+    editTarget.port!==editOriginalRef.current.port||
+    editTarget.username!==editOriginalRef.current.username||
+    editTarget.identityAlias!==editOriginalRef.current.identityAlias||
+    editTarget.resetHostKey!==editOriginalRef.current.resetHostKey||
+    editTarget.forgetCredentials!==editOriginalRef.current.forgetCredentials
+  ));
+  const closeHostEditor=()=>{
+    if(!editTarget||editBusy)return;
+    if(editIsDirty&&!window.confirm("Discard unsaved SSH connection changes for "+editTarget.alias+"?"))return;
+    editOriginalRef.current=null;
+    setEditTarget(null);setEditError("");
+  };
   const beginEditHost=(alias:string)=>{
     const host=hosts.find(item=>item.id===alias);
     if(!host||!vaultUnlocked||!desktopAvailable())return;
     setEditError("");
-    setEditTarget({alias,displayName:host.label,hostname:host.address,port:host.port,username:host.user,
-      identityAlias:host.identityAlias||"",resetHostKey:false,forgetCredentials:false});
+    const draft={alias,displayName:host.label,hostname:host.address,port:host.port,username:host.user,
+      identityAlias:host.identityAlias||"",resetHostKey:false,forgetCredentials:false};
+    editOriginalRef.current=draft;
+    setEditTarget(draft);
   };
   const editorChangesConnection=(draft:NonNullable<typeof editTarget>)=>{
     const existing=hosts.find(host=>host.id===draft.alias);
@@ -267,6 +285,7 @@ export default function App(){
         group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,
         hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,
         backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));
+      editOriginalRef.current=null;
       setEditTarget(null);setProbeError("");setProbeResult(null);setAuthResult("");
     }catch(error){setEditError("Could not save SSH connection: "+String(error))}
     finally{setEditBusy(false)}
@@ -1832,12 +1851,12 @@ export default function App(){
         <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button><button className="contextAction" type="button" disabled={!connected||tunnelBusy} onClick={()=>void refreshLocalForwarding()}>Refresh active forwards</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{!tunnels.some(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected))&&<p className="note">No active local forwards for this host. Start one above to map a localhost port through SSH, or refresh to retrieve active native tunnels.</p>}{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusySessions.includes(t.session)} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
       </div></aside>}
     </div>
-    {editTarget&&!keyDialog&&<div className="overlay" onMouseDown={()=>{if(!editBusy){setEditTarget(null);setEditError("")}}}>
+    {editTarget&&!keyDialog&&<div className="overlay" onMouseDown={closeHostEditor}>
       <form className="modal wizard editConnectionModal" role="dialog" aria-modal="true" aria-label="Edit SSH connection"
         onMouseDown={event=>event.stopPropagation()} onSubmit={event=>{event.preventDefault();void saveEditedHost()}}>
         <div className="modalTitle"><Pencil size={18}/> Edit SSH connection
-          <button type="button" aria-label="Close connection editor" disabled={editBusy}
-            onClick={()=>{setEditTarget(null);setEditError("")}}><X size={17}/></button>
+          <button type="button" aria-label="Close" title="Close connection editor" disabled={editBusy}
+            onClick={closeHostEditor}><X size={17}/></button>
         </div>
         <p className="note">Update connection settings stored in your encrypted Vault. The saved host name
           <strong> {editTarget.alias}</strong> remains unchanged so gateway references stay valid.</p>
@@ -1893,7 +1912,8 @@ export default function App(){
           {editError&&<p role="alert" className="wizardError">{editError}</p>}
         </div>
         <div className="wizardActions">
-          <button type="button" disabled={editBusy} onClick={()=>{setEditTarget(null);setEditError("")}}>Cancel</button>
+          {editIsDirty&&<small role="status" className="editConnectionDirty">Unsaved changes</small>}
+          <button type="button" disabled={editBusy} onClick={closeHostEditor}>Cancel</button>
           <button type="submit" className="primary" disabled={editBusy||(editorChangesConnection(editTarget)&&(
             sshTabs.some(t=>t.alias===editTarget.alias)||
             hosts.some(host=>host.jumpAlias===editTarget.alias&&sshTabs.some(tab=>tab.alias===host.id))))}>
