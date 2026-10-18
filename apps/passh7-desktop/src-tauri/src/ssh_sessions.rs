@@ -69,6 +69,7 @@ enum SessionCommand {
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
     Exec(String,tokio::sync::oneshot::Sender<Result<RemoteExecResult,String>>),
+    SftpWrite(String,String,tokio::sync::oneshot::Sender<Result<(),String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpImage(String, tokio::sync::oneshot::Sender<Result<String,String>>),
@@ -289,6 +290,30 @@ impl SshSessionManager {
 
     /// Jump traffic runs only over an already authenticated, pinned gateway
     /// session; the local machine never contacts the target's private address.
+    pub async fn remote_list(&self,id:&str,path:&str)->Result<Vec<SftpEntry>,String>{
+        if !valid_sftp_path(path){return Err("Invalid remote directory path".into());}
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        self.sender(id)?.send(SessionCommand::SftpList(path.to_owned(),tx)).await
+            .map_err(|_|"SSH session closed during directory listing")?;
+        rx.await.map_err(|_|"SFTP directory listing interrupted".to_owned())?
+    }
+
+    pub async fn remote_read(&self,id:&str,path:&str)->Result<String,String>{
+        if !valid_sftp_path(path){return Err("Invalid remote file path".into());}
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        self.sender(id)?.send(SessionCommand::SftpRead(path.to_owned(),tx)).await
+            .map_err(|_|"SSH session closed during SFTP read")?;
+        rx.await.map_err(|_|"SFTP read interrupted".to_owned())?
+    }
+
+    pub async fn remote_write(&self,id:&str,path:&str,body:&str)->Result<(),String>{
+        if !valid_sftp_path(path)||body.len()>256*1024{return Err("SFTP write requires valid path and at most 256 KiB".into());}
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        self.sender(id)?.send(SessionCommand::SftpWrite(path.to_owned(),body.to_owned(),tx)).await
+            .map_err(|_|"SSH session closed before SFTP write")?;
+        rx.await.map_err(|_|"SFTP write interrupted".to_owned())?
+    }
+
     /// Reuse an already authenticated/pinned SSH session: no Vault secrets.
     pub async fn execute_remote(&self,id:&str,command:&str)->Result<RemoteExecResult,String>{
         if command.is_empty()||command.len()>8192||command.as_bytes().contains(&0){
@@ -1187,6 +1212,39 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 .then_with(||a.name.to_lowercase().cmp(&b.name.to_lowercase())));
                                             Ok::<Vec<SftpEntry>,String>(result)
                                         }).await.unwrap_or_else(|_|Err("SFTP directory listing timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::SftpWrite(path,body,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async{
+                                let ch=connection.channel_open_session().await
+                                    .map_err(|_|"Cannot open SFTP write SSH channel".to_owned())?;
+                                ch.request_subsystem(true,"sftp").await
+                                    .map_err(|_|"Remote SFTP write subsystem unavailable".to_owned())?;
+                                Ok::<_,String>(ch.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP write setup timed out".into()));
+                            match opened{
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move{
+                                        use tokio::io::AsyncWriteExt;
+                                        let result=tokio::time::timeout(Duration::from_secs(30),async{
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|_|"SFTP write initialization failed".to_owned())?;
+                                            let mut remote=sftp.open_with_flags(path,
+                                                russh_sftp::protocol::OpenFlags::CREATE |
+                                                russh_sftp::protocol::OpenFlags::TRUNCATE |
+                                                russh_sftp::protocol::OpenFlags::WRITE
+                                            ).await.map_err(|e|format!("Cannot open remote file for writing: {e}"))?;
+                                            remote.write_all(body.as_bytes()).await
+                                                .map_err(|e|format!("SFTP write failed: {e}"))?;
+                                            remote.flush().await.map_err(|e|format!("SFTP flush failed: {e}"))?;
+                                            remote.shutdown().await.map_err(|e|format!("SFTP close failed: {e}"))?;
+                                            Ok::<(),String>(())
+                                        }).await.unwrap_or_else(|_|Err("SFTP write timed out".into()));
                                         let _=response.send(result);
                                     });
                                 }
