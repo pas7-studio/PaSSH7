@@ -611,6 +611,14 @@ fn vault_update_host(host:UpdateHostInput,sessions:State<'_,SessionStore>,
     }
     sessions.use_password(|password|{
         passh7_core::transaction(&vault_path()?,password,|vault|{
+            // A gateway with live downstream PTYs must not be edited while
+            // those nested SSH transports are using its configured identity.
+            if vault.hosts.iter().any(|dependent|
+                dependent.extensions.get("passh7_jump_alias").and_then(|v|v.as_str())==Some(host.alias.as_str())
+                    &&live.iter().any(|session|session.alias==dependent.alias)){
+                return Err(HubError::InvalidInput(
+                    "Disconnect dependent private-host SSH sessions before editing this jump gateway"));
+            }
             if !host.identity_alias.is_empty()&&!vault.identities.iter().any(|identity|identity.alias==host.identity_alias){
                 return Err(HubError::InvalidInput("Choose a key that exists in the encrypted Vault"));
             }
