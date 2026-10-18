@@ -245,6 +245,17 @@ export async function controlDockerContainer(sessionId:string,containerId:string
   return invoke<string>("ssh_session_docker_action",{id:sessionId,containerId,action});
 }
 
+export type LocalAgentAvailability={installed:boolean;path:string|null;diagnostic:string};
+export async function probeLocalAgent(agent:"codex"|"claude"|"opencode"):Promise<LocalAgentAvailability>{
+  return invoke<LocalAgentAvailability>("local_agent_probe",{agent});
+}
+export async function launchLocalAgent(agent:"codex"|"claude"|"opencode",sessionId:string):Promise<string>{
+  return invoke<string>("local_agent_launch",{agent,id:sessionId});
+}
+export type RemoteExecResult={stdout:string;stderr:string;exitCode:number;truncated:boolean};
+export async function executeRemoteCommand(sessionId:string,command:string):Promise<RemoteExecResult>{
+  return invoke<RemoteExecResult>("ssh_session_exec",{id:sessionId,command});
+}
 export type RemoteAgentAvailability={
   installed:boolean;version:string|null;
   platform:"windows"|"unix";
