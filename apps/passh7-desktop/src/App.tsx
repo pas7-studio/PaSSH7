@@ -14,7 +14,7 @@ import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -723,6 +723,25 @@ export default function App(){
   const [agentMode,setAgentMode]=useState<"auto"|"remote"|"local">("auto");
   const [localAgentAvailability,setLocalAgentAvailability]=useState<Partial<Record<AgentKind,LocalAgentAvailability>>>({});
   const [localAgentBusy,setLocalAgentBusy]=useState(false);
+  const [localAgentConnections,setLocalAgentConnections]=useState<LocalAgentConnection[]>([]);
+  const [localAgentRevoking,setLocalAgentRevoking]=useState("");
+  const refreshLocalAgentConnections=async()=>{
+    if(!desktopAvailable())return;
+    try{setLocalAgentConnections(await listLocalAgentConnections())}
+    catch{/* Native bridge may be unavailable while Vault is being locked. */}
+  };
+  const revokeAgentSshAccess=async(id:string)=>{
+    const grant=localAgentConnections.find(item=>item.id===id);
+    if(!grant)return;
+    if(!window.confirm("Revoke "+grant.agent+" SSH tools for "+grant.host+"? This blocks new remote operations but does not close its local CLI window or cancel already running SSH commands."))return;
+    setLocalAgentRevoking(id);
+    try{
+      const revoked=await revokeLocalAgentConnection(id);
+      await refreshLocalAgentConnections();
+      setAgentStatus(revoked?"SSH tools revoked. Local CLI console stays open; future MCP requests will be rejected.":"SSH grant has already expired or been revoked.");
+    }catch(error){setAgentStatus("Could not revoke local CLI SSH tools: "+String(error))}
+    finally{setLocalAgentRevoking("")}
+  };
   const checkLocalAgents=async()=>{
     if(!desktopAvailable()||localAgentBusy)return;
     setLocalAgentBusy(true);
@@ -784,6 +803,7 @@ export default function App(){
       if(!window.confirm("Start your already-signed-in LOCAL "+agent+" CLI with SSH command and file access to "+session.alias+"? It will run on this computer and can modify the remote server with your SSH account's permissions."))return;
       try{
         const notice=await launchLocalAgent(agent,session.id);
+        await refreshLocalAgentConnections();
         if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)setAgentStatus(notice);
       }catch(error){
         if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
@@ -807,6 +827,7 @@ export default function App(){
           if(!window.confirm("Remote "+agent+" CLI is not available. Start the already-signed-in LOCAL CLI and grant it command/file access to "+session.alias+" via this PaSSH7 SSH session?"))return;
           try{
             const notice=await launchLocalAgent(agent,session.id);
+        await refreshLocalAgentConnections();
             if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)setAgentStatus(notice);
           }catch(error){
             if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
@@ -854,6 +875,22 @@ export default function App(){
   const [panel,setPanel]=useState<Panel>(()=>{
     try{const value=localStorage.getItem("passh7.workspace.v1");return ["connections","terminal","agent","files","docker","snippets","ports","settings"].includes(value||"")?value as Panel:"connections"}catch{return "agent"}
   });
+  // Rust bridge owns the actual grants. Poll only while AI Agents is open,
+  // including after a WebView reload, console exit or SSH disconnect.
+  useEffect(()=>{
+    if(!vaultUnlocked){
+      setLocalAgentConnections([]);
+      return;
+    }
+    if(panel!=="agent"||!desktopAvailable())return;
+    let mounted=true;
+    const refresh=()=>{void listLocalAgentConnections().then(items=>{
+      if(mounted)setLocalAgentConnections(items);
+    }).catch(()=>{/* read-only status; native state remains authoritative */})};
+    refresh();
+    const interval=window.setInterval(refresh,5000);
+    return()=>{mounted=false;window.clearInterval(interval)};
+  },[vaultUnlocked,panel]);
   useLayoutEffect(()=>{
     const dock=panel==="agent"?agentTerminalDock.current
       :panel==="terminal"?mainTerminalDock.current:null;
@@ -1451,6 +1488,8 @@ export default function App(){
  onCheck={()=>{void checkRemoteAgents();void checkLocalAgents()}}
  mode={agentMode} onMode={setAgentMode}
  localAvailability={localAgentAvailability} localChecking={localAgentBusy}
+ localConnections={localAgentConnections} localRevoking={localAgentRevoking}
+ onRevokeLocal={id=>void revokeAgentSshAccess(id)}
  onLaunch={()=>void launchAgent()}
  onTerminal={()=>setPanel("terminal")}
  onPrepareRdp={()=>{
