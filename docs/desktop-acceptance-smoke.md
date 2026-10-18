@@ -390,3 +390,17 @@ loopback tests do not substitute for this manual validation.
 | HOST-EDIT-08 | Remove a gateway referenced by a saved private target | Dialog disables deletion with a clear dependency explanation, matching Rust Vault protection |
 | HOST-EDIT-09 | Switch among Terminal, Connections, Files, Docker, Snippets, Ports, AI Agents and Settings rapidly | The old four contextual navigation icons never appear on the right on any view. Global left nav and global session strip are the only navigation controls; the top title/header datum stays vertically consistent |
 | HOST-EDIT-10 | Use 100% / 125% / 150% Windows display scaling and resize to 760 px and below | No clipped Save/Cancel controls, no overlay underneath the app, no overlapping header or old contextual tabs |
+
+
+## Cross-workspace continuity and transfer visibility (2026-10-18)
+
+| ID | Manual check | Required result |
+| --- | --- | --- |
+| APP-UX-35 | Rename the friendly label of a saved gateway while its SSH PTY and downstream SSH PTY are connected | Save remains available without disconnecting. Existing SSH sessions, bound tunnels, credential secrets and host-key pin stay unchanged; sidebar, global strip and Connections show the new label |
+| APP-UX-36 | While connected, change SSH username, hostname, key, port, forget-credentials or reset-trust in Edit connection | Save requires disconnecting affected SSH and gateway-dependent sessions. The editor offers an individually confirmed Disconnect action. Native Vault command rejects unsafe changes even if the UI is bypassed |
+| APP-UX-37 | Start an SFTP download on host A, switch to Docker on host B and use other app tabs | A compact global transfer indicator stays in the SSH strip, shows pending/in-progress count and known progress. The native SFTP transfer continues; the app does not reconnect or switch SSH session without user input |
+| APP-UX-38 | Click the global SFTP transfer indicator while Docker on host B is visible | Remote Files opens on the originating live SSH PTY (host A) and scrolls directly to the transfer queue. No FTP operation is restarted, and the queue's native owner is preserved |
+| APP-UX-39 | Queue multiple transfers, pause the queue, cancel a queued job, and simulate one failure | The global transfer indicator distinguishes active, queued/paused and failed jobs; failures are accessible in the queue until explicitly cleared. Existing transfers are not erased on navigation |
+| APP-UX-40 | Close all SSH terminals while Vault is unlocked and no hosts exist | Shared session strip offers Add SSH host and opens the existing encrypted Vault wizard. With Vault locked it offers Unlock Vault instead |
+| APP-UX-41 | Focus Edit, Remove, Terminal or Connect inside a Connections table row and press Enter | Only the focused action runs. The parent row selection handler must not also execute from bubbled keyboard events |
+| APP-UX-42 | From Docker select a saved host via the top host-picker or global palette, then choose an actual SSH PTY result | Selecting the host preserves the Docker workspace; selecting an individual terminal explicitly opens that terminal. Neither operation creates a new SSH connection |
