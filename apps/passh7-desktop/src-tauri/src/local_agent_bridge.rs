@@ -446,6 +446,14 @@ fn mcp_tools()->Value{
             json!({"path":{"type":"string"},"content":{"type":"string"}}),vec!["path","content"])
     ])
 }
+fn mcp_tool_text(name:&str,value:&Value)->String{
+    // MCP text is the actual file content for remote_read. JSON-encoding a
+    // string here forced the agent to see extra quotes and escaped newlines.
+    // Structured exec / directory metadata remain JSON for machine parsing.
+    if name=="remote_read"{
+        value.as_str().map(str::to_owned).unwrap_or_else(||value.to_string())
+    }else{value.to_string()}
+}
 fn mcp_handle(message:&Value)->Option<Value>{
     let id=message.get("id")?.clone();
     let method=message.get("method").and_then(Value::as_str).unwrap_or("");
@@ -463,7 +471,7 @@ fn mcp_handle(message:&Value)->Option<Value>{
                 rpc_call(name.strip_prefix("remote_").unwrap(),&args)
             }else{Err("Unknown PaSSH7 remote tool".into())};
             match outcome{
-                Ok(result)=>json!({"content":[{"type":"text","text":result.to_string()}]}),
+                Ok(result)=>json!({"content":[{"type":"text","text":mcp_tool_text(name,&result)}]}),
                 Err(message)=>json!({"isError":true,"content":[{"type":"text","text":message}]}),
             }
         },
@@ -554,6 +562,12 @@ mod tests{
         assert!(allowed_agent("claude").is_ok());
         assert!(allowed_agent("opencode").is_ok());
         assert!(allowed_agent("powershell -evil").is_err());
+    }
+    #[test]
+    fn mcp_remote_read_preserves_utf8_and_line_breaks(){
+        let value=json!("first line\nдруга лінія\n");
+        assert_eq!(mcp_tool_text("remote_read",&value),"first line\nдруга лінія\n");
+        assert_eq!(mcp_tool_text("remote_list",&json!([{"name":"data"}])),r#"[{"name":"data"}]"#);
     }
     #[test]
     fn mcp_has_expected_tools_and_no_secrets_in_schema(){
