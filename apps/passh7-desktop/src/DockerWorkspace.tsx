@@ -1,131 +1,370 @@
-import {useEffect,useMemo,useState} from "react";
-import {listDockerCatalog,type DockerCatalogKind} from "./backend";
-import {Clipboard,Container,Download,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
+import {useEffect,useMemo,useRef,useState} from "react";
+import {WorkspaceHeader} from "./WorkspaceChrome";
+import {listDockerCatalog,listComposeProjectContainers,saveVisibleDockerLogs,type DockerCatalogKind,type DockerRuntimeStats,type DockerDetails} from "./backend";
+import PaneResizeHandle from "./PaneResizeHandle";
+import {defaultPaneSizes,type PaneSizes} from "./preferences";
+import {ArrowDownToLine,Clipboard,Container,Cpu,Download,HardDrive,Layers,Maximize2,Minimize2,Network,Play,RefreshCw,Search,Square,TerminalSquare} from "lucide-react";
 
 export type ContainerRow={ID?:string;Names?:string;Image?:string;State?:string;Status?:string;Ports?:string};
 type Logs={session:string;containerId:string;containerName:string;text:string}|null;
-type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|null;
+type Props={host:string;session:string;connected:boolean;items:ContainerRow[]|null;stats:DockerRuntimeStats[]|null;statsError:string;
+  details:{session:string;containerId:string;data:DockerDetails}|null;
+  detailsError:{session:string;containerId:string;message:string}|null;
+  onInspect:(containerId:string)=>void;
+  paneSizes:PaneSizes;onPaneSize:(key:keyof PaneSizes,value:number)=>void;
   loading:boolean;error:string;actionStatus:string|null;actionBusy:string;
   logs:Logs;logsBusy:boolean;logsError:string;tail:number;follow:boolean;
   liveStatus:"off"|"connecting"|"streaming"|"closed"|"error";
   onFollow:(value:boolean)=>void;onTail:(value:number)=>void;
+  autoRefresh:boolean;onAutoRefresh:(value:boolean)=>void;
   onRefresh:()=>void;onAction:(id:string,name:string,action:"start"|"stop"|"restart")=>void;
-  onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;};
+  onLogs:(id:string,name:string)=>void;onCloseLogs:()=>void;
+  onShell:(id:string,name:string)=>void;};
+// Surface the likely failure stage instead of leaving users with raw SSH
+// stderr and an apparently empty Docker screen. No commands are executed by
+// this diagnostic; the target user's permissions and daemon stay unchanged.
+const dockerRecoveryAdvice=(message:string):string=>{
+  if(/permission denied|access.denied|got permission denied|unauthorized|forbidden/i.test(message))
+    return "Docker denied this SSH account. Verify its Docker permissions on the remote host, then reconnect SSH to refresh group membership.";
+  if(/not recognized|command not found|docker: not found|term 'docker'|executable file not found/i.test(message))
+    return "The remote SSH shell cannot find Docker CLI. Run docker --version in that same SSH terminal; install Docker or repair that account's PATH.";
+  if(/cannot connect to the docker daemon|daemon is not running|docker_engine|dockerdesktop|docker.sock|error during connect/i.test(message))
+    return "Docker CLI is present but its daemon/socket is unavailable. Start the remote Docker service (Linux) or Docker Desktop/Engine (Windows) and confirm this SSH user can reach it.";
+  if(/--format json|unexpected inspect response|invalid (inspect )?json|template parsing|unclosed action/i.test(message))
+    return "The remote Docker CLI returned unsupported or malformed JSON. Check docker version on the SSH host and upgrade an outdated CLI if needed.";
+  if(/ssh session|ssh channel|connection closed|disconnected/i.test(message))
+    return "The authenticated SSH transport was interrupted. Reconnect this host, then retry Docker inventory or logs.";
+  return "Verify docker ps -a in this same SSH terminal. PaSSH7 uses that account's Docker permissions; no local or other host's Docker context is used.";
+};
 const isRunning=(item:ContainerRow)=>(item.State||"").toLowerCase()==="running";
+const containerStat=(item:ContainerRow,stats:DockerRuntimeStats[]|null)=>{
+  if(!stats)return null;
+  const id=item.ID||"";
+  return stats.find(entry=>(id&&entry.ID&&(entry.ID.startsWith(id)||id.startsWith(entry.ID)))||
+    (entry.Name&&entry.Name===item.Names))||null;
+};
+const parseMemoryBytes=(text:string)=>{
+  const match=text.split("/")[0]?.trim().match(/^([\d.]+)\s*([KMGT]?i?B|B)$/i);
+  if(!match)return 0;
+  const n=Number(match[1]);
+  const unit=match[2].toLowerCase();
+  const powers:{[name:string]:number}={b:1,kb:1000,mb:1000**2,gb:1000**3,tb:1000**4,kib:1024,mib:1024**2,gib:1024**3,tib:1024**4};
+  return Number.isFinite(n)?n*(powers[unit]||0):0;
+};
+const readableMemory=(bytes:number)=>bytes>=1024**3?(bytes/1024**3).toFixed(2)+" GiB":(bytes/1024**2).toFixed(1)+" MiB";
 export default function DockerWorkspace(p:Props){
   const [search,setSearch]=useState("");
-  const [tab,setTab]=useState<"containers"|DockerCatalogKind>("containers");
+  const [savingLogs,setSavingLogs]=useState(false);
+  const [saveLogsNotice,setSaveLogsNotice]=useState("");
+  const [saveLogsError,setSaveLogsError]=useState("");
+  const saveTarget=useRef({session:p.session,containerId:p.logs?.containerId});
+  saveTarget.current={session:p.session,containerId:p.logs?.containerId};
+  useEffect(()=>{setSaveLogsNotice("");setSaveLogsError("")},[p.session,p.logs?.containerId]);
+  const [tab,setTab]=useState<"containers"|"logs"|DockerCatalogKind>("containers");
   const [catalog,setCatalog]=useState<{session:string;kind:DockerCatalogKind;rows:Record<string,string>[]} |null>(null);
   const [catalogBusy,setCatalogBusy]=useState(false);
   const [catalogError,setCatalogError]=useState("");
   const [catalogSearch,setCatalogSearch]=useState("");
+  const [composeSelected,setComposeSelected]=useState("");
+  const [composeMembers,setComposeMembers]=useState<{session:string;project:string;rows:Record<string,string>[]} |null>(null);
+  const [composeBusy,setComposeBusy]=useState(false);
+  const [composeError,setComposeError]=useState("");
+  // Results belong to a specific SSH session AND tab. A response arriving
+  // after host/tab navigation must never clear or overwrite the new view.
+  const catalogRequest=useRef(0);
+  const catalogContext=useRef({session:p.session,tab});
+  catalogContext.current={session:p.session,tab};
   const loadCatalog=async(kind:DockerCatalogKind)=>{
     if(!p.connected||!p.session)return;
+    const session=p.session, request=++catalogRequest.current;
     setCatalogBusy(true);setCatalogError("");
     try{
-      const rows=await listDockerCatalog(p.session,kind);
-      setCatalog({session:p.session,kind,rows});
-    }catch(error){setCatalogError("Could not list Docker "+kind+": "+String(error))}
-    finally{setCatalogBusy(false)}
+      const rows=await listDockerCatalog(session,kind);
+      if(request===catalogRequest.current&&catalogContext.current.session===session&&catalogContext.current.tab===kind)
+        setCatalog({session,kind,rows});
+    }catch(error){
+      if(request===catalogRequest.current&&catalogContext.current.session===session&&catalogContext.current.tab===kind)
+        setCatalogError("Could not list Docker "+kind+": "+String(error));
+    }finally{
+      if(request===catalogRequest.current)setCatalogBusy(false);
+    }
   };
   useEffect(()=>{
-    if(tab==="containers"||!p.connected)return;
+    catalogRequest.current++;
+    setCatalogBusy(false);setCatalogError("");setComposeError("");
+    // Keep only the selected session's cached record; never show stale tabs.
+    if(tab==="containers"||tab==="logs"||!p.connected)return;
     if(catalog?.session===p.session&&catalog.kind===tab)return;
     void loadCatalog(tab);
+    // Requests are invalidated when this tab/session is left.
+    return ()=>{catalogRequest.current++};
   },[tab,p.session,p.connected]);
   const displayCatalog=catalog?.session===p.session&&catalog.kind===tab?catalog.rows:null;
+  const activeComposeProject=tab==="compose"&&displayCatalog?.some(row=>row.Name===composeSelected)
+    ?composeSelected:"";
+  useEffect(()=>{
+    if(!p.connected||!p.session||!activeComposeProject)return;
+    let cancelled=false;
+    setComposeBusy(true);setComposeError("");setComposeMembers(null);
+    void listComposeProjectContainers(p.session,activeComposeProject).then(rows=>{
+      if(!cancelled)setComposeMembers({session:p.session,project:activeComposeProject,rows});
+    }).catch(error=>{if(!cancelled)setComposeError(String(error))})
+      .finally(()=>{if(!cancelled)setComposeBusy(false)});
+    return()=>{cancelled=true};
+  },[p.connected,p.session,activeComposeProject]);
   const filteredCatalog=(displayCatalog||[]).filter(row=>
     Object.values(row).join(" ").toLocaleLowerCase().includes(catalogSearch.toLocaleLowerCase())
   );
   const catalogColumns:Record<DockerCatalogKind,string[]>={
     images:["Repository","Tag","ID","Size","CreatedSince"],
     volumes:["Name","Driver","Scope"],
-    networks:["Name","ID","Driver","Scope"]
+    networks:["Name","ID","Driver","Scope"],
+    compose:["Name","Status","ConfigFiles"]
   };
 
   const [selected,setSelected]=useState("");
+  const [logTarget,setLogTarget]=useState<{session:string;id:string;name:string}|null>(null);
+  const [pausedSnapshot,setPausedSnapshot]=useState<{session:string;id:string;text:string}|null>(null);
+  useEffect(()=>{
+    setSelected("");setComposeSelected("");setComposeMembers(null);setComposeBusy(false);
+    setComposeError("");setCatalog(null);setCatalogBusy(false);setCatalogError("");
+    setLogTarget(null);setPausedSnapshot(null);setAutoScroll(true);
+  },[p.session]);
   const [filter,setFilter]=useState<"all"|"running"|"stopped">("all");
+  const [sortBy,setSortBy]=useState<"name"|"cpu"|"memory">("name");
+  const [descending,setDescending]=useState(false);
+  const sortWith=(kind:typeof sortBy)=>{
+    if(kind===sortBy)setDescending(previous=>!previous);
+    else {setSortBy(kind);setDescending(kind!=="name");}
+  };
   const [logsSearch,setLogsSearch]=useState("");
   const [wrap,setWrap]=useState(false);
   const [level,setLevel]=useState<"all"|"error"|"warn">("all");
+  const [logsFullscreen,setLogsFullscreen]=useState(false);
+  const [autoScroll,setAutoScroll]=useState(true);
+  const logBodyRef=useRef<HTMLDivElement>(null);
+  const selectLogContainer=(id:string,name:string)=>{
+    setTab("logs");
+    setLogTarget({session:p.session,id,name});
+    setPausedSnapshot(null);
+    setAutoScroll(true);
+    p.onLogs(id,name);
+  };
+  const [inspectorWidth,setInspectorWidth]=useState(p.paneSizes.dockerInspector);
+  const [logsHeight,setLogsHeight]=useState(p.paneSizes.dockerLogs);
+  useEffect(()=>setInspectorWidth(p.paneSizes.dockerInspector),[p.paneSizes.dockerInspector]);
+  useEffect(()=>setLogsHeight(p.paneSizes.dockerLogs),[p.paneSizes.dockerLogs]);
+  const [inspectorTab,setInspectorTab]=useState<"details"|"mounts"|"network">("details");
   const running=(p.items||[]).filter(isRunning).length;
   const stopped=(p.items||[]).length-running;
   const images=new Set((p.items||[]).map(c=>c.Image).filter(Boolean)).size;
+  const totalCpu=p.stats?.reduce((sum,item)=>sum+(Number.parseFloat(item.CPUPerc||"")||0),0)??null;
+  const totalMemory=p.stats?.reduce((sum,item)=>sum+parseMemoryBytes(item.MemUsage||""),0)??null;
   const visible=useMemo(()=>(p.items||[]).filter(row=>
     (filter==="all"||(filter==="running"?isRunning(row):!isRunning(row))) &&
     (row.Names+" "+row.ID+" "+row.Image+" "+row.Status).toLowerCase().includes(search.toLowerCase())
-  ),[p.items,filter,search]);
+  ).sort((a,b)=>{
+    let comparison=0;
+    if(sortBy==="name")comparison=(a.Names||a.ID||"").localeCompare(b.Names||b.ID||"");
+    else if(sortBy==="cpu")comparison=(Number.parseFloat(containerStat(a,p.stats)?.CPUPerc||"")||0)-(Number.parseFloat(containerStat(b,p.stats)?.CPUPerc||"")||0);
+    else comparison=parseMemoryBytes(containerStat(a,p.stats)?.MemUsage||"")-parseMemoryBytes(containerStat(b,p.stats)?.MemUsage||"");
+    return descending?-comparison:comparison;
+  }),[p.items,p.stats,filter,search,sortBy,descending]);
   const chosen=p.items?.find(x=>x.ID===selected)||visible[0];
-  const logLines=useMemo(()=>(p.logs?.session===p.session?p.logs.text:"").split(/\r?\n/)
+  const inspected=p.details?.session===p.session&&p.details.containerId===chosen?.ID?p.details.data:null;
+  const inspectError=p.detailsError?.session===p.session&&p.detailsError.containerId===chosen?.ID?p.detailsError.message:"";
+  useEffect(()=>{
+    if(tab==="containers"&&p.connected&&p.session&&chosen?.ID)p.onInspect(chosen.ID);
+  },[tab,p.session,p.connected,chosen?.ID]);
+  const activeLog=p.logs?.session===p.session?p.logs:null;
+  const displayedTarget=logTarget?.session===p.session?logTarget:
+    activeLog?{session:p.session,id:activeLog.containerId,name:activeLog.containerName}:null;
+  const paused=!!pausedSnapshot&&pausedSnapshot.session===p.session&&
+    pausedSnapshot.id===displayedTarget?.id;
+  const logText=paused&&pausedSnapshot?pausedSnapshot.text:(activeLog&&activeLog.containerId===displayedTarget?.id?activeLog.text:"");
+  const logLines=useMemo(()=>logText.split(/\r?\n/)
     .filter(Boolean).filter(line=>line.toLowerCase().includes(logsSearch.toLowerCase()))
     .filter(line=>level==="all"||(level==="error"?/\berror\b|\bfatal\b|\bpanic\b/i.test(line):/\bwarn(ing)?\b/i.test(line)))
-    .slice(-2000),[p.logs,p.session,logsSearch,level]);
+    .slice(-2000),[logText,logsSearch,level]);
+  const togglePause=()=>{
+    if(paused){setPausedSnapshot(null);setAutoScroll(true);return;}
+    if(!displayedTarget||!activeLog||activeLog.containerId!==displayedTarget.id)return;
+    setPausedSnapshot({session:p.session,id:activeLog.containerId,text:activeLog.text});
+    setAutoScroll(false);
+  };
+  useEffect(()=>{
+    if(tab==="logs"&&autoScroll&&logBodyRef.current)
+      logBodyRef.current.scrollTop=logBodyRef.current.scrollHeight;
+  },[tab,autoScroll,logLines]);
+  const saveCurrentLogs=async()=>{
+    const current=p.logs;
+    if(!current||current.session!==p.session||!logLines.length||savingLogs)return;
+    const session=current.session,containerId=current.containerId;
+    const visible=logLines.join("\n");
+    setSavingLogs(true);setSaveLogsNotice("");setSaveLogsError("");
+    try{
+      const saved=await saveVisibleDockerLogs(current.containerName,visible);
+      if(saveTarget.current.session===session&&saveTarget.current.containerId===containerId)
+        setSaveLogsNotice(saved||"Save cancelled. No file was changed.");
+    }catch(error){
+      if(saveTarget.current.session===session&&saveTarget.current.containerId===containerId)
+        setSaveLogsError("Could not save Docker logs: "+String(error));
+    }finally{setSavingLogs(false)}
+  };
   return <div className="widePage dockerPage">
-    <div className="widePageTitle"><Container size={26}/><div><h1>Docker</h1><p>Manage remote containers and inspect their logs · {p.host}</p></div>
-      <span className={p.connected?"workspaceConnected":"workspaceOffline"}>{p.connected?"● Connected":"○ Disconnected"}</span></div>
+    <WorkspaceHeader icon={Container} title="Docker"
+      description={"Inspect and manage remote containers, Compose projects and logs · "+p.host}
+      status={p.connected?"connected":"offline"} statusText={p.connected?"SSH connected":"SSH disconnected"}/>
     <div className="dockerMetrics">
-      <div><small>Total containers</small><strong>{p.items?.length??"—"}</strong></div>
-      <div><small>Running</small><strong className="textGood">{p.items?running:"—"}</strong></div>
-      <div><small>Stopped / other</small><strong>{p.items?stopped:"—"}</strong></div>
-      <div><small>Images in use</small><strong>{p.items?images:"—"}</strong></div>
+      <div><small><Container size={17}/> Containers</small><strong>{p.items?.length??"—"}</strong><span>Total on selected SSH host</span></div>
+      <div><small><Play size={17}/> Running</small><strong className="textGood">{p.items?running:"—"}</strong><span>{p.items?.length?Math.round(100*running/p.items.length)+"% running":"No inventory"}</span></div>
+      <div><small><Square size={17}/> Stopped</small><strong>{p.items?stopped:"—"}</strong><span>{p.items?.length?Math.round(100*stopped/p.items.length)+"% stopped":"No inventory"}</span></div>
+      <div><small><Layers size={17}/> Images in use</small><strong>{p.items?images:"—"}</strong><span>Unique container image names</span></div>
+      <div title="One read-only docker stats sample. CPU percentages are summed across running containers, not normalized to total host CPU."><small><Cpu size={17}/> Container CPU</small><strong>{totalCpu===null?"—":totalCpu.toFixed(1)+"%"}</strong><span>{p.statsError?"Stats unavailable":p.stats?"Sum of container CPU":"Sampling remote Docker…"}</span></div>
+      <div title="One read-only docker stats sample. Memory sums the container usage values, not overall server RAM."><small><HardDrive size={17}/> Container memory</small><strong>{totalMemory===null?"—":readableMemory(totalMemory)}</strong><span>{p.statsError?"Stats unavailable":p.stats?"Reported container usage":"Sampling remote Docker…"}</span></div>
     </div>
-    <div className="dockerResourceTabs" role="tablist" aria-label="Docker resources">{(["containers","images","volumes","networks"] as const).map(kind=><button type="button" role="tab" aria-selected={tab===kind} className={tab===kind?"active":""} key={kind} onClick={()=>setTab(kind)}>{kind[0].toUpperCase()+kind.slice(1)} {tab===kind&&tab!=="containers"&&displayCatalog?"("+displayCatalog.length+")":""}</button>)}</div>
-    {tab==="containers"?<><div className="dockerWorkspaceGrid"><section className="dockerContainersPane">
+    <div className="dockerResourceTabs" role="tablist" aria-label="Docker resources">{(["containers","logs","images","volumes","networks","compose"] as const).map(kind=><button type="button" role="tab" aria-selected={tab===kind} className={tab===kind?"active":""} key={kind} onClick={()=>{setTab(kind);if(kind==="logs"&&!displayedTarget&&chosen?.ID)selectLogContainer(chosen.ID,chosen.Names||chosen.ID)}}>{kind==="logs"?"Logs":kind[0].toUpperCase()+kind.slice(1)} {tab===kind&&kind!=="containers"&&kind!=="logs"&&displayCatalog?"("+displayCatalog.length+")":""}</button>)}</div>
+    {tab==="containers"&&<div className="dockerWorkspaceGrid resizableDockerGrid"
+      style={{gridTemplateColumns:`minmax(250px,1fr) 7px minmax(265px,${inspectorWidth}px)`}}><section className="dockerContainersPane">
       <div className="dockerToolbar"><div className="filesSearch"><Search size={15}/><input placeholder="Search containers…" value={search} onChange={e=>setSearch(e.target.value)} aria-label="Search containers"/></div>
         <select aria-label="Container state filter" value={filter} onChange={e=>setFilter(e.target.value as typeof filter)}><option value="all">All containers</option><option value="running">Running</option><option value="stopped">Stopped / other</option></select>
+        <label className="compactToggle dockerAutoRefresh" title="Refresh container inventory automatically every 15 seconds."><input type="checkbox" checked={p.autoRefresh} onChange={e=>p.onAutoRefresh(e.target.checked)}/> Auto-refresh</label>
         <button onClick={p.onRefresh} disabled={!p.connected||p.loading}><RefreshCw size={15}/>{p.loading?" Loading…":" Refresh"}</button>
       </div>
-      {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
+      {p.error&&<div className="workspaceError dockerActionableError" role="alert">
+        <strong>Docker inventory unavailable</strong><span>{p.error}</span>
+        <small>{dockerRecoveryAdvice(p.error)}</small>
+        <button type="button" disabled={!p.connected||p.loading} onClick={p.onRefresh}>Retry inventory</button>
+      </div>}
       {p.actionStatus&&<div className="workspaceNotice" role="status">{p.actionStatus}</div>}
-      <div className="dockerTableScroll"><table className="workspaceTable"><thead><tr><th>Name</th><th>Status</th><th>Image</th><th>Ports</th><th>Uptime / detail</th></tr></thead><tbody>
-      {visible.map(row=><tr key={row.ID} className={row.ID===chosen?.ID?"selected":""} onClick={()=>setSelected(row.ID||"")}>
-        <td className="dockerContainerName"><Container size={15}/> {row.Names||row.ID?.slice(0,12)||"Unknown"}</td>
-        <td><span className={"dockerStatus "+(isRunning(row)?"running":"stopped")}>{isRunning(row)?"● Running":"● "+(row.State||"Other")}</span></td>
-        <td title={row.Image}>{row.Image||"—"}</td><td title={row.Ports}>{row.Ports||"—"}</td><td>{row.Status||"—"}</td>
-      </tr>)}</tbody></table>
+      <div className="dockerTableScroll"><table className="workspaceTable"><thead><tr>
+        <th><button className="dockerSort" aria-label="Sort containers by name" onClick={()=>sortWith("name")}>Name {sortBy==="name"?(descending?"↓":"↑"):""}</button></th>
+        <th>Status</th><th>Image</th><th>Ports</th>
+        <th><button className="dockerSort" aria-label="Sort containers by CPU usage" onClick={()=>sortWith("cpu")}>CPU {sortBy==="cpu"?(descending?"↓":"↑"):""}</button></th>
+        <th><button className="dockerSort" aria-label="Sort containers by memory usage" onClick={()=>sortWith("memory")}>Memory {sortBy==="memory"?(descending?"↓":"↑"):""}</button></th>
+        <th>Uptime / detail</th></tr></thead><tbody>
+      {visible.map(row=>{
+        const stat=containerStat(row,p.stats);
+        return <tr key={row.ID} tabIndex={0} className={row.ID===chosen?.ID?"selected":""}
+          onClick={()=>setSelected(row.ID||"")}
+          onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setSelected(row.ID||"")}}}>
+          <td className="dockerContainerName"><Container size={15}/> {row.Names||row.ID?.slice(0,12)||"Unknown"}</td>
+          <td><span className={"dockerStatus "+(isRunning(row)?"running":"stopped")}>{isRunning(row)?"● Running":"● "+(row.State||"Other")}</span></td>
+          <td title={row.Image}>{row.Image||"—"}</td><td title={row.Ports}>{row.Ports||"—"}</td>
+          <td className="dockerStatCell">{stat?.CPUPerc||"—"}</td>
+          <td className="dockerStatCell" title={stat?.MemUsage||""}>{stat?.MemUsage?.split("/")[0]?.trim()||"—"}</td>
+          <td>{row.Status||"—"}</td>
+        </tr>;
+      })}</tbody></table>
       {p.connected&&p.items&&!visible.length&&<div className="workspaceEmpty">No matching containers. Change the filter or search.</div>}
       {!p.connected&&<div className="workspaceEmpty">Connect to {p.host} to inspect remote Docker.</div>}
       {p.connected&&!p.items&&<div className="workspaceEmpty">Click Refresh to load containers from the remote host. Your SSH user needs Docker permissions.</div>}
       </div></section>
+      <PaneResizeHandle label="Docker container inspector width" direction="vertical"
+        value={inspectorWidth} min={265} max={520} invert defaultValue={defaultPaneSizes.dockerInspector}
+        onPreview={setInspectorWidth} onCommit={n=>{setInspectorWidth(n);p.onPaneSize("dockerInspector",n)}}/>
       <aside className="dockerInspector"><div className="paneTitle">CONTAINER DETAILS</div>
         {chosen&&chosen.ID?<><div className="inspectorFile"><Container size={30}/><strong>{chosen.Names||chosen.ID.slice(0,12)}</strong><span className={"dockerStatus "+(isRunning(chosen)?"running":"stopped")}>{chosen.Status||chosen.State}</span></div>
-          <dl><dt>ID</dt><dd className="filePath">{chosen.ID}</dd><dt>Image</dt><dd>{chosen.Image||"Unknown"}</dd><dt>Ports</dt><dd>{chosen.Ports||"None"}</dd><dt>State</dt><dd>{chosen.State||"Unknown"}</dd><dt>Status</dt><dd>{chosen.Status||"Unknown"}</dd></dl>
-          <div className="inspectorActions"><button disabled={p.logsBusy} onClick={()=>p.onLogs(chosen.ID!,chosen.Names||chosen.ID!)}><TerminalSquare size={14}/> {p.logsBusy?"Loading…":"View logs"}</button>
-            {isRunning(chosen)?<><button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"restart")}><RefreshCw size={14}/> Restart</button><button className="dangerButton" disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"stop")}><Square size={14}/> Stop</button></>:<button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"start")}><Play size={14}/> Start</button>}
+          <div className="inspectorActions">
+            {isRunning(chosen)?<><button className="dangerButton" disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"stop")}><Square size={14}/> Stop</button>
+              <button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"restart")}><RefreshCw size={14}/> Restart</button></>:<button disabled={!!p.actionBusy} onClick={()=>p.onAction(chosen.ID!,chosen.Names||chosen.ID!,"start")}><Play size={14}/> Start</button>}
+            <button disabled={p.logsBusy} onClick={()=>selectLogContainer(chosen.ID!,chosen.Names||chosen.ID!)}><TerminalSquare size={14}/> {p.logsBusy?"Loading…":"View logs"}</button>
+            {isRunning(chosen)&&<button onClick={()=>p.onShell(chosen.ID!,chosen.Names||chosen.ID!)}><TerminalSquare size={14}/> Open shell</button>}
+            <button onClick={()=>void navigator.clipboard.writeText("docker inspect "+chosen.ID)}><Clipboard size={14}/> Copy command</button>
           </div>
-          <p className="prefInfo">Actions run using your remote SSH account's Docker privileges. Destructive actions require confirmation.</p>
+          <div className="dockerInspectTabs" role="tablist" aria-label="Container details tabs">
+            {(["details","mounts","network"] as const).map(kind=><button key={kind} role="tab" aria-selected={inspectorTab===kind}
+              className={inspectorTab===kind?"active":""} onClick={()=>setInspectorTab(kind)}>{kind==="details"?"Details":kind==="mounts"?"Volumes":"Network"}</button>)}
+          </div>
+          {inspectError&&<div className="workspaceError" role="alert">Could not inspect container: {inspectError}
+            <button onClick={()=>p.onInspect(chosen.ID!)}>Retry</button></div>}
+          {inspectorTab==="details"&&<dl><dt>Container ID</dt><dd className="filePath">{chosen.ID}</dd>
+            <dt>Image</dt><dd>{inspected?.image||chosen.Image||"Unknown"}</dd>
+            <dt>Status</dt><dd><span className={"dockerStatus "+(isRunning(chosen)?"running":"stopped")}>{chosen.State||"Unknown"}</span></dd>
+            <dt>Created</dt><dd>{inspected?.created?new Date(inspected.created).toLocaleString():"—"}</dd>
+            <dt>Started</dt><dd>{inspected?.startedAt&&!inspected.startedAt.startsWith("0001-")?new Date(inspected.startedAt).toLocaleString():"—"}</dd>
+            <dt>Restart policy</dt><dd>{inspected?.restartPolicy||"—"}</dd>
+            <dt>Ports</dt><dd>{chosen.Ports||"None published"}</dd>
+            <dt>Mounts</dt><dd>{inspected?inspected.mounts.length:"—"}</dd>
+            <dt>Networks</dt><dd>{inspected?inspected.networks.join(", ")||"None":"—"}</dd></dl>}
+          {inspectorTab==="mounts"&&<div className="dockerMounts">{inspected?.mounts.map((mount,index)=><div key={index}>
+            <strong>{mount.destination||"Unknown target"}</strong><small>{mount.source||"Unknown source"}</small>
+            <span>{mount.type||"Mount"} · {mount.rw?"read/write":"read-only"}</span>
+          </div>)}{inspected?.mounts.length===0&&<p>No volumes or bind mounts reported.</p>}{!inspected&&<p>Loading Docker mount details…</p>}</div>}
+          {inspectorTab==="network"&&<div className="dockerNetworks">
+            {inspected?.networks.map(name=><div key={name}><Network size={14}/>{name}</div>)}
+            {inspected?.networks.length===0&&<p>No networks reported.</p>}{!inspected&&<p>Loading Docker network details…</p>}
+          </div>}
+          <p className="prefInfo">Read-only inspection intentionally omits environment variable values, labels and full command arguments, which may contain secrets.</p>
         </>:<div className="workspaceEmpty">Select a container to inspect its details.</div>}
       </aside>
-    </div>
-    <section className="dockerLogViewer"><div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
-      <span>{p.logs?.session===p.session?p.logs.containerName:"Select a container"}</span>
+    </div>}
+    {tab==="logs"&&<>
+    <div className="dockerLogHeading"><div><strong><TerminalSquare size={19}/> Dedicated container log viewer</strong><p>Choose a container, filter output, or follow new lines over the existing SSH connection.</p></div><button onClick={()=>setTab("containers")}><Container size={15}/> Back to containers</button></div>
+    <PaneResizeHandle label="Container logs panel height" direction="horizontal" value={logsHeight}
+      min={240} max={620} invert defaultValue={defaultPaneSizes.dockerLogs}
+      onPreview={setLogsHeight} onCommit={n=>{setLogsHeight(n);p.onPaneSize("dockerLogs",n)}}/>
+    <section className={"dockerLogViewer dockerLogsWorkspace "+(logsFullscreen?"dockerLogsFullscreen":"")} style={{height:logsFullscreen?undefined:logsHeight}}>
+      <div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
+      <select aria-label="Container for log viewer" value={displayedTarget?.id||""} onChange={e=>{const row=p.items?.find(item=>item.ID===e.target.value);if(row?.ID)selectLogContainer(row.ID,row.Names||row.ID)}} disabled={!p.connected||p.logsBusy}>
+        <option value="">Select container…</option>
+        {displayedTarget&&!p.items?.some(item=>item.ID===displayedTarget.id)&&
+          <option value={displayedTarget.id}>{displayedTarget.name} · last selected</option>}
+        {(p.items||[]).map(item=>item.ID?<option key={item.ID} value={item.ID}>{item.Names||item.ID.slice(0,12)}</option>:null)}
+      </select>
       <label className="filesSearch"><Search size={14}/><input value={logsSearch} onChange={e=>setLogsSearch(e.target.value)} placeholder="Find in logs" aria-label="Search Docker logs"/></label>
       <select value={level} onChange={e=>setLevel(e.target.value as typeof level)} aria-label="Log severity"><option value="all">All levels</option><option value="warn">Warnings</option><option value="error">Errors</option></select>
       <select value={p.tail} onChange={e=>p.onTail(Number(e.target.value))} aria-label="Recent log lines">{[50,100,200,500,1000].map(n=><option value={n} key={n}>{n} lines</option>)}</select>
       <label className="compactToggle" title="Open an SSH log stream. Stop following automatically on navigation or disconnect."><input type="checkbox" checked={p.follow} onChange={e=>p.onFollow(e.target.checked)}/> Follow live</label>
       <label className="compactToggle"><input type="checkbox" checked={wrap} onChange={e=>setWrap(e.target.checked)}/> Wrap</label>
-      <button title="Reload selected container logs" disabled={!p.logs||p.logsBusy} onClick={()=>{if(p.logs)p.onLogs(p.logs.containerId,p.logs.containerName)}}><RefreshCw size={15}/></button>
+      <button title="Reload selected container logs" disabled={!displayedTarget||p.logsBusy}
+        onClick={()=>{if(displayedTarget)selectLogContainer(displayedTarget.id,displayedTarget.name)}}><RefreshCw size={15}/></button>
       <button title="Copy visible logs" disabled={!logLines.length} onClick={()=>navigator.clipboard.writeText(logLines.join("\n"))}><Clipboard size={15}/></button>
-      <button title="Close log viewer" disabled={!p.logs} onClick={p.onCloseLogs}>Clear</button>
-      <button title="Save recent logs to a local text file" disabled={!logLines.length} onClick={()=>{
-        const blob=new Blob([logLines.join("\n")],{type:"text/plain;charset=utf-8"});
-        const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=(p.logs?.containerName||"docker")+"-logs.txt";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-      }}><Download size={15}/></button>
-    </div>{p.logsError&&<div className="workspaceError" role="alert">{p.logsError} <button type="button" disabled={p.logsBusy||!chosen?.ID} onClick={()=>{if(chosen?.ID)p.onLogs(chosen.ID,chosen.Names||chosen.ID)}}>Retry logs</button></div>}<div className={"dockerLogsBody "+(wrap?"wrapped":"")}>
-      {p.logs?.session===p.session?<>{p.logsBusy&&<div className="logsLoading">Refreshing latest Docker logs…</div>}
+      <button title={paused?"Resume displaying new log lines":"Freeze visible lines while the SSH log stream keeps running"}
+        aria-pressed={paused} disabled={!paused&&(!activeLog||activeLog.containerId!==displayedTarget?.id)}
+        onClick={togglePause}>{paused?"Resume view":"Pause view"}</button>
+      <button title="Jump to latest logs" aria-label="Jump to latest logs" aria-pressed={autoScroll&&!paused}
+        onClick={()=>{setPausedSnapshot(null);setAutoScroll(true);
+          if(logBodyRef.current)logBodyRef.current.scrollTop=logBodyRef.current.scrollHeight}}><ArrowDownToLine size={15}/> Latest</button>
+      <button title="Clear selected container logs" disabled={!displayedTarget&&!activeLog}
+        onClick={()=>{setLogTarget(null);setPausedSnapshot(null);setAutoScroll(true);p.onCloseLogs()}}>Clear</button>
+      <button title={logsFullscreen?"Exit full-screen logs":"Expand logs to full screen"} aria-label={logsFullscreen?"Exit full-screen logs":"Expand logs to full screen"} onClick={()=>setLogsFullscreen(value=>!value)}>{logsFullscreen?<Minimize2 size={15}/>:<Maximize2 size={15}/>}</button>
+      <button title="Save visible filtered logs using the native Save As dialog (never overwrite existing files)" aria-label="Save visible logs" disabled={!logLines.length||savingLogs}
+        onClick={()=>void saveCurrentLogs()}><Download size={15}/>{savingLogs?"Saving…":"Save As"}</button>
+    </div>{saveLogsNotice&&<p className="workspaceNotice" role="status">{saveLogsNotice}</p>}
+      {saveLogsError&&<div className="workspaceError" role="alert">{saveLogsError}</div>}
+      {p.logsError&&<div className="workspaceError dockerActionableError" role="alert">
+        <strong>Docker logs unavailable</strong><span>{p.logsError}</span>
+        <small>{dockerRecoveryAdvice(p.logsError)}</small>
+        <button type="button" disabled={p.logsBusy||!(displayedTarget?.id||chosen?.ID)}
+          onClick={()=>{if(displayedTarget)selectLogContainer(displayedTarget.id,displayedTarget.name);
+            else if(chosen?.ID)selectLogContainer(chosen.ID,chosen.Names||chosen.ID)}}>Retry logs</button>
+      </div>}<div className={"dockerLogsBody "+(wrap?"wrapped":"")} ref={logBodyRef} onScroll={event=>{const target=event.currentTarget;setAutoScroll(target.scrollHeight-target.scrollTop-target.clientHeight<90)}}>
+      {(activeLog?.containerId===displayedTarget?.id||paused)?<>{p.logsBusy&&!paused&&<div className="logsLoading">Refreshing latest Docker logs…</div>}
         {logLines.map((line,index)=><div className="dockerLogLine" key={index}><span>{index+1}</span><code className={/\berror\b|fatal|panic/i.test(line)?"logError":/\bwarn/i.test(line)?"logWarn":""}>{line}</code></div>)}
-        {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}
-      </>:<div className="workspaceEmpty">Select a container and click View logs. Log output is fetched through a dedicated SSH exec channel.</div>}
-    </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
-    </section></>:<section className="dockerCatalogWorkspace">
+        {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">{logsSearch||level!=="all"?"No log lines match the selected filters. Clear search or switch to All levels.":"Docker returned no recent stdout/stderr logs. This container may not have emitted anything yet, or may write logs to files instead of stdout. Try Follow live."}</div>}
+      </>:<div className="workspaceEmpty">{p.logsBusy
+        ?"Reading recent container logs over your SSH session…"
+        :p.logsError?"Log retrieval failed. Check the actionable error above and retry."
+        :"Select a container above to view stdout/stderr logs through SSH."}</div>}
+    </div><div className="dockerLogFooter"><span>{paused?"Ⅱ Display paused"+(p.follow?" · Follow stays enabled":""):activeLog?.containerId===displayedTarget?.id?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines · {new Blob([logLines.join("\n")]).size.toLocaleString()} UTF-8 bytes</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
+    </section></>}
+    {tab!=="containers"&&tab!=="logs"&&<section className="dockerCatalogWorkspace">
       <div className="dockerToolbar">
         <div className="filesSearch"><Search size={15}/><input value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} placeholder={"Search "+tab+"…"} aria-label={"Search Docker "+tab}/></div>
         <button disabled={!p.connected||catalogBusy} onClick={()=>void loadCatalog(tab)}><RefreshCw size={15}/>{catalogBusy?" Loading…":" Refresh "+tab}</button>
       </div>
-      {catalogError&&<div className="workspaceError" role="alert">{catalogError}</div>}
+      {catalogError&&<div className="workspaceError dockerActionableError" role="alert">
+        <strong>Docker {tab} unavailable</strong><span>{catalogError}</span>
+        <small>{dockerRecoveryAdvice(catalogError)}</small>
+      </div>}
       <div className="dockerTableScroll">
       <table className="workspaceTable"><thead><tr>{catalogColumns[tab].map(name=><th key={name}>{name}</th>)}</tr></thead><tbody>
-        {filteredCatalog.map((row,index)=><tr key={(row.ID||row.Name||row.Repository||"")+index}>
+        {filteredCatalog.map((row,index)=><tr key={(row.ID||row.Name||row.Repository||"")+index}
+          className={tab==="compose"&&row.Name===activeComposeProject?"selected":""}
+          tabIndex={tab==="compose"?0:undefined}
+          onClick={tab==="compose"?()=>setComposeSelected(row.Name||""):undefined}
+          onKeyDown={tab==="compose"?e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setComposeSelected(row.Name||"")}}:undefined}>
           {catalogColumns[tab].map(key=><td key={key} title={row[key]||""}>{row[key]||"—"}</td>)}
         </tr>)}
       </tbody></table>
@@ -133,7 +372,21 @@ export default function DockerWorkspace(p:Props){
         displayCatalog&&filteredCatalog.length===0?<div className="workspaceEmpty">No matching {tab}.</div>:
         !displayCatalog&&!catalogBusy?<div className="workspaceEmpty">Select Refresh to load {tab}.</div>:null}
       </div>
-      <p className="prefInfo">Read-only {tab} inventory using the connected SSH account. No resource is modified by browsing.</p>
+      {tab==="compose"&&<section className="dockerComposeMembers">
+        <div className="dockerComposeMembersHeader">
+          <div><strong>Project containers</strong><small>{activeComposeProject||"Select a Compose project above"}</small></div>
+          <span>{composeBusy?"Loading…":composeMembers?.session===p.session&&composeMembers.project===activeComposeProject?composeMembers.rows.length+" containers":"Read-only"}</span>
+        </div>
+        {composeError&&<div className="workspaceError" role="alert">Cannot inspect Compose containers: {composeError}</div>}
+        {activeComposeProject&&composeMembers?.session===p.session&&composeMembers.project===activeComposeProject?
+          <div className="dockerTableScroll"><table className="workspaceTable"><thead><tr><th>Name</th><th>State</th><th>Image</th><th>Ports</th><th>Status</th></tr></thead>
+            <tbody>{composeMembers.rows.map((row,index)=><tr key={(row.ID||"")+index}><td>{row.Names||row.ID?.slice(0,12)||"—"}</td><td>{row.State||"—"}</td><td>{row.Image||"—"}</td><td>{row.Ports||"—"}</td><td>{row.Status||"—"}</td></tr>)}</tbody></table>
+            {!composeMembers.rows.length&&<div className="workspaceEmpty">No containers found with this Compose project label.</div>}
+          </div>:<div className="workspaceEmpty">{activeComposeProject?"Reading project containers through SSH…":"Select a project to list its containers without reading compose YAML or .env files."}</div>}
+      </section>}
+      <p className="prefInfo">{tab==="compose"
+        ?"Read-only Compose discovery and project-labelled containers. Compose up/down, YAML editing, and mutations are not enabled."
+        :"Read-only "+tab+" inventory using the connected SSH account. No resource is modified by browsing."}</p>
     </section>}
   </div>;
 }

@@ -1,0 +1,1446 @@
+/* PaSSH7 reference UI (2026-10-17)
+   Canonical reference: Settings / Remote Files / Docker dark navy desktop mocks.
+   This layer intentionally follows legacy styles.css until workspaces finish migration. */
+.shell{
+ --bg:#081420;--panel:#0d1b2c;--panel2:#112237;--surface:#182c45;
+ --border:#253a52;--fg:#ecf4ff;--muted:#94a9c5;
+ --accent:#3287ff;--accentSoft:#173d72;--positive:#43d78d;
+ background:radial-gradient(ellipse 70% 80% at 85% 5%,#112640 0%,transparent 70%),var(--bg);
+ color:var(--fg);font-family:Inter,"Segoe UI Variable","Segoe UI",system-ui,sans-serif;
+ font-size:13px;letter-spacing:.003em}
+.shell.light{--bg:#eaf0f9;--panel:#fff;--panel2:#f4f7fc;--surface:#e6effb;--border:#cddbec;--fg:#15263a;--muted:#586d83;--accent:#2369cf;--accentSoft:#dceafb;--positive:#157e5b}
+.shell button{transition:background-color .14s ease,color .14s ease,border-color .14s ease}
+.shell button:focus-visible,.shell [role=button]:focus-visible,.shell input:focus-visible,.shell select:focus-visible,.shell textarea:focus-visible{outline:2px solid #66afff;outline-offset:2px}
+.shell button:disabled{opacity:.47}
+.topbar{height:61px;min-height:61px;border-bottom:1px solid var(--border);background:#0b1827;gap:0;padding:0}
+.shell.light .topbar{background:var(--panel)}
+.topbar .brand{align-self:stretch;width:222px;min-width:222px;border-right:1px solid var(--border);padding:0 17px;gap:12px}
+.topbar .brand strong{font-size:16px;color:var(--fg);letter-spacing:-.3px}
+.topbar .brandicon{border:1px solid #547394;background:transparent;border-radius:7px;padding:6px;color:#dcecff}
+.topbar .alpha{display:none}
+.topHost{display:flex;align-items:center;gap:13px;padding:0 16px;min-width:0;flex:1}
+.topHost .hostSelectIcon{height:34px;width:34px;flex:none;border:1px solid #3d7bd2;border-radius:7px;background:#122c4d;color:#6eb7ff;display:grid;place-items:center}
+.topHost .hostDot{height:11px;width:11px}
+.topHostIdentity{display:flex;flex-direction:column;gap:4px;min-width:0}
+.topHostIdentity strong{font-size:13px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topHostIdentity small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topHost .hostStatusLabel{font-size:11px;color:var(--muted);border:1px solid var(--border);padding:4px 7px;border-radius:6px;white-space:nowrap}
+.topactions{padding:0 13px;gap:8px}
+.topactions .topQuickButton{display:flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid #3c5673;border-radius:6px;background:var(--panel);color:var(--fg);font-size:11px;white-space:nowrap}
+.topactions .topDisconnect{color:#ff7883;border-color:#893b4d;background:#201b2a}
+.topactions .topDisconnect:disabled{opacity:.5}
+.topactions .lock{border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--muted);font-size:11px;white-space:nowrap}
+.workspace{background:transparent}
+.sidebar{width:222px;padding:11px 9px 12px;border-right:1px solid var(--border);background:linear-gradient(160deg,#0e1e31,#0a1725);scrollbar-width:thin}
+.shell.light .sidebar{background:var(--panel)}
+.workspaceNav{gap:3px;padding-bottom:13px;margin-bottom:14px}
+.workspaceNav button{min-height:38px;padding:10px 11px;color:#bfcee0;font-size:12px;font-weight:550;border-radius:6px;gap:12px}
+.workspaceNav button.active{color:#fff;background:linear-gradient(105deg,#2268d2,#2b86ff);box-shadow:inset 3px 0 0 #64a9ff,0 2px 8px #052a5c44}
+.workspaceNav button:hover{background:#193956}
+.workspaceNav button.active:hover{background:#2a75e4}
+.sidebar .sectionHeading{margin-top:2px;color:#bbcce2;font-size:11px;letter-spacing:.05em}
+.sidebar .search{background:#0d1d2e;border:1px solid #28415e;padding:9px}
+.sidebar .groupLabel{font-size:11px;letter-spacing:0;color:#c4d3e7;margin:16px 8px 6px}
+.sidebar .host{padding:8px 11px;border-radius:6px;color:#bcd0e7;gap:10px}
+.sidebar .host.selected{background:#1b3553;border-color:#1f3a5b}
+.sidebar .hostText strong{font-size:11px;font-weight:570}
+.sidebar .hostText small{font-size:10px;line-height:1.35}
+.sidebar .hostDot{order:-1}
+.sidebar .sidebottom{border-top:1px solid var(--border)}
+.main{background:transparent}
+.workspaceFull>.main{display:none}
+.workspaceFull>.context.fullContext{background:transparent}
+.fullContext>.contextBody{scrollbar-width:thin}
+.context{background:var(--panel)}
+.widePage{max-width:none;padding:16px 17px 22px;gap:13px}
+.widePageTitle{min-height:56px;gap:15px;padding-bottom:2px}
+.widePageTitle>svg{color:#4aa9ff;width:34px;height:34px;stroke-width:1.7}
+.widePageTitle h1{font-size:24px;letter-spacing:-.45px;margin:0 0 5px}
+.widePageTitle p{font-size:12px;color:#a4b8d4}
+.widePageTitle .workspaceConnected,.widePageTitle .workspaceOffline{font-size:11px}
+.widePage button,.widePage select,.widePage input{background:#102137;border:1px solid #314b6a;border-radius:6px;color:var(--fg);font-size:11px}
+.widePage button:hover:not(:disabled){background:#1c3758;border-color:#508aca}
+.widePage .workspacePrimary{background:linear-gradient(90deg,#206cdf,#3389fc);border-color:#408ffa;font-weight:650}
+.widePage .workspacePrimary:hover:not(:disabled){background:#287cf0}
+.workspaceTable{font-size:11px;color:#cbd9eb}
+.workspaceTable thead th{background:#16283e;color:#bdcce0;border-bottom:1px solid #304761;letter-spacing:.015em;font-weight:600}
+.workspaceTable tbody td{border-bottom:1px solid #21354c}
+.workspaceTable tbody tr:hover{background:#183553}
+.workspaceTable tbody tr.selected{background:#13447c}
+.workspaceTable tbody tr:nth-child(2n):not(.selected){background:#0c1b2b55}
+.filesFolders,.filesTablePane,.filesInspector,.dockerContainersPane,.dockerInspector,.dockerLogViewer,.settingsCard,.dockerCatalogWorkspace,.vaultBackupCard{background:linear-gradient(180deg,#102037,#0c1b2c);border:1px solid #2b425e;border-radius:9px}
+.shell.light .filesFolders,.shell.light .filesTablePane,.shell.light .filesInspector,.shell.light .dockerContainersPane,.shell.light .dockerInspector,.shell.light .dockerLogViewer,.shell.light .settingsCard,.shell.light .dockerCatalogWorkspace,.shell.light .vaultBackupCard{background:var(--panel)}
+.paneTitle{color:#d9e7f7;font-size:12px;font-weight:650}
+.dockerMetrics{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.dockerMetrics>div{border:1px solid #2a435e;background:linear-gradient(160deg,#10243b,#0c1b2d);padding:13px 15px;border-radius:8px;gap:6px;min-height:91px}
+.dockerMetrics small{font-size:11px;color:#bfcee2}
+.dockerMetrics strong{font-size:23px;line-height:1.15}
+.dockerResourceTabs{gap:7px}
+.dockerResourceTabs button.active{background:#1b67c8;color:#fff;border-color:#287bf1}
+.dockerWorkspaceGrid{grid-template-columns:minmax(0,1fr) minmax(265px,26.5%);height:clamp(325px,43vh,550px);gap:11px}
+.dockerLogViewer{height:clamp(240px,30vh,380px);min-height:240px;overflow:hidden}
+.dockerLogToolbar{gap:9px}
+.dockerLogsBody{background:#081522;scrollbar-width:thin}
+.dockerLogLine:nth-child(even){background:#10203770}
+.dockerLogLine code{color:#c6dbf1}
+.dockerLogsBody .logError{color:#ff858c}
+.dockerLogsBody .logWarn{color:#f5c565}
+.dockerStatus.running{background:#0b4e35;color:#53ee9a}
+.dockerStatus.stopped{background:#4d2233;color:#ffa2a7}
+.filesGrid{grid-template-columns:minmax(150px,19%) minmax(0,1fr) minmax(260px,26.5%);gap:11px;height:clamp(370px,49vh,635px)}
+.filesFolders{padding:8px}
+.filesFolders .paneTitle{padding:10px}
+.filesFolders button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;justify-content:flex-start}
+.filesFolders button.selected{background:#154a86;border-color:#266ec5}
+.filesInspector{overflow:auto}
+.filesPathBar{gap:7px}
+.filesCrumbs{background:#0d1e32;border:1px solid #2d455f;border-radius:6px}
+.filesActions{gap:7px}
+.filesActions .filesToolbarSpacer{flex:1}
+.wideTransferQueue{background:#10243a;border:1px solid #2d4867;border-radius:8px}
+.filesVaultSection .vaultBackupCard{border:1px solid #2b4868;border-radius:8px;background:linear-gradient(125deg,#112641,#0c1e31)}
+.agentHero,.agentSection{background:linear-gradient(155deg,#10243c,#0c1d30)}
+.agentPage .agentCard{background:#13273e}
+.agentPage .agentCard.active{background:#17447d}
+.agentContextPreview,.agentLaunchCommand{background:#081728}
+.agentEmbeddedTerminal{gap:10px;min-width:0}
+.agentEmbeddedTerminal .agentSectionHead h2{display:flex;align-items:center;gap:8px}
+.agentEmbeddedTerminal .agentSectionHead h2 svg{color:#72b8ff}
+.agentTerminalFrame{
+  height:clamp(320px,46vh,580px);min-height:320px;min-width:0;
+  background:#081522;border:1px solid #30516f;border-radius:8px;
+  overflow:hidden;
+}
+.terminalDockSlot{flex:1;min-height:0;min-width:0;overflow:hidden}
+.terminalSessionSurface{height:100%;width:100%;min-height:0;min-width:0;overflow:hidden}
+.terminalDockSlot .liveTerminal,
+.terminalSessionSurface>.liveTerminal{height:100%;min-height:0}
+.terminalParked{display:none}
+.agentTerminalFrame.expanded{height:clamp(490px,78vh,980px)}
+.agentTerminalFrame>.terminalSessionSurface{height:100%;width:100%}
+.agentTerminalFrame .liveTerminal{height:100%;min-height:0;padding:8px}
+.agentTerminalFrame .xterm{height:100%}
+.agentDevTerminalPreview{
+  height:100%;width:100%;display:flex;flex-direction:column;align-items:flex-start;
+  gap:11px;padding:18px;color:#dbe9fa;background:#081522;
+  font:12px/1.6 "Cascadia Code",Consolas,monospace;
+}
+.agentDevTerminalPreview small{color:#7fa1c7;font:600 10px Inter,"Segoe UI",sans-serif;letter-spacing:.04em}
+.agentDevTerminalPreview .terminalCaret{color:#86c6ff}
+.shell.light .agentDevTerminalPreview{background:#f7fbff;color:#243b59}
+.agentTerminalActions{display:flex;align-items:center;flex-wrap:wrap;gap:7px}
+.agentEmbeddedTerminal .agentHint{margin:0;color:var(--muted);font-size:11px;line-height:1.5}
+.shell.light .agentTerminalFrame{background:#f7fbff;border-color:#bad1e5}
+@media(max-width:900px){.agentTerminalFrame{height:360px;min-height:300px}}
+
+.settingsPage .settingsLayout{grid-template-columns:minmax(190px,220px) minmax(0,1fr) minmax(270px,310px);gap:12px}
+.settingsPage .settingsNav{border:1px solid #2a405a;border-radius:9px;background:#0d1e30;padding:7px;align-self:start;gap:3px}
+.settingsPage .settingsNav button{text-align:left;align-items:center;gap:11px;padding:10px;border-radius:6px;min-height:54px;border:1px solid transparent;background:transparent}
+.settingsPage .settingsNav button.selected{background:linear-gradient(105deg,#1959b8,#2678ed);border-color:#2e81f3;color:#fff}
+.settingsPage .settingsNav button.selected small{color:#c7ddfc}
+.settingsPage .settingsNav strong{font-size:12px}
+.settingsPage .settingsNav small{font-size:10px;color:#91a9c7}
+.settingsHeading{padding:6px 9px 3px;align-items:start}
+.settingsHeading h2{font-size:18px}
+.settingsHeading p{font-size:12px}
+.settingsCard{padding:15px 16px;gap:0}
+.settingsCard h3{font-size:13px;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:1px}
+.settingsCard p{font-size:11px;line-height:1.65}
+.prefRow{padding:11px 0;min-height:54px}
+.prefRow strong{font-size:11px;font-weight:650}
+.prefRow small{font-size:10px;color:#a3b4ce}
+.prefRow input[type=checkbox]{accent-color:var(--accent);width:17px;height:17px}
+.settingsHelp{gap:11px}
+.settingsHelp .settingsCard{padding:15px}
+.settingsHelp h3{margin:0 0 8px}
+.settingsHelp .settingsCard p{line-height:1.65;margin:7px 0}
+.settingsHelp .diagnosticList{padding:10px 0}
+.settingsImportBar{justify-content:flex-end}
+.settingsImportBar button{font-size:11px}
+.settingsPage .settingsDanger{border-color:#a64a59!important;color:#ff8f98!important;background:#271a2a!important}
+@media(max-width:1250px){.settingsPage .settingsLayout{grid-template-columns:minmax(160px,195px) minmax(0,1fr)}.settingsHelp{grid-column:2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.dockerWorkspaceGrid{grid-template-columns:minmax(0,1fr) 270px}}
+@media(max-width:900px){.topbar .brand{min-width:184px;width:184px}.sidebar{width:184px}.topHost .hostStatusLabel{display:none}.widePage{padding:12px}.filesGrid{grid-template-columns:minmax(150px,1fr) minmax(0,2fr);height:auto}.filesInspector{grid-column:1/-1;max-height:340px}.settingsPage .settingsLayout{grid-template-columns:170px minmax(0,1fr)}}
+@media(max-width:680px){.topbar .brand{min-width:60px;width:60px}.topbar .brand strong{display:none}.topactions .topQuickButton{padding:8px}.topactions .topQuickButton span{display:none}.topHost{gap:8px;padding:0 8px}.sidebar{width:60px;padding:9px 4px}.workspaceNav button{font-size:0;justify-content:center;padding:10px}.workspaceNav button svg{width:19px;height:19px}.sidebar .sectionHeading,.sidebar .search,.sidebar .groupLabel,.sidebar .hostText,.sidebar .sidebottom,.sidebar .identityManage{display:none}.sidebar .host{justify-content:center}.sidebar .hostDot{order:0}.settingsPage .settingsLayout{display:flex;flex-direction:column}.settingsPage .settingsNav{display:flex;overflow-x:auto;width:100%;max-width:100%}.settingsPage .settingsNav button{min-width:135px}.settingsHelp{display:flex;flex-direction:column;width:100%}.dockerWorkspaceGrid{display:flex;flex-direction:column;height:auto}.dockerInspector{min-height:235px}}
+
+
+/* Mock-aligned practical refinements */
+.topHost .hostSelectIcon{cursor:pointer}
+.topHost .hostSelectIcon:hover{background:#1d4474;border-color:#5da1ff}
+.settingsCard h3{display:flex;align-items:center;justify-content:space-between;gap:9px}
+.settingsCard h3 svg:first-child{margin-right:3px;color:#cbdcf2}
+.settingsCard .settingsActions.vertical{display:grid;gap:7px;margin:6px 0}
+.settingsCard .settingsActions.vertical button{width:100%;justify-content:center}
+.settingsCard .settingsActions:not(.vertical){padding:9px 0;gap:9px}
+.settingsCard>.settingsActions{display:flex;flex-wrap:wrap}
+.settingsCard>.settingsActions button{display:inline-flex;gap:7px;align-items:center}
+.prefReadonly{font-size:11px;color:#aec4df;border:1px solid #314b68;border-radius:5px;padding:5px 8px;white-space:nowrap}
+.settingsPage .settingsNav{max-height:calc(100vh - 160px);overflow-y:auto;scrollbar-width:thin}
+.settingsPage .settingsContent{align-content:start}
+.settingsPage .settingsContent .settingsCard>p.prefInfo{margin:10px 0}
+.settingsPage .settingsHelp .settingsCard button{display:inline-flex;align-items:center;gap:7px;justify-content:center;margin-top:8px;min-height:33px}
+.settingsPage .settingsHelp .prefRow{margin:2px 0}
+.settingsPage .settingsHelp .diagnosticList{gap:7px 10px;font-size:11px}
+.settingsPage .settingsHelp .diagnosticList dd{text-align:right}
+.settingsPage .settingsHelp .settingsCard button.settingsDanger{color:#ff858b;border-color:#923b48!important}
+.filesFolders{display:flex;flex-direction:column;min-width:0;overflow-y:auto;padding:0}
+.remoteTree{flex:1;min-height:0;overflow-y:auto;padding:8px 5px 10px}
+.remoteTree .paneTitle{padding:8px 9px 11px}
+.remoteTreeBranch{min-width:0}
+.remoteTreeRow{display:flex;align-items:center;gap:1px;min-width:0;border-radius:5px;margin:1px 0}
+.remoteTreeRow.selected{background:#154d8c}
+.remoteTreeRow:hover{background:#1b3654}
+.remoteTreeRow button{border:0;background:transparent!important;padding:5px 2px;min-height:25px;min-width:0}
+.remoteTreeRow .remoteTreeToggle{width:24px;flex:none;color:#a0bad7}
+.remoteTreeRow .remoteTreeFolder{display:flex;flex:1;align-items:center;gap:7px;justify-content:flex-start;min-width:0;color:#d3e3f5}
+.remoteTreeFolder svg{flex:none;color:#62aaff}
+.remoteTreeFolder span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.remoteTreeMessage{font-size:10px;color:var(--muted);line-height:1.6;padding:6px 10px;overflow-wrap:anywhere}
+.remoteTreeFoot{font-size:9px;line-height:1.6;color:#758da9;border-top:1px solid var(--border);padding:10px;margin-top:15px}
+.remoteCurrentFolder{display:grid;gap:7px;padding:11px;border-top:1px solid var(--border)}
+.remoteCurrentFolder strong{font-size:10px;color:var(--muted)}
+.remoteCurrentFolder button{font-size:10px;color:#c6d8ee;text-align:left;min-width:0;width:100%}
+.remoteCurrentFolder button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.transferQueueEmpty{padding:2px 0;margin:0!important;font-size:11px;color:var(--muted)!important}
+.filesVaultSection{display:block}
+.dockerMetrics{grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.dockerMetrics>div{min-width:0}
+.dockerMetrics>div small{display:flex;align-items:center;gap:8px;white-space:nowrap;font-size:11px}
+.dockerMetrics>div small svg{color:#47abff;flex:none}
+.dockerMetrics>div:nth-child(2) small svg{color:#50de97}
+.dockerMetrics>div:nth-child(3) small svg{color:#f48190}
+.dockerMetrics>div strong{font-size:21px}
+.dockerMetrics>div span{font-size:9.5px;color:#8ba5c3;line-height:1.2}
+.dockerLogViewer.dockerLogsFullscreen{position:fixed;inset:15px;height:auto;width:auto;z-index:20;margin:0;box-shadow:0 15px 80px #000b;background:#081525}
+.dockerLogViewer.dockerLogsFullscreen .dockerLogsBody{font-size:12px}
+.dockerLogToolbar>select[aria-label="Container for log viewer"]{max-width:180px;min-width:100px}
+.dockerLogFooter{font-size:10px}
+.dockerLogsBody{overflow-x:auto}
+@media(max-width:1210px){.dockerMetrics{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:980px){.dockerMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.settingsPage .settingsNav{max-height:unset}}
+@media(max-width:700px){.dockerMetrics{grid-template-columns:repeat(2,minmax(0,1fr))}.topactions .lock{padding:8px}.topactions .lock span{display:none}}
+
+
+/* Connections and Snippets use the same desktop visual grammar. */
+.connectionsCount{margin-left:auto;color:var(--muted);font-size:11px}
+.connectionsMetrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
+.connectionsMetrics>div{display:flex;align-items:center;gap:11px;border:1px solid var(--border);border-radius:9px;background:var(--panel);padding:17px}
+.connectionsMetrics svg{color:#4aa9ff;flex:none}
+.connectionsMetrics span{font-size:11px;color:var(--muted)}
+.connectionsMetrics strong{font-size:20px;margin-left:auto}
+.connectionsBody,.snippetsBody{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:12px;min-height:0;align-items:start}
+.connectionsList,.connectionsInspector,.snippetsCatalog,.snippetsRunner{border:1px solid var(--border);background:linear-gradient(155deg,#10243b,#0d1b2c);border-radius:10px;overflow:hidden}
+.connectionsList,.snippetsCatalog{min-height:380px}
+.connectionsToolbar,.snippetsToolbar{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--border)}
+.connectionsToolbar .filesSearch,.snippetsToolbar .filesSearch{flex:1;min-width:110px}
+.connectionsTableWrap{overflow:auto}
+.connectionsHostName{display:inline-flex;align-items:center;gap:8px;background:transparent!important;border:none!important;color:var(--fg);text-align:left;padding:5px!important;white-space:nowrap}
+.connectionsHostName svg{color:#4a9dff}
+.connectionsTarget{display:grid;gap:5px;min-width:170px}
+.connectionsTarget small{font-size:10px;color:var(--muted)}
+.connectionTrust,.connectionState{display:inline-flex;align-items:center;gap:5px;font-size:10px;white-space:nowrap;color:var(--muted)}
+.connectionTrust.good,.connectionState.online{color:#4fe49b}
+.connectionTrust.pending{color:#f2c379}
+.connectionRowActions{display:flex;align-items:center;gap:6px}
+.connectionRowActions button{white-space:nowrap;padding:7px 9px!important}
+.connectionsInspector,.snippetsRunner{padding:16px;display:grid;gap:11px}
+.connectionsInspector h2,.snippetsRunner h2{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700;margin:0;border-bottom:1px solid var(--border);padding-bottom:13px}
+.connectionPreview{display:grid;justify-items:center;gap:9px;padding:15px 8px;border-bottom:1px solid var(--border)}
+.connectionPreview svg{color:#4aa9ff}
+.connectionPreview strong{font-size:15px;overflow-wrap:anywhere;text-align:center}
+.connectionPreview span{color:var(--muted);font-size:11px;overflow-wrap:anywhere;text-align:center}
+.connectionsInspector .diagnosticList{padding:7px 0}
+.connectionsInspector .diagnosticList dd{text-align:right}
+.connectionsInspector>.workspacePrimary,.connectionsInspector>button,.snippetsRunner>button{width:100%}
+.connectionsInspector .prefInfo{display:flex;align-items:start;gap:6px}
+.snippetsToolbar>span{font-size:10px;color:var(--muted)}
+.snippetsGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:11px;padding:14px}
+.snippetsGrid .snippetCard{display:grid;gap:10px;align-items:start;text-align:left;justify-content:start;min-height:150px;background:var(--panel2);padding:13px}
+.snippetsGrid .snippetCard.selected{background:#173d6a;border-color:#4485dc}
+.snippetCard span{font-size:10px;color:#61a9ff}
+.snippetCard strong{font-size:13px}
+.snippetCard code{display:block;padding:7px 9px;border:1px solid #31516e;background:#0a192b;border-radius:5px;font-size:12px;color:#e2edfb;overflow-wrap:anywhere}
+.snippetCard small{font-size:10px;color:var(--muted);line-height:1.6}
+.snippetsRunner>p{font-size:11px;color:var(--muted);line-height:1.65;margin:0}
+.snippetsRunner label{display:grid;gap:8px;font-size:11px;font-weight:650}
+.snippetsRunner textarea{background:#081729;border:1px solid #34516e;color:var(--fg);padding:11px;border-radius:7px;resize:vertical;font:12px/1.65 Consolas,monospace}
+.snippetWarning{display:flex;gap:8px;padding-top:14px;border-top:1px solid var(--border)}
+.snippetWarning svg{color:#f4bc75;flex:none}
+.snippetWarning p{font-size:11px;line-height:1.65;color:var(--muted);margin:0}
+@media(max-width:1250px){.connectionsBody,.snippetsBody{grid-template-columns:minmax(0,1fr)}.connectionsInspector{display:flex;flex-wrap:wrap;align-items:center}.connectionsInspector h2{flex-basis:100%}.connectionsInspector .diagnosticList{flex:1}.connectionsInspector>button{width:auto}.snippetsRunner{max-width:none}}
+@media(max-width:800px){.connectionsMetrics{grid-template-columns:1fr}.connectionsToolbar,.snippetsToolbar{flex-wrap:wrap}.connectionsInspector{display:grid}.connectionsInspector>button{width:100%}}
+
+
+/* Port Forwarding: secure local SSH listeners, reference-style workspace */
+.forwardMetrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.forwardMetrics>div{display:flex;align-items:center;gap:11px;padding:15px 18px;background:var(--panel);border:1px solid var(--border);border-radius:9px}
+.forwardMetrics>div svg{color:#52a9ff}
+.forwardMetrics>div span{font-size:11px;color:var(--muted)}
+.forwardMetrics>div strong{font-size:17px;margin-left:auto}
+.forwardGrid{display:grid;grid-template-columns:minmax(260px,355px) minmax(0,1fr);gap:13px;align-items:start}
+.forwardForm,.forwardList{border:1px solid var(--border);background:linear-gradient(145deg,#10243b,#0c1b2c);border-radius:9px;padding:18px;min-width:0;display:grid;gap:14px}
+.forwardForm h2,.forwardList h2{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:700;margin:0}
+.forwardForm>p,.forwardTips>p{margin:0;color:var(--muted);line-height:1.65;font-size:11px}
+.forwardForm label{display:grid;gap:7px;color:#cfdef2;font-size:11px;font-weight:650}
+.forwardForm input{width:100%}
+.forwardFormHint{font-size:10px;color:var(--muted)}
+.forwardFormHint code{color:#d7e7fa}
+.forwardForm>.workspacePrimary{min-height:39px}
+.forwardListHeading{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.forwardListHeading button{white-space:nowrap}
+.forwardTableWrap{overflow-x:auto;min-height:210px}
+.forwardTableWrap .workspaceTable td{white-space:nowrap}
+.forwardRowActions{display:flex;align-items:center;gap:6px}
+.forwardSecure{color:#4bd98d;display:inline-flex;align-items:center;gap:5px}
+.forwardTips{padding:15px;border:1px solid var(--border);background:#10243b;border-radius:8px;display:grid;gap:11px}
+.forwardTips h3{font-size:12px;display:flex;align-items:center;gap:8px;margin:0}
+.forwardTips h3 svg{color:#49d39a}
+.forwardTips button{justify-self:start}
+.forwardNotice{border:1px solid #31547b;background:#183553;border-radius:7px;padding:10px;display:grid;gap:8px;color:var(--muted);font-size:11px;line-height:1.5}
+.forwardNotice button{justify-self:start}
+@media(max-width:1150px){.forwardGrid{grid-template-columns:1fr}}
+@media(max-width:710px){.forwardMetrics{grid-template-columns:1fr}}
+
+
+/* Preserve contrast when the user selects the existing supported light theme. */
+.shell.light .workspaceNav button{color:#334b65}
+.shell.light .workspaceNav button.active{color:white}
+.shell.light .sidebar .host{color:#375370}
+.shell.light .sidebar .host.selected{background:#d6e8fe;color:#1b3856}
+.shell.light .sidebar .groupLabel{color:#536a82}
+.shell.light .sidebar .search,.shell.light .filesCrumbs{background:#f4f8ff;border-color:#c8d7e9}
+.shell.light .topHost .hostSelectIcon{background:#e0edff;color:#276fc9;border-color:#a8caee}
+.shell.light .widePage button,.shell.light .widePage select,.shell.light .widePage input{background:#f6f9ff;border-color:#c5d4e6;color:#203752}
+.shell.light .widePage button:hover:not(:disabled){background:#e5effd}
+.shell.light .widePage .workspacePrimary,.shell.light .widePage .agentCard.active,.shell.light .workspaceNav button.active{color:white;background:#2573d9;border-color:#2573d9}
+.shell.light .workspaceTable{color:#273e57}
+.shell.light .workspaceTable thead th{background:#e9f1fb;color:#344d67;border-color:#c5d4e6}
+.shell.light .workspaceTable tbody td{border-color:#dce5f0}
+.shell.light .workspaceTable tbody tr:hover{background:#e2f0ff}
+.shell.light .workspaceTable tbody tr:nth-child(2n):not(.selected){background:#f3f7fd}
+.shell.light .workspaceTable tbody tr.selected{background:#d5e9ff;color:#172e49}
+.shell.light .filesFolders,.shell.light .filesTablePane,.shell.light .filesInspector,.shell.light .dockerContainersPane,.shell.light .dockerInspector,.shell.light .dockerLogViewer,.shell.light .settingsCard,.shell.light .dockerCatalogWorkspace,.shell.light .connectionsList,.shell.light .connectionsInspector,.shell.light .snippetsCatalog,.shell.light .snippetsRunner,.shell.light .forwardForm,.shell.light .forwardList,.shell.light .forwardTips,.shell.light .agentHero,.shell.light .agentSection{background:var(--panel);border-color:#cbd9ea}
+.shell.light .dockerMetrics>div,.shell.light .connectionsMetrics>div,.shell.light .forwardMetrics>div{background:#fff;border-color:#ccdcec}
+.shell.light .dockerMetrics small,.shell.light .dockerMetrics span,.shell.light .widePageTitle p{color:#5c738d}
+.shell.light .settingsPage .settingsNav{background:#fff;border-color:#cad8e9}
+.shell.light .settingsPage .settingsNav button{color:#344c68}
+.shell.light .settingsPage .settingsNav button.selected{color:white;background:#2573d9}
+.shell.light .settingsPage .settingsNav button.selected small{color:#f0f6ff}
+.shell.light .settingsPage .settingsNav small,.shell.light .prefRow small{color:#5d718b}
+.shell.light .prefReadonly{color:#39516b;background:#f4f8ff;border-color:#c5d4e6}
+.shell.light .remoteTreeFolder{color:#304c6d}
+.shell.light .remoteTreeRow .remoteTreeFolder{color:#304c6d}
+.shell.light .remoteTreeRow.selected{background:#d4e8ff}
+.shell.light .remoteTreeRow:hover{background:#e8f3ff}
+.shell.light .agentPage .agentCard,.shell.light .snippetsGrid .snippetCard{background:#f2f7fd;border-color:#ceddec}
+.shell.light .agentPage .agentCard.active,.shell.light .snippetsGrid .snippetCard.selected{background:#dcecff;color:#173c6a;border-color:#488cda}
+.shell.light .agentContextPreview,.shell.light .agentLaunchCommand,.shell.light .snippetCard code,.shell.light .snippetsRunner textarea{background:#f1f6fd;border-color:#c8d9e9;color:#273e58}
+.shell.light .connectionTrust.good,.shell.light .forwardSecure{color:#188457}
+.shell.light .connectionsInspector .connectionPreview svg{color:#246fd1}
+.shell.light .forwardForm label{color:#39506b}
+.shell.light .forwardTips{background:#f4f8ff}
+.shell.light .filesVaultSection .vaultBackupCard{background:#fff}
+
+
+/* Real container inspector driven by sanitized native docker inspect. */
+.dockerInspector .inspectorActions{padding:12px;gap:7px;border-bottom:1px solid var(--border)}
+.dockerInspector .inspectorActions button{white-space:nowrap}
+.dockerInspectTabs{display:flex;align-items:center;gap:3px;border-bottom:1px solid var(--border);padding:7px 10px}
+.dockerInspectTabs button{background:transparent;border:0;border-radius:4px;flex:1;padding:9px 6px;font-size:10.5px;color:var(--muted)}
+.dockerInspectTabs button.active{background:#1d5eb1;color:white}
+.dockerInspector>.workspaceError{margin:12px;font-size:11px}
+.dockerInspector dl{padding:12px}
+.dockerInspector dl dt,.dockerInspector dl dd{padding-bottom:2px}
+.dockerInspector .prefInfo{padding:8px 12px 16px}
+.dockerMounts,.dockerNetworks{display:grid;gap:7px;padding:12px;overflow:auto}
+.dockerMounts>div,.dockerNetworks>div{display:grid;gap:6px;background:#132a43;border:1px solid var(--border);padding:10px;border-radius:6px;font-size:11px}
+.dockerMounts strong{overflow-wrap:anywhere}
+.dockerMounts small{color:var(--muted);overflow-wrap:anywhere}
+.dockerMounts span{color:#91b8e6;font-size:10px}
+.dockerNetworks>div{display:flex;align-items:center;gap:7px;color:#cddff5}
+.dockerNetworks svg{color:#58acff}
+.dockerMounts p,.dockerNetworks p{font-size:11px;color:var(--muted);line-height:1.6}
+.shell.light .dockerMounts>div,.shell.light .dockerNetworks>div{background:#f3f8ff;border-color:#d0dfed}
+.shell.light .dockerNetworks>div{color:#3c5671}
+
+/* Reference host list uses status dot and concise alias, with full target in active-host header. */
+.sidebar section .host{padding-left:42px}
+.sidebar section .host>svg{display:none}
+.sidebar .hostText small{display:none}
+@media(max-width:900px){.sidebar section .host{padding-left:17px}}
+@media(max-width:680px){.sidebar section .host{padding-left:8px}}
+
+
+/* Adjustable mock-aligned Files/Docker splits.
+   Splits are controlled from existing non-secret preferences; values commit after
+   pointer release or immediately from the keyboard, avoiding write-amplification. */
+.filesGrid.resizableFilesGrid,.dockerWorkspaceGrid.resizableDockerGrid{
+  display:grid;align-items:stretch;column-gap:4px;min-width:0;
+}
+.filesGrid.resizableFilesGrid>*,
+.dockerWorkspaceGrid.resizableDockerGrid>*{min-width:0}
+.paneResizeHandle{
+  position:relative;z-index:2;display:flex;align-items:center;justify-content:center;
+  border-radius:6px;touch-action:none;user-select:none;
+  background:transparent;transition:background-color .14s,border-color .14s;
+}
+.paneResizeHandle.vertical{height:100%;min-height:160px;cursor:col-resize}
+.paneResizeHandle.horizontal{height:12px;min-height:12px;cursor:row-resize;margin:-2px 1px -1px}
+.paneResizeHandleGrip{
+  display:block;border-radius:8px;background:#365575;opacity:.68;
+  transition:background-color .14s,opacity .14s;
+}
+.paneResizeHandle.vertical .paneResizeHandleGrip{width:3px;height:42px}
+.paneResizeHandle.horizontal .paneResizeHandleGrip{width:42px;height:3px}
+.paneResizeHandle:hover,.paneResizeHandle:focus-visible{background:#193b5a}
+.paneResizeHandle:hover .paneResizeHandleGrip,.paneResizeHandle:focus-visible .paneResizeHandleGrip{background:#4c9eff;opacity:1}
+.paneResizeHandle:focus-visible{outline:2px solid #66afff;outline-offset:-1px}
+.paneResizeHandle:active .paneResizeHandleGrip{background:#80bcff}
+.filesFolders,.filesTablePane,.filesInspector,.dockerContainersPane,.dockerInspector{min-width:0}
+.dockerLogViewer{flex-shrink:0}
+.shell.light .paneResizeHandle:hover,.shell.light .paneResizeHandle:focus-visible{background:#dceafa}
+.shell.light .paneResizeHandleGrip{background:#92b0d2}
+@media(max-width:1080px){
+  .filesGrid.resizableFilesGrid{grid-template-columns:minmax(145px,32%) minmax(0,1fr)!important;column-gap:10px;row-gap:10px;height:auto}
+  .filesGrid.resizableFilesGrid>.paneResizeHandle{display:none}
+  .filesGrid.resizableFilesGrid>.filesInspector{grid-column:1/-1;max-height:370px}
+}
+@media(max-width:960px){
+  .dockerWorkspaceGrid.resizableDockerGrid{grid-template-columns:minmax(0,1fr)!important;height:auto;gap:10px}
+  .dockerWorkspaceGrid.resizableDockerGrid>.paneResizeHandle{display:none}
+  .dockerWorkspaceGrid.resizableDockerGrid>.dockerInspector{min-height:280px;max-height:400px;overflow:auto}
+}
+@media(max-width:800px){
+  .dockerPage>.paneResizeHandle.horizontal{display:none}
+  .dockerPage>.dockerLogViewer:not(.dockerLogsFullscreen){height:300px!important}
+  .filesGrid.resizableFilesGrid{grid-template-columns:1fr!important}
+  .filesGrid.resizableFilesGrid>.filesFolders{max-height:250px}
+  .filesGrid.resizableFilesGrid>.filesInspector{grid-column:1;max-height:360px}
+}
+@media(prefers-reduced-motion:reduce){
+  .paneResizeHandle,.paneResizeHandleGrip{transition:none}
+}
+
+
+/* Fast file actions — purpose-built context menu, not operating system shell. */
+.fileContextMenu{
+  position:fixed;z-index:70;width:204px;padding:6px;
+  display:flex;flex-direction:column;gap:2px;
+  color:var(--fg);
+  background:linear-gradient(155deg,#132a43,#0d1d31);
+  border:1px solid #456889;border-radius:9px;
+  box-shadow:0 18px 45px #0009,0 4px 12px #0006;
+}
+.fileMenuTitle{
+  padding:9px 10px;color:#b8cce2;border-bottom:1px solid #28425d;
+  font-size:11px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.fileContextMenu button{
+  display:flex;align-items:center;justify-content:flex-start;gap:10px;
+  width:100%;min-height:34px;padding:8px 9px;background:transparent;
+  color:#d8e7fa;text-align:left;border:0;border-radius:5px;font-size:11px;
+}
+.fileContextMenu button:hover:not(:disabled){background:#194775;color:white}
+.fileContextMenu button:disabled{opacity:.43}
+.fileContextMenu button>span{margin-left:auto;font-size:10px;color:#819dba}
+.fileContextMenu button.dangerItem{color:#ff9da9}
+.fileContextMenu button.dangerItem:hover:not(:disabled){background:#552336}
+.fileMenuDivider{height:1px;background:#2c4360;margin:4px 2px}
+.filesTablePane tr[tabindex="0"]:focus-visible{outline:2px solid #60aaff;outline-offset:-2px}
+.dockerInspector .inspectorActions{display:flex;flex-wrap:wrap}
+.treeLoading{animation:passh7-tree-spinner .7s linear infinite}
+@keyframes passh7-tree-spinner{to{transform:rotate(360deg)}}
+.shell.light .fileContextMenu{background:#fff;border-color:#bdcedf;color:#2d415d;box-shadow:0 12px 28px #1c35502b}
+.shell.light .fileMenuTitle{color:#3f5b7b;border-color:#d5e3f1}
+.shell.light .fileContextMenu button{color:#304a67}
+.shell.light .fileContextMenu button:hover:not(:disabled){background:#deedff;color:#20466f}
+.shell.light .fileContextMenu button.dangerItem{color:#a82542}
+@media(prefers-reduced-motion:reduce){.treeLoading{animation:none}}
+
+
+/* Dense live Docker inventory, matching the approved table hierarchy. */
+.dockerTableScroll{overflow-x:auto;scrollbar-width:thin}
+.dockerTableScroll>.workspaceTable{min-width:760px}
+.dockerTableScroll .workspaceTable thead th{white-space:nowrap}
+.dockerSort{background:transparent!important;border:0!important;padding:0!important;min-height:0!important;display:inline-flex!important;gap:6px;justify-content:flex-start!important;align-items:center;color:inherit!important;font-size:inherit!important;font-weight:650}
+.dockerSort:hover:not(:disabled){color:#74b3ff!important;background:transparent!important}
+.dockerStatCell{font-family:"Cascadia Code",Consolas,monospace;font-variant-numeric:tabular-nums;font-size:10.5px;white-space:nowrap;color:#c2e1ff}
+.dockerAutoRefresh{white-space:nowrap;display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
+.dockerAutoRefresh input{accent-color:#3388ff;height:15px;width:15px}
+.dockerTableScroll tr[tabindex]:focus-visible{outline:2px solid #62adff;outline-offset:-2px}
+.shell.light .dockerStatCell{color:#34516f}
+@media(max-width:1200px){.dockerToolbar{flex-wrap:wrap}.dockerToolbar .filesSearch{flex:1}}
+
+
+/* Working Settings accordion: all headings with chevrons are interactive. */
+.settingsContent .settingsCard>h3{padding:0;margin:0;border-bottom:0}
+.settingsCardToggle{
+  display:flex!important;align-items:center!important;justify-content:space-between!important;
+  width:100%;min-height:36px!important;
+  padding:7px 0 12px!important;margin:0!important;
+  text-align:left;color:var(--fg)!important;
+  background:transparent!important;border:0!important;
+  font-size:13px!important;font-weight:700;
+}
+.settingsCardToggle:hover:not(:disabled){color:#83bbff!important;background:transparent!important}
+.settingsCardToggle svg{color:#a9c5e4;transition:transform .15s ease}
+.settingsCardToggle svg.collapsed{transform:rotate(-90deg)}
+.settingsCardBody{border-top:1px solid var(--border);padding-top:2px}
+.settingsCardBody>.prefRow:first-of-type{border-top:0}
+.settingsCardBody .settingsActions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 0}
+.settingsCardBody>.prefInfo{padding:10px 0}
+.shell.light .settingsCardToggle{color:#1c3652!important}
+.shell.light .settingsCardToggle:hover:not(:disabled){color:#1b68c5!important}
+@media(prefers-reduced-motion:reduce){.settingsCardToggle svg{transition:none}}
+
+
+/* SFTP Transfer Manager: mock-aligned persistent queue panel. */
+.fileSelectHeader,.fileSelectCell{width:35px!important;min-width:35px;max-width:35px;text-align:center!important;padding:4px 6px!important}
+.fileSelectHeader input,.fileSelectCell input{width:15px;height:15px;accent-color:#3287ff;padding:0!important;margin:0;cursor:pointer}
+.filesTablePane .workspaceTable tr.selected .fileName{color:#e8f5ff}
+.transferQueuePanel{display:block;padding:0!important;min-height:0;overflow:hidden;background:linear-gradient(180deg,#122740,#0c1b2d)!important}
+.transferQueueHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 13px;border-bottom:1px solid var(--border)}
+.transferQueueTitle{display:flex!important;align-items:center;justify-content:flex-start!important;flex:1;min-width:0;gap:9px;padding:0!important;min-height:28px!important;background:transparent!important;border:0!important}
+.transferQueueTitle strong{font-size:12px;white-space:nowrap}
+.transferQueueTitle span{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.transferQueueControls{display:flex;gap:7px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.transferQueueControls button{white-space:nowrap;padding:6px 9px!important;min-height:29px!important}
+.transferQueueFilters{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 13px;background:rgba(4,17,33,.18);border-bottom:1px solid var(--border)}
+.transferQueueFilters button{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;padding:5px 9px;min-height:29px;font-size:11px}
+.transferQueueFilters button span{font-variant-numeric:tabular-nums;font-weight:600}
+.transferQueueFilters button.selected{background:rgba(51,135,255,.16);color:var(--fg);border-color:#477bad}
+.transferQueueFilters button:focus-visible{outline:2px solid #76b5ff;outline-offset:2px}
+.shell.light .transferQueueFilters{background:#f4f8fd}
+.shell.light .transferQueueFilters button.selected{background:#e5f0ff;border-color:#82a8d8;color:#154675}
+.transferQueueBody{display:grid;max-height:315px;overflow:auto;scrollbar-width:thin}
+.transferQueueDescription{font-size:10px;color:var(--muted);padding:9px 13px;margin:0;line-height:1.5;border-bottom:1px solid #233950}
+.transferQueueEmpty{padding:17px!important;margin:0!important;color:var(--muted)!important;font-size:11px}
+.transferQueueItem{display:flex;align-items:center;gap:11px;padding:9px 13px;min-height:54px;border-bottom:1px solid #243950}
+.transferQueueItem:last-child{border-bottom:0}
+.transferQueueGlyph{width:31px;height:31px;flex:none;display:grid;place-items:center;border-radius:7px;background:#163f6d;color:#61aaff}
+.transferQueueGlyph.completed{background:#123d33;color:#64e1a0}
+.transferQueueGlyph.failed{background:#4d2736;color:#ffa5aa}
+.transferQueueGlyph.cancelled{background:#33394b;color:#afbdd1}
+.transferQueueItemMain{min-width:0;flex:1;display:grid;gap:5px}
+.transferQueueItemHeading{display:flex;align-items:center;gap:9px;min-width:0}
+.transferQueueItemHeading strong{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(45%,400px)}
+.transferQueueItemHeading span{color:var(--muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.transferQueueItemStatus{display:flex;align-items:center;gap:4px;margin:0;font-size:10px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.transferQueueItem.completed .transferQueueItemStatus{color:#68d6a0}
+.transferQueueItem.failed .transferQueueItemStatus{color:#ff909c}
+.transferQueueProgress{display:block;width:100%;height:5px;border-radius:5px;accent-color:#368fff}
+.transferQueueItemActions{display:flex;align-items:center;gap:4px}
+.transferQueueItemActions button{width:28px;height:28px;min-height:28px!important;padding:5px!important;border-radius:5px}
+.shell.light .transferQueuePanel{background:#fff!important}
+.shell.light .transferQueueDescription,.shell.light .transferQueueItem{border-color:#d6e1ef}
+.shell.light .transferQueueTitle span,.shell.light .transferQueueItemHeading span,.shell.light .transferQueueItemStatus{color:#617891}
+@media(max-width:740px){
+  .transferQueueHeader{flex-wrap:wrap}
+  .transferQueueControls{width:100%;justify-content:flex-end}
+  .transferQueueItemHeading{flex-wrap:wrap;gap:3px}
+  .transferQueueItemHeading strong{max-width:100%}
+}
+
+
+/* Docker Compose: read-only project discovery and project-labelled containers. */
+.dockerCatalogWorkspace:has(.dockerComposeMembers){min-height:500px}
+.dockerCatalogWorkspace:has(.dockerComposeMembers) .dockerTableScroll .workspaceTable tr[tabindex]{cursor:pointer}
+.dockerCatalogWorkspace:has(.dockerComposeMembers) .dockerTableScroll .workspaceTable tr[tabindex]:focus-visible{outline:2px solid #65aaff;outline-offset:-2px}
+.dockerComposeMembers{margin:12px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#0d1d30;min-height:165px}
+.dockerComposeMembersHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 13px;border-bottom:1px solid var(--border);background:#142841}
+.dockerComposeMembersHeader>div{display:grid;gap:4px}
+.dockerComposeMembersHeader strong{font-size:12px}
+.dockerComposeMembersHeader small,.dockerComposeMembersHeader>span{font-size:10px;color:var(--muted)}
+.dockerComposeMembers .dockerTableScroll{max-height:310px;overflow:auto}
+.dockerComposeMembers .workspaceEmpty{padding:22px 15px}
+.shell.light .dockerComposeMembers{background:#fff}
+.shell.light .dockerComposeMembersHeader{background:#edf5ff}
+
+
+/* Native image preview: never render SVG/HTML, avoid overflowing file inspector. */
+.fileImagePreview{display:grid;gap:10px;padding:10px 2px 5px;min-width:0}
+.fileImagePreview img{
+  display:block;width:100%;height:auto;max-height:290px;
+  object-fit:contain;object-position:center;border-radius:7px;
+  border:1px solid #2c4969;background:#071525;
+}
+.fileImagePreview small{font-size:10px;color:#91a9c5;line-height:1.5}
+.filePreviewError{display:grid;gap:9px;padding:13px;color:#ff9ea8;font-size:11px;line-height:1.6;overflow-wrap:anywhere}
+.filePreviewError button{justify-self:start;min-height:29px;padding:6px 10px}
+.shell.light .fileImagePreview img{background:#edf4fa;border-color:#c8d9ea}
+.shell.light .fileImagePreview small{color:#58728e}
+
+
+/* Screenshot fixture chrome — available through Vite development mode only. */
+.referenceFixtureLabel{
+  position:fixed;right:15px;bottom:12px;z-index:90;
+  padding:8px 12px;border:1px solid #7a6744;border-radius:7px;
+  background:#1a2533ee;color:#f1d6a0;
+  font-size:10px;font-weight:750;letter-spacing:.045em;
+  box-shadow:0 4px 19px #050f1b8c;pointer-events:none;
+}
+.referenceFixture .sidebar button:disabled{opacity:.58}
+.referenceFixture .workspaceNav button.active{opacity:1}
+.referenceFixture .sidebottom small{color:#e6b971}
+.referenceFixture .contextBody{scrollbar-width:thin}
+
+
+/* Transfer queue status copy is informational, not a green success banner. */
+.shell .transferQueuePanel .transferQueueDescription{
+  color:#9bb5d1!important;background:transparent!important;
+}
+.shell.light .transferQueuePanel .transferQueueDescription{
+  color:#566e87!important;
+}
+
+
+/* ================================================================
+   CONSISTENCY PASS — shared chrome, states, panel density, terminal.
+   Single visual language for ALL primary workspaces (not new mock UI).
+   ================================================================ */
+.shell{
+  --ui-canvas:#081420;--ui-panel:#102137;--ui-panel-raised:#132941;
+  --ui-control:#0d2239;--ui-outline:#2b455f;
+  --ui-strong:#eaf3ff;--ui-subtle:#9bb1cb;
+  --ui-brand:#3287ff;--ui-success:#4fd69a;
+  --ui-warning:#eaba70;--ui-danger:#fc8e9c;
+  --ui-radius:8px;--ui-focus:#68adff;
+}
+.shell.light{
+  --ui-canvas:#eaf0f9;--ui-panel:#fff;--ui-panel-raised:#f2f7fe;
+  --ui-control:#f6f9ff;--ui-outline:#c6d8eb;
+  --ui-strong:#1c344f;--ui-subtle:#617890;
+  --ui-brand:#2471d1;--ui-success:#147b56;
+  --ui-warning:#99621c;--ui-danger:#ab3451;
+}
+.shell .workspacePageHeader{
+  display:flex;gap:13px;align-items:center;min-width:0;
+  padding:3px 0 13px;border-bottom:1px solid var(--ui-outline);
+}
+.workspacePageIcon{
+  display:grid;place-items:center;flex:none;
+  width:42px;height:42px;border:1px solid #345a83;
+  background:linear-gradient(140deg,#153757,#102b48);
+  border-radius:10px;color:#6ab5ff;
+}
+.workspacePageHeading{min-width:0;flex:1}
+.workspacePageHeading h1{font-size:23px;line-height:1.25;margin:0 0 4px;font-weight:720;letter-spacing:-.45px}
+.workspacePageHeading p{
+  font-size:11.5px;line-height:1.5;margin:0;color:var(--muted);
+  overflow-wrap:anywhere;
+}
+.workspacePageMeta{margin-left:auto;display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+.workspaceHeaderCount{font-size:11px;color:var(--muted);white-space:nowrap}
+.workspaceStatus{
+  --state:#8ba4bd;
+  display:inline-flex;align-items:center;gap:7px;flex:none;max-width:100%;
+  padding:5px 8px;color:var(--state)!important;background:color-mix(in srgb,var(--state) 8%,transparent);
+  border:1px solid color-mix(in srgb,var(--state) 27%,var(--border));
+  border-radius:6px;font-size:10.5px;line-height:1.3;font-weight:600;white-space:nowrap;
+}
+.workspaceStatusDot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--state)}
+.workspaceStatus--connected{--state:var(--ui-success)}
+.workspaceStatus--offline{--state:var(--ui-subtle)}
+.workspaceStatus--trusted{--state:var(--ui-brand)}
+.workspaceStatus--warning{--state:var(--ui-warning)}
+.shell .workspaceMetrics{display:grid;gap:11px;align-items:stretch}
+.shell .workspaceMetrics>.workspaceMetric{
+  display:grid;align-content:start;gap:9px;min-width:0;padding:15px 16px;
+  border:1px solid var(--ui-outline);border-radius:9px;
+  background:linear-gradient(145deg,#11263f,#0d1d2f);
+}
+.workspaceMetricHeading{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--ui-subtle)}
+.workspaceMetricHeading svg{color:#5daaff;flex:none}
+.workspaceMetric>strong{font-variant-numeric:tabular-nums;font-size:23px;line-height:1.15;font-weight:720;color:var(--ui-strong)}
+.workspaceMetric>small{font-size:10px;line-height:1.5;color:var(--ui-subtle)}
+.workspaceMetric--good .workspaceMetricHeading svg{color:var(--ui-success)}
+.workspaceEmptyState{
+  display:grid;justify-items:center;align-content:center;gap:10px;
+  padding:38px 20px;min-height:190px;text-align:center;color:var(--muted);
+}
+.workspaceEmptyIcon{
+  display:grid;place-items:center;width:44px;height:44px;
+  border-radius:12px;background:#132d4a;border:1px solid #325172;color:#7ab9ff;
+}
+.workspaceEmptyState>strong{font-size:13px;color:var(--fg)}
+.workspaceEmptyState>p{max-width:335px;font-size:11px;line-height:1.7;margin:0}
+.workspaceEmptyActions{display:flex;gap:8px;align-items:center;margin-top:4px}
+.workspaceFilterBar{
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px;
+  padding:10px 12px;border-bottom:1px solid var(--ui-outline);
+}
+.workspaceFilterBar>button{
+  display:flex;align-items:center;gap:8px;border:1px solid transparent;
+  background:transparent;padding:7px 10px;border-radius:6px;
+  color:var(--muted);font-size:11px;font-weight:600;
+}
+.workspaceFilterBar>button span{font-size:10px;color:inherit;opacity:.8;font-variant-numeric:tabular-nums}
+.workspaceFilterBar>button[aria-pressed=true],
+.workspaceFilterBar>button.active{background:#1a5595;color:#f0f7ff;border-color:#347dd1}
+.workspaceFilterBar>button:hover:not(.active){background:#1b354f;color:#dbeafe}
+.shell .workspaceTable tbody tr[tabindex="0"]{cursor:pointer}
+.shell .workspaceTable tbody tr[tabindex="0"]:focus-visible{outline:2px solid var(--ui-focus);outline-offset:-2px}
+.shell .workspaceTable td{vertical-align:middle}
+.shell .workspaceTable code,.shell .forwardRoutePreview code{
+  font-family:"Cascadia Code",Consolas,monospace;font-variant-numeric:tabular-nums;
+}
+.shell .widePage button:not(.workspacePrimary):active:not(:disabled){transform:translateY(1px)}
+.shell .widePage :is(button,input,select,textarea):focus-visible{
+  outline:2px solid var(--ui-focus);outline-offset:2px;
+}
+/* Consistent workspace inspector and action density. */
+.connectionsBody,.snippetsBody,.forwardGrid,.agentWorkspaceGrid{align-items:start}
+.connectionsList,.snippetsCatalog,.forwardList,.forwardForm,.agentSection,
+.connectionsInspector,.snippetsRunner,.agentHero{
+  border-color:var(--ui-outline)!important;border-radius:9px!important;
+}
+.connectionsToolbar,.snippetsToolbar,.forwardListHeading,.agentSectionHead{
+  min-height:47px;
+}
+.connectionsToolbar .filesSearch,.snippetsToolbar .filesSearch{
+  min-width:160px;background:#0d2036;
+}
+.connectionsTableWrap .workspaceTable{width:100%;min-width:695px}
+.connectionsTableWrap{max-height:min(63vh,700px);overflow:auto}
+.connectionsInspector .workspaceStatus{justify-self:end}
+.connectionsInspector .diagnosticList dt,.connectionsInspector .diagnosticList dd{font-size:11px}
+.snippetsGrid{grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:10px}
+.snippetsGrid .snippetCard{min-height:156px;transition:border-color .15s,background-color .15s}
+.snippetsGrid .snippetCard[aria-pressed=true]{
+  background:#173e70!important;border:1px solid #4d91e8;color:#fff;
+}
+.snippetCounter{display:block;text-align:right;margin-top:-8px;color:var(--ui-subtle);font-size:10px}
+.workspaceInlineActions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.workspaceInlineActions>button{display:flex;gap:7px;align-items:center;justify-content:center}
+.snippetsRunner textarea{width:100%;min-width:0}
+.agentWorkspaceSide .agentSection{min-width:0}
+.agentHeroMeta .workspaceStatus{font-weight:600}
+.agentCard .agentDetection{display:block}
+.agentCard .workspaceStatus{font-size:10px}
+.agentCard:hover:not(.active){border-color:#4c759e}
+.agentSection h2,.connectionsInspector h2,.snippetsRunner h2,.forwardForm h2,.forwardList h2{
+  font-size:14px;line-height:1.35;
+}
+.agentSafetyPanel{border-left:3px solid #b28a56!important}
+.forwardBindAddress{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  border:1px solid #33516f;background:#112c48;border-radius:7px;
+  padding:10px;color:#bdd7f2;font-size:11px;
+}
+.forwardBindAddress svg{color:var(--ui-success)}
+.forwardBindAddress strong{font-family:Consolas,monospace;color:#e4f2ff;font-size:12px;margin-left:auto}
+.forwardBindAddress small{flex-basis:100%;font-size:10px;color:var(--muted)}
+.forwardRoutePreview{
+  display:flex;flex-wrap:wrap;align-items:center;gap:9px;
+  padding:12px;border:1px solid #31516e;border-radius:7px;background:#0b2035;
+}
+.forwardRoutePreview>span:first-child{width:100%;font-size:10px;color:var(--ui-subtle);font-weight:700;letter-spacing:.05em}
+.forwardRoutePreview code{color:#bedbfa;font-size:11px;overflow-wrap:anywhere}
+.forwardRoutePreview>span:not(:first-child){font-size:10px;color:var(--ui-subtle)}
+.forwardDetail{
+  display:flex;gap:16px;align-items:center;justify-content:space-between;
+  padding:13px;background:#102942;border:1px solid var(--ui-outline);border-radius:7px;
+}
+.forwardDetail>div{display:grid;gap:6px;min-width:0}
+.forwardDetail small{font-size:9px;letter-spacing:.04em;color:var(--muted)}
+.forwardDetail strong{font:600 11px Consolas,monospace;overflow-wrap:anywhere}
+.forwardDetail button{white-space:nowrap;flex:none}
+.forwardForm>button.workspacePrimary{width:100%}
+.forwardTableWrap tr[tabindex]{cursor:pointer}
+/* The terminal is the main content, not an always-visible narrow tab beside help. */
+.shell .main{min-width:0;background:transparent}
+.shell .main .identity{
+  padding:16px 18px;margin:0;background:linear-gradient(145deg,#0f2136,#0b1928);
+  border-bottom:1px solid var(--ui-outline);gap:16px;align-items:flex-start;
+}
+.shell .main .identity h1{font-size:22px;line-height:1.2;letter-spacing:-.4px}
+.shell .main .identityMeta{font-size:10.5px;gap:8px;flex-wrap:wrap}
+.shell .main .identityActions{align-self:center;gap:7px}
+.shell .main .identityActions button{min-height:32px}
+.shell .main .identity .jumpRouteConfig{align-self:center;gap:6px}
+.shell .main .terminal{
+  min-height:280px;flex:1;margin:12px 13px;
+  border:1px solid var(--ui-outline);border-radius:10px;
+  background:#081522;overflow:hidden;display:flex;flex-direction:column;
+  box-shadow:0 4px 18px #0002;
+}
+.shell .terminalbar{
+  min-height:44px;padding:7px 12px;background:#11243a;
+  border-bottom:1px solid var(--ui-outline);gap:8px;
+}
+.shell .terminalbar>span{font-size:12px;font-weight:700;color:#d8eafa;display:flex;align-items:center;gap:8px}
+.shell .terminalbar>small{font-size:10px;color:var(--muted)}
+.shell .terminalbarSpacer{flex:1}
+.shell .terminalbar .terminalInfoToggle{
+  display:inline-flex;align-items:center;gap:7px;background:transparent;
+  color:var(--muted);border:1px solid var(--ui-outline);padding:7px 10px;
+}
+.shell .terminalbar .terminalInfoToggle.active{background:#1b4779;color:#dff0ff;border-color:#3b7bc4}
+.shell .sshTabBar{
+  flex:none;gap:5px;padding:7px 10px;background:#0b1c2d;border-bottom:1px solid #273b55;
+  scrollbar-width:thin;
+}
+.shell .sshTab{
+  display:flex;align-items:center;gap:1px;padding:0;border-radius:6px;
+  border:1px solid #2b425b;background:#13283f;color:#b1c5df;
+}
+.shell .sshTab.active{background:#174a83;color:#eff7ff;border-color:#3677c6}
+.shell .sshTabSelect{
+  display:flex;align-items:center;gap:8px;min-height:30px;
+  padding:6px 9px;background:transparent;border:0;color:inherit;font-size:11px;
+}
+.shell .sshTabConnectionDot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--ui-success)}
+.shell .sshTabClose{
+  display:grid;place-items:center;background:transparent;border:0;color:#a6bad3;
+  padding:6px;min-height:30px;width:28px;border-radius:4px;
+}
+.shell .sshTabClose:hover{background:#703348;color:#fff}
+.shell .sshTab:focus-within{outline:1px solid #4d91db}
+.shell .main .liveTerminal{flex:1;min-height:0}
+.shell .main .terminalEmpty{margin:auto;max-width:530px;text-align:center;padding:30px}
+.shell .main footer{
+  padding:10px 15px;min-height:34px;font-size:10px;color:var(--muted);
+  background:#0c1a29;border-top:1px solid var(--ui-outline);
+}
+.shell .context:not(.fullContext) {
+  background:linear-gradient(155deg,#10253b,#0c1d2e);
+  border-left:1px solid var(--ui-outline);scrollbar-width:thin;
+}
+/* All dialogs, including Vault/login/onboarding, share the same foundations. */
+.shell .overlay{background:#030a1399;backdrop-filter:blur(5px)}
+.shell .modal{
+  background:linear-gradient(155deg,#11243a,#0c1b2c);
+  border:1px solid #355474;border-radius:11px;
+  color:var(--fg);box-shadow:0 20px 80px #020813b3;
+}
+.shell .modal .modalTitle{
+  color:#eaf3ff;font-size:16px;font-weight:720;
+  padding-bottom:12px;margin-bottom:5px;border-bottom:1px solid var(--ui-outline);
+}
+.shell .modal input,.shell .modal select,.shell .modal textarea{
+  background:#0d2136;border:1px solid #365473;color:#e8f3ff;
+  border-radius:6px;font-size:12px;outline:none;
+}
+.shell .modal button{border-radius:6px;min-height:33px}
+.shell .modal .primary{background:#2879e8;color:#fff;border:1px solid #4a98ff}
+.shell .modal .wizardError,.shell .workspaceError{border-radius:7px}
+.shell .modal :is(input,select,textarea,button):focus-visible{outline:2px solid #62a9ff;outline-offset:2px}
+.shell .modal .wizardActions{background:transparent}
+/* Light theme remains a real choice, not dark-only mock styling. */
+.shell.light .workspacePageIcon{background:#e5f1ff;border-color:#aac8ec;color:#226bc3}
+.shell.light .workspaceMetrics>.workspaceMetric,
+.shell.light .forwardBindAddress,.shell.light .forwardRoutePreview,
+.shell.light .forwardDetail{background:#fff;border-color:var(--ui-outline)}
+.shell.light .workspaceEmptyIcon{background:#eaf4ff;border-color:#c4daf2;color:#2875d8}
+.shell.light .workspaceFilterBar>button.active{background:#2877db;color:#fff}
+.shell.light .workspaceFilterBar>button:hover:not(.active){background:#e4f0ff;color:#23568f}
+.shell.light .workspaceMetric>strong{color:#19334e}
+.shell.light .forwardBindAddress strong,.shell.light .forwardRoutePreview code,
+.shell.light .forwardDetail strong{color:#244663}
+.shell.light .snippetsGrid .snippetCard[aria-pressed=true]{background:#ddebff!important;color:#20456b}
+.shell.light .main .identity,.shell.light .main footer,
+.shell.light .terminalbar,.shell.light .sshTabBar{background:#edf4fd;border-color:#ccdaea}
+.shell.light .terminalbar>span{color:#1e3f64}
+.shell.light .sshTab{background:#f4f8fd;color:#46617f;border-color:#cadbec}
+.shell.light .sshTab.active{background:#d9eaff;color:#16477e;border-color:#5a95dd}
+.shell.light .modal{background:#fff;border-color:#c2d5e7;color:#213b55}
+.shell.light .modal .modalTitle{color:#1e3c5e}
+.shell.light .modal :is(input,select,textarea){background:#f5f9ff;color:#213c57;border-color:#bbd0e3}
+.shell.light .main .terminal{background:#081522}
+@media(max-width:1240px){
+  .shell .main .identity{flex-wrap:wrap;gap:12px}
+  .shell .main .identityActions{justify-content:flex-start}
+  .workspaceMetrics{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+  .connectionsBody,.snippetsBody{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:850px){
+  .workspacePageHeader{align-items:flex-start}
+  .workspacePageMeta{margin-left:0;justify-content:flex-start}
+  .shell .workspacePageHeader{flex-wrap:wrap}
+  .forwardDetail{flex-wrap:wrap;align-items:flex-start}
+  .shell .main .identity{padding:12px}
+  .shell .main .terminal{margin:8px}
+}
+@media(max-height:700px){
+  .shell .main .identity{padding-top:10px;padding-bottom:10px}
+  .shell .main .terminal{min-height:175px}
+}
+@media(prefers-reduced-motion:reduce){
+  .shell .widePage button:not(.workspacePrimary):active:not(:disabled){transform:none}
+}
+
+
+/* Dev reference output shares the real terminal chrome; never invokes a PTY. */
+.referenceFixture .referenceTerminalMain{width:100%;min-height:calc(100vh - 100px);padding-bottom:0}
+.referenceFixture .referenceTerminalMain .terminal{min-height:420px}
+.referenceTerminalText{
+  padding:20px 22px;white-space:pre;overflow:auto;min-height:400px;flex:1;
+  background:#081522;color:#bfdaef;
+  font:12.5px/1.7 "Cascadia Code",Consolas,monospace;
+}
+.referenceTerminalPrompt{color:#74dca7}
+.referenceTerminalPrompt>span{color:#dbe9f9}
+.referenceTerminalPrompt .terminalCaret{color:#7bacff}
+.referenceFixture .workspacePageHeading h1{overflow-wrap:anywhere}
+@media(max-width:900px){
+  .referenceFixture .referenceTerminalMain .identity{display:flex;flex-wrap:wrap}
+  .referenceTerminalText{padding:14px;font-size:11px}
+}
+
+
+/* Keyboard accessible command palette: workspaces and trusted SSH hosts. */
+.shell .quickSwitchOverlay{align-items:flex-start;padding-top:min(12vh,125px)}
+.shell .quickSwitchModal{
+  padding:0;width:min(580px,calc(100vw - 28px));max-height:min(75vh,690px);
+  background:#0e2035;border:1px solid #385777;gap:0;overflow:hidden;
+}
+.quickSwitchTitle{
+  min-height:48px;padding:12px 16px;display:flex;align-items:center;gap:10px;
+  background:#132941;border-bottom:1px solid #2b455e;color:#dcecff;
+}
+.quickSwitchTitle strong{font-size:13px;flex:1}
+.quickSwitchTitle svg{color:#78b6f5}
+.quickSwitchTitle button{
+  border:0;background:transparent;color:#aac1db;
+  display:grid;place-items:center;width:27px;height:27px;border-radius:5px;
+}
+.quickSwitchTitle button:hover{color:#fff;background:#294964}
+.quickSwitchPanel{display:flex;flex-direction:column;min-height:0;flex:1}
+.quickSwitchSearch{
+  display:flex;align-items:center;gap:11px;margin:13px 15px 10px;
+  padding:11px 13px;border:1px solid #3871aa;border-radius:7px;
+  background:#0a1b2f;color:#77b7f8;
+}
+.quickSwitchSearch input{
+  flex:1;min-width:0;outline:0;border:0;background:transparent;
+  color:#e6f2ff;font-size:13px;font-weight:550;
+}
+.quickSwitchSearch input::placeholder{color:#88a5c1}
+.quickSwitchSearch kbd,.quickSwitchFooter kbd{
+  border:1px solid #405a76;border-radius:4px;padding:3px 5px;
+  font:600 10px "Cascadia Code",Consolas,monospace;color:#a9bfd7;
+}
+.quickSwitchResults{
+  display:flex;flex-direction:column;overflow:auto;min-height:90px;
+  padding:6px 12px 12px;scrollbar-width:thin;gap:3px;
+}
+.quickSwitchOption{
+  width:100%;display:flex;align-items:center;gap:12px;
+  border:1px solid transparent;border-radius:7px;min-height:53px;
+  padding:8px 11px;background:transparent;color:#d9e8fb;text-align:left;
+}
+.quickSwitchOption:hover,.quickSwitchOption.selected{border-color:#315e8c;background:#183c64}
+.quickSwitchOption.selected{box-shadow:inset 3px 0 #4da0ff}
+.quickSwitchOptionIcon{
+  flex:none;display:grid;place-items:center;width:33px;height:33px;
+  border-radius:7px;background:#153552;border:1px solid #2c4b6c;color:#71b8fb;
+}
+.quickSwitchOptionText{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
+.quickSwitchOptionText strong{font-size:12px;font-weight:640;color:#edf6ff;overflow:hidden;text-overflow:ellipsis}
+.quickSwitchOptionText small{font-size:10px;color:#a1b8d2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quickSwitchHostState{display:flex;gap:5px;align-items:center;color:#a2bad3;font-size:10px}
+.quickSwitchHostState.online{color:#6ee2a6}
+.quickSwitchGo{color:#92c6fa}
+.quickSwitchNoResults{
+  display:grid;gap:8px;justify-items:center;text-align:center;
+  padding:30px 15px;color:#9ab3cd;font-size:11px;
+}
+.quickSwitchNoResults strong{font-size:13px;color:#ddecfe}
+.quickSwitchFooter{
+  display:flex;gap:17px;align-items:center;padding:10px 15px;
+  background:#10253b;border-top:1px solid #2b425b;
+}
+.quickSwitchFooter>span{font-size:10px;display:flex;align-items:center;gap:4px;color:#8eaccb}
+.shell.light .quickSwitchModal,.shell.light .quickSwitchTitle,
+.shell.light .quickSwitchFooter{background:#fff;border-color:#c5d7ec}
+.shell.light .quickSwitchTitle,.shell.light .quickSwitchOptionText strong{color:#193654}
+.shell.light .quickSwitchSearch{background:#f1f7ff;border-color:#7caadc}
+.shell.light .quickSwitchSearch input{color:#193754}
+.shell.light .quickSwitchSearch input::placeholder{color:#69849f}
+.shell.light .quickSwitchOption:hover,.shell.light .quickSwitchOption.selected{background:#e5f1ff;border-color:#a5c9f3}
+.shell.light .quickSwitchOptionIcon{background:#d8eafd;color:#286ec4;border-color:#b1cde8}
+.shell.light .quickSwitchOptionText small,.shell.light .quickSwitchHostState{color:#59738e}
+.shell.light .quickSwitchHostState.online{color:#13835a}
+.shell.light .quickSwitchFooter>span{color:#58718e}
+.shell.light .quickSwitchFooter kbd,.shell.light .quickSwitchSearch kbd{border-color:#b7cce0;color:#54708d}
+@media(max-width:600px){
+  .shell .quickSwitchOverlay{padding:10px}
+  .shell .quickSwitchModal{max-height:calc(100dvh - 20px)}
+  .quickSwitchHostState{font-size:0}
+  .quickSwitchHostState svg{width:13px}
+  .quickSwitchFooter{gap:10px;flex-wrap:wrap}
+}
+
+
+/* Appearance preference applies to xterm as well as the outer shell. */
+.shell.light .main .terminal{background:#f7fbff;border-color:#c4d6ea}
+.shell.light .liveTerminal{background:#f7fbff}
+.shell.light .referenceTerminalText{background:#f7fbff;color:#284463}
+.shell.light .referenceTerminalPrompt{color:#156f50}
+.shell.light .referenceTerminalPrompt>span{color:#264462}
+.shell.light .referenceTerminalPrompt .terminalCaret{color:#1d75d9}
+
+
+/* Remote Windows agent discovery: explicit terminal CLI vs desktop-only state. */
+.agentDiscovery{
+  display:grid;gap:0;margin:12px 0;border:1px solid #315470;border-radius:9px;
+  background:#0a2036;overflow:hidden;
+}
+.agentDiscovery>div{
+  display:grid;grid-template-columns:minmax(105px,135px) minmax(0,1fr);
+  gap:12px;padding:9px 12px;border-bottom:1px solid #203b56;
+  font-size:11px;align-items:start;
+}
+.agentDiscovery>div:last-of-type{border-bottom:0}
+.agentDiscovery strong{color:#91afd0;font-size:10px;font-weight:650}
+.agentDiscovery span{color:#d7e9fb;overflow-wrap:anywhere}
+.agentDiscovery code{
+  font-family:"Cascadia Code",Consolas,monospace;font-size:10px;
+  color:#acd6ff;overflow-wrap:anywhere;word-break:break-word;
+}
+.agentDiscovery>p{
+  border-top:1px solid #294760;background:#102b45;color:#b8d1ea;
+  margin:0;padding:10px 12px;font-size:11px;line-height:1.65;
+}
+.agentInstallHelp{
+  display:grid;gap:10px;padding:14px;
+  border:1px solid #66543b;border-radius:8px;background:#292419;
+  color:#e9d2aa;font-size:11px;
+}
+.agentInstallHelp>strong{color:#f6d6a0;font-size:12px}
+.agentInstallHelp p{line-height:1.7;margin:0;color:#dcc6a3}
+.agentInstallHelp>div{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.agentInstallHelp code{
+  font:11px/1.5 "Cascadia Code",Consolas,monospace;color:#ffdfae;
+  overflow-wrap:anywhere;flex:1;min-width:185px;
+}
+.agentInstallHelp button{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.agentInstallHelp a{
+  display:inline-flex;align-items:center;gap:6px;
+  color:#88bdff;text-decoration:underline;text-underline-offset:3px;
+  width:max-content;max-width:100%;
+}
+.shell.light .agentDiscovery{background:#fff;border-color:#c4d7e8}
+.shell.light .agentDiscovery>div{border-color:#dce6ef}
+.shell.light .agentDiscovery strong{color:#536f8b}
+.shell.light .agentDiscovery span{color:#25435f}
+.shell.light .agentDiscovery code{color:#2968a5}
+.shell.light .agentDiscovery>p{background:#f1f6fb;color:#3a5a76;border-color:#c5d7eb}
+.shell.light .agentInstallHelp{background:#fff8ed;color:#754f20;border-color:#e3cda9}
+.shell.light .agentInstallHelp>strong,.shell.light .agentInstallHelp code{color:#7f531b}
+.shell.light .agentInstallHelp p{color:#755a37}
+.shell.light .agentInstallHelp a{color:#2168bd}
+@media(max-width:750px){
+  .agentDiscovery>div{grid-template-columns:minmax(0,1fr);gap:5px}
+}
+
+
+/* A GUI is not an SSH CLI: explicit optional RDP tunnel guidance. */
+.agentRdpHelp{
+  display:grid;gap:8px;padding:12px;border:1px solid #335f85;border-radius:8px;
+  background:#102c47;color:#bad8f5;
+}
+.agentRdpHelp>strong{font-size:11px;color:#e3f1ff}
+.agentRdpHelp>p,.agentRdpHelp>small{font-size:10px;color:#abc5df;line-height:1.65;margin:0}
+.agentRdpHelp>button{justify-self:start;display:inline-flex;align-items:center;gap:7px;
+  min-height:32px;font-size:11px;border:1px solid #4174ab;background:#1a4f83;color:#f0f7ff}
+.agentRdpHelp>code{font:11px "Cascadia Code",Consolas,monospace;overflow-wrap:anywhere;color:#8dc2ff}
+.shell.light .agentRdpHelp{background:#eef6ff;border-color:#b8d4f0}
+.shell.light .agentRdpHelp>strong{color:#254869}
+.shell.light .agentRdpHelp>p,.shell.light .agentRdpHelp>small{color:#51708d}
+.shell.light .agentRdpHelp>code{color:#2466ad}
+
+
+/* Disconnects are global: a wide workspace hides Terminal's original main. */
+.globalSessionNotice{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  padding:10px 18px;border-bottom:1px solid #976144;background:#35251f;color:#ffe7d0;font-size:12px;line-height:1.55}
+.globalSessionNoticeText,.globalSessionNoticeActions{display:flex;align-items:center;gap:10px;min-width:0}
+.globalSessionNoticeText span{overflow-wrap:anywhere}
+.globalSessionNoticeActions button{border:1px solid #966749;background:#503427;color:#ffeddc;border-radius:6px;padding:6px 11px;font-weight:600}
+.globalSessionNoticeActions button:hover:not(:disabled){background:#694331}
+.shell.light .globalSessionNotice{background:#fff4e8;color:#623c23;border-color:#e3b993}
+.shell.light .globalSessionNoticeActions button{background:#fff;border-color:#d1a57d;color:#623c23}
+@media(max-width:700px){.globalSessionNotice{padding:8px 12px}.globalSessionNoticeText{flex:1 1 100%}}
+
+/* Docker errors must explain whether SSH, CLI, permissions or the daemon
+   failed; avoid a raw stderr string disguised as an empty container list. */
+.dockerActionableError{display:flex;flex-direction:column;align-items:flex-start;gap:7px;line-height:1.5;overflow-wrap:anywhere}
+.dockerActionableError strong{font-size:13px}
+.dockerActionableError span{font-family:ui-monospace,Consolas,monospace;font-size:11px;white-space:pre-wrap}
+.dockerActionableError small{font-size:12px;line-height:1.55;max-width:90ch}
+.dockerActionableError button{border:1px solid currentColor;border-radius:6px;padding:6px 12px;font-weight:600;background:transparent}
+.dockerActionableError button:hover:not(:disabled){opacity:.8}
+
+/* Read-only per-host capability diagnostics embedded in Settings. */
+.remoteHealth{display:flex;flex-direction:column;gap:13px;min-width:0}
+.remoteHealthHeader{display:flex;gap:20px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.remoteHealthHeader>div{flex:1 1 290px}
+.remoteHealthHeader strong{display:inline-flex;align-items:center;gap:8px;font-weight:650}
+.remoteHealthHeader .prefInfo{margin:8px 0 0}
+.remoteHealthHeader>button{flex-shrink:0;display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line, #3a4f61);border-radius:8px;background:transparent;color:inherit;padding:9px 14px;font-size:12px;font-weight:650;cursor:pointer}
+.remoteHealthHeader>button:disabled{opacity:.48;cursor:default}
+.remoteHealthChecks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px}
+.remoteHealthRow{display:flex;gap:10px;align-items:flex-start;min-width:0;padding:12px 13px;border:1px solid var(--line, #314458);border-radius:10px;background:rgba(120,150,190,.04)}
+.remoteHealthStatus{width:23px;height:23px;display:grid;place-items:center;border:1px solid currentColor;border-radius:50%;flex-shrink:0;font-size:12px;font-weight:750;color:var(--muted,#a7b6c6)}
+.remoteHealthStatus.pass{color:#279c69}
+.remoteHealthStatus.fail{color:#d76b65}
+.remoteHealthStatus.checking{color:#629de9}
+.remoteHealthRow>span:last-child{display:flex;flex-direction:column;gap:5px;min-width:0}
+.remoteHealthRow strong{font-size:12px;line-height:1.35}
+.remoteHealthRow small{font-size:11px;line-height:1.5;color:var(--muted,#93a8bf);overflow-wrap:anywhere}
+
+/* Agent execution mode: one path for existing remote CLIs, one local fallback. */
+.agentModeGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.agentModeOption{display:flex;flex-direction:column;gap:7px;align-items:flex-start;text-align:left;min-width:0;
+  border:1px solid var(--line,#33465d);border-radius:11px;background:rgba(100,129,163,.05);
+  color:inherit;padding:13px 14px;cursor:pointer;transition:border-color .15s,background .15s}
+.agentModeOption strong{font-size:12px;line-height:1.35}
+.agentModeOption small{font-size:11px;line-height:1.5;color:var(--muted,#91a3ba)}
+.agentModeOption.active{border-color:#4d9ce7;background:rgba(65,142,210,.13)}
+.agentModeOption:focus-visible{outline:2px solid #71baff;outline-offset:3px}
+@media(max-width:900px){.agentModeGrid{grid-template-columns:1fr}}
+
+/* Agent cockpit: action-first layout with the SSH PTY visible without scrolling. */
+.agentPage{max-width:1920px}
+.agentPage .agentHero{padding:15px 18px;gap:14px}
+.agentPage .agentHeroIdentity{flex:1;min-width:240px}
+.agentPage .agentHeroMeta{margin-left:0}
+.agentPage .agentHeroActions{margin-left:auto;align-items:flex-end}
+.agentPage .agentHeroActions select{width:clamp(195px,18vw,275px);max-width:100%}
+.agentQuickLaunch{
+  display:grid;gap:15px;min-width:0;padding:19px 20px;border-radius:12px;
+  border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));
+  background:linear-gradient(110deg,color-mix(in srgb,var(--accent) 9%,var(--panel)),var(--panel));
+}
+.agentQuickLaunchHead{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}
+.agentEyebrow{font-size:10px;letter-spacing:1.5px;font-weight:800;color:var(--accent)}
+.agentQuickLaunchHead h2{font-size:19px;margin:5px 0 4px;line-height:1.3}
+.agentQuickLaunchHead h2 strong{font-weight:750}
+.agentQuickLaunchHead p{margin:0;font-size:12px;line-height:1.55;color:var(--muted);max-width:740px}
+.agentQuickMeta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.agentQuickMeta span{font-size:10px;font-weight:700;color:var(--muted);background:var(--bg);
+  border:1px solid var(--border);padding:6px 9px;border-radius:6px}
+.agentQuickControls{display:grid;grid-template-columns:minmax(135px,185px) minmax(246px,1fr) auto auto;align-items:end;gap:12px;min-width:0}
+.agentQuickSelect{display:grid;gap:7px;font-size:11px;font-weight:650;color:var(--muted);min-width:0}
+.agentPage .agentQuickSelect select{width:100%;height:43px;font-size:13px;font-weight:700;padding-right:7px}
+.agentQuickMode{display:flex;align-items:stretch;min-height:43px;background:var(--bg);
+  border:1px solid var(--border);border-radius:9px;padding:4px;gap:3px;min-width:0}
+.agentPage .agentQuickMode button{flex:1;min-width:0;white-space:nowrap;padding:8px 10px;font-weight:650;
+  background:transparent;border:1px solid transparent;border-radius:6px;min-height:34px}
+.agentPage .agentQuickMode button.active{color:var(--fg);background:var(--accentSoft);
+  border-color:color-mix(in srgb,var(--accent) 55%,var(--border))}
+.agentPage .agentRunButton{min-height:43px;padding:9px 18px;font-weight:750;white-space:nowrap}
+.agentPage .agentCheckButton{min-height:43px;white-space:nowrap}
+.agentQuickFooter{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;
+  padding-top:8px;border-top:1px solid color-mix(in srgb,var(--border) 75%,transparent)}
+.agentQuickFooter>span{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;line-height:1.5}
+.agentQuickFooter>span svg{flex-shrink:0}
+.agentQuickFooter button{border:0;background:transparent;padding:4px 7px;min-height:29px;color:var(--accent);font-weight:650}
+.agentQuickFooter button:hover{background:var(--accentSoft)}
+.agentSpin{animation:agent-spinning 1s linear infinite}
+@keyframes agent-spinning{to{transform:rotate(360deg)}}
+.agentPage .agentWorkspaceGrid{grid-template-columns:minmax(0,1fr) minmax(260px,310px);gap:15px}
+.agentPage .agentWorkspaceMain,.agentPage .agentWorkspaceSide{gap:15px}
+.agentPage .agentEmbeddedTerminal{padding:17px}
+.agentPage .agentEmbeddedTerminal .agentSectionHead{margin-bottom:13px}
+.agentPage .agentTerminalFrame{height:clamp(460px,64vh,820px);min-height:460px}
+.agentPage .agentTerminalFrame.expanded{height:clamp(620px,84vh,1150px)}
+.agentPage .agentDiagnosticSection .agentCard{min-height:130px}
+.agentPage .agentDiagnosticSection .agentCards{margin-bottom:14px}
+.agentPage .agentContextSection .agentSectionHead{margin-bottom:0}
+.agentPage .agentContextSection .agentContextPreview{margin-top:14px}
+.agentPage .agentContextSection>button{margin-top:10px}
+.agentPage .agentGrantRows .agentLaunchRow{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+.agentPage .agentGrantRows .agentLaunchCommand{padding:11px}
+.agentPage .agentGrantRows .agentLaunchCommand code{font-size:13px}
+.agentPage .agentGrantRows .agentLaunchRow>button{min-height:37px}
+.agentPage .agentWorkspaceSide .agentSection{padding:16px}
+.agentPage .agentWorkspaceSide .agentSection h2{font-size:14px}
+.shell.light .agentQuickLaunch{background:linear-gradient(115deg,#e8f2ff,#f8fbff);border-color:#b6cfe8}
+.shell.light .agentQuickMeta span,.shell.light .agentQuickMode{background:#f7fbff}
+@media(max-width:1380px){
+  .agentQuickControls{grid-template-columns:minmax(150px,210px) minmax(220px,1fr) auto}
+  .agentQuickControls .agentCheckButton{grid-column:3;grid-row:1;align-self:start}
+  .agentQuickControls .agentRunButton{grid-column:3;grid-row:2}
+  .agentQuickControls .agentQuickSelect{grid-row:1 / span 2;align-self:center}
+  .agentQuickControls .agentQuickMode{grid-row:1 / span 2;align-self:center}
+}
+@media(max-width:1040px){
+  .agentPage .agentWorkspaceGrid{grid-template-columns:minmax(0,1fr)}
+  .agentPage .agentWorkspaceSide{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .agentPage .agentWorkspaceSide .agentSection:last-child{grid-column:1/-1}
+}
+@media(max-width:750px){
+  .agentQuickLaunch{padding:15px;gap:11px}
+  .agentQuickControls{display:flex;flex-direction:column;align-items:stretch;gap:9px}
+  .agentQuickControls .agentQuickSelect,.agentQuickControls .agentQuickMode,
+  .agentQuickControls .agentRunButton,.agentQuickControls .agentCheckButton{width:100%}
+  .agentPage .agentWorkspaceSide{grid-template-columns:minmax(0,1fr)}
+  .agentPage .agentHeroActions{margin-left:0;flex:1}
+  .agentPage .agentHeroActions label{flex:1}
+  .agentPage .agentHeroActions select{width:100%}
+  .agentPage .agentTerminalFrame{height:390px;min-height:320px}
+  .agentPage .agentTerminalFrame.expanded{height:72vh}
+}
+@media(prefers-reduced-motion:reduce){.agentSpin{animation:none}}
+
+.agentLocalBanner{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px 16px
+}
+.agentLocalBanner>div{display:flex;align-items:flex-start;gap:11px;flex:1;min-width:220px}
+.agentLocalBanner>div>svg{flex:none;margin-top:2px;color:var(--accent)}
+.agentLocalBanner strong{font-size:12px}
+.agentLocalBanner p{margin:5px 0 0;color:var(--muted);font-size:11px;line-height:1.6}
+.agentPage .agentLocalBanner button{white-space:nowrap;min-height:37px}
+.agentPage>.agentDiagnosticSection{margin:0}
+.agentPage>.agentDiagnosticSection .agentCard{min-height:128px}
+.agentPage>.agentDiagnosticSection .agentCards{margin-bottom:14px}
+@media(max-width:750px){.agentPage .agentLocalBanner>button{width:100%}}
+
+/* Docker logs are a first-class destination, rather than a panel beneath inventory. */
+.dockerLogHeading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
+  padding:13px 17px;background:var(--panel);border:1px solid var(--border);border-radius:10px}
+.dockerLogHeading>div{min-width:0}
+.dockerLogHeading strong{display:flex;align-items:center;gap:9px;font-size:15px}
+.dockerLogHeading strong svg{color:var(--accent)}
+.dockerLogHeading p{font-size:11px;color:var(--muted);line-height:1.5;margin:5px 0 0}
+.dockerLogHeading button{white-space:nowrap}
+.dockerLogsWorkspace{min-height:240px;flex:none}
+.dockerLogsWorkspace .dockerLogsBody{min-height:160px}
+.dockerLogsWorkspace .dockerLogToolbar button[aria-pressed="true"]{
+  background:var(--accentSoft);border-color:var(--accent)
+}
+.dockerLogsWorkspace .dockerLogFooter{flex-wrap:wrap;gap:8px}
+@media(max-width:780px){
+  .dockerLogHeading{align-items:stretch}
+  .dockerLogHeading button{width:100%}
+  .dockerLogsWorkspace{min-height:240px}
+}
+
+/* Host diagnostics are explicit about TCP reachability versus authentication. */
+.connectionProbePanel{display:grid;gap:9px;padding:14px;margin-top:14px;
+  border:1px solid var(--border);border-radius:9px;background:var(--panel2)}
+.connectionProbePanel>div:first-child strong{font-size:12px}
+.connectionProbePanel>div:first-child p{font-size:11px;line-height:1.6;color:var(--muted);margin:6px 0 0}
+.connectionProbePanel .workspaceNotice,.connectionProbePanel .workspaceError{
+  display:grid;gap:7px;margin:0;overflow-wrap:anywhere
+}
+.connectionProbePanel .workspaceNotice code{display:block;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.connectionProbePanel .workspaceNotice small,.connectionProbePanel .workspaceError small{font-size:10px;line-height:1.5}
+.connectionProbePanel>.prefInfo{margin:0;font-size:11px;line-height:1.55}
+
+/* Practical, explicitly reviewed loopback tunnel presets. */
+.forwardPresets{display:grid;gap:10px;border:1px solid var(--border);border-radius:9px;
+  padding:13px;background:var(--panel2)}
+.forwardPresets>span{font-size:10px;font-weight:800;letter-spacing:1.1px;color:var(--muted)}
+.forwardPresets>div{display:flex;flex-wrap:wrap;gap:7px}
+.forwardPresets button{min-height:34px;padding:7px 11px;font-size:11px;white-space:nowrap}
+.forwardPresets small{font-size:10px;line-height:1.65;color:var(--muted)}
+.forwardConflict{display:flex;align-items:flex-start;gap:8px;border:1px solid color-mix(in srgb,#f0b45e 45%,var(--border));
+  border-radius:8px;background:color-mix(in srgb,#f0b45e 9%,var(--panel));padding:11px 12px;
+  font-size:11px;line-height:1.6;color:var(--fg)}
+.forwardConflict svg{flex:none;margin-top:1px;color:#f0b45e}
+
+/* Find configuration categories directly without navigating twelve panels. */
+.settingsPage .settingsNavSearch{display:flex;align-items:center;gap:8px;padding:9px 10px;margin-bottom:7px;
+  border:1px solid var(--border);border-radius:7px;background:var(--panel2);color:var(--muted)}
+.settingsPage .settingsNavSearch input{display:block;min-width:0;width:100%;padding:1px 0;
+  background:transparent;border:0;box-shadow:none;color:var(--fg);font-size:12px;outline:none}
+.settingsPage .settingsNavSearch input:focus-visible{outline:2px solid var(--accent);outline-offset:5px}
+.settingsNoMatches{display:grid;gap:9px;color:var(--muted);font-size:11px;line-height:1.5;padding:12px}
+.settingsPage .settingsNav .settingsNoMatches button{min-height:32px;height:auto;padding:6px 10px;
+  justify-content:center;border-color:var(--border);background:var(--panel2)}
+.shell.light .settingsPage .settingsNavSearch{background:#f8fbff;border-color:#d1dfea}
+
+/* Command palette: sessions, saved hosts, workspaces and explicit safe actions. */
+.shell .quickCommandPalette{min-height:0}
+.shell .quickSwitchModal{width:min(680px,calc(100vw - 28px));max-height:min(82vh,820px)}
+.quickPaletteHelp{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;
+  padding:0 17px 10px;color:var(--muted);font-size:10px;border-bottom:1px solid var(--border)}
+.quickPaletteHelp span{display:inline-flex;gap:6px;align-items:center}
+.quickPaletteHelp span:last-child{margin-left:auto}
+.quickPaletteHelp kbd{display:inline-block;background:var(--panel2);padding:3px 6px;border:1px solid var(--border);
+  border-radius:4px;font:700 10px Consolas,monospace;color:var(--fg)}
+.quickPaletteSection{font-size:9px;font-weight:750;letter-spacing:1.1px;color:var(--muted);
+  padding:15px 12px 6px;text-transform:uppercase}
+.quickPaletteSection:first-child{padding-top:7px}
+.quickSwitchOption[aria-selected="true"]{border-color:color-mix(in srgb,var(--accent) 60%,transparent)}
+.quickSwitchSearch:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 15%,transparent)}
+.quickSwitchSearch .quickClearQuery{padding:5px 8px;border:1px solid var(--border);border-radius:5px;
+  color:var(--muted);background:var(--panel2);font-size:10px}
+.quickSwitchNoResults button{padding:8px 12px;border:1px solid var(--border);
+  border-radius:6px;color:var(--fg);background:var(--panel2);font-size:11px}
+.quickSwitchFooter svg{color:var(--accent)}
+.shell.light .quickPaletteSection{color:#617b94}
+.shell.light .quickPaletteHelp{border-color:#d2e0ef}
+.shell.light .quickPaletteHelp kbd{background:#f6faff}
+.shell.light .quickSwitchSearch .quickClearQuery{color:#405979;background:#fff}
+@media(max-width:620px){.quickPaletteHelp{gap:8px;padding-inline:12px}.quickPaletteHelp span:last-child{display:none}
+  .quickSwitchFooter span:nth-last-child(2){display:none}
+  .quickSwitchOptionText small{white-space:normal;line-height:1.35}
+}
+
+/* Session strip: one-click PTY context switching from every full-width workspace. */
+.sessionStrip{display:flex;align-items:center;gap:10px;min-height:45px;flex:none;padding:5px 13px;
+  border-bottom:1px solid var(--border);background:var(--panel);min-width:0}
+.sessionStripCaption{display:flex;align-items:center;gap:8px;flex:none;font-size:10px;
+  font-weight:750;letter-spacing:.7px;color:var(--muted);white-space:nowrap}
+.sessionStripCaption>svg{color:var(--positive)}
+.sessionStripCaption small{padding:3px 6px;border-radius:5px;border:1px solid var(--border);
+  font-size:10px;font-weight:500;letter-spacing:0}
+.sessionStripItems{display:flex;align-items:center;gap:6px;min-width:0;flex:1;overflow-x:auto;scrollbar-width:thin}
+.sessionStrip button{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  flex:none;border:1px solid var(--border);background:var(--panel2);color:var(--fg);
+  border-radius:7px;font-size:11px;padding:7px 11px;min-height:32px;white-space:nowrap}
+.sessionStrip button:hover{border-color:var(--accent);background:var(--surface)}
+.sessionStripItem.active{background:var(--accentSoft);border-color:var(--accent);font-weight:700}
+.sessionStripItem small{color:var(--muted);font-size:10px}
+.sessionStripDot{display:block;width:7px;height:7px;border-radius:50%;background:var(--positive);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--positive) 13%,transparent)}
+.sessionStripSearch{margin-left:auto}
+.sessionStripConnect{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.sessionStripEmpty .sessionStripCaption{flex:1;min-width:0;flex-wrap:wrap}
+.sessionStripEmpty .sessionStripCaption>svg{color:var(--muted)}
+.sessionStripEmpty .sessionStripCaption small{border:0;padding:0}
+.shell.light .sessionStrip{background:#f8fbff}
+@media(max-width:1120px){.sessionStripCaption small{display:none}.sessionStripSearch span{display:none}}
+@media(max-width:720px){.sessionStrip{padding:4px 8px;gap:7px;min-height:40px}
+ .sessionStripCaption>span{display:none}
+ .sessionStrip button{padding:7px 8px}
+ .sessionStripItem{max-width:155px}
+ .sessionStripItem>span:nth-child(2){overflow:hidden;text-overflow:ellipsis}
+ .sessionStripConnect{max-width:100px}
+}
+
+/* Make Ctrl+K discoverable without stealing terminal keyboard focus. */
+.topactions .topCommandPalette{
+  display:flex;align-items:center;gap:8px;min-height:34px;padding:7px 9px;
+  border:1px solid color-mix(in srgb,var(--accent) 37%,var(--border));border-radius:7px;
+  color:var(--fg);background:var(--panel2);font-size:11px
+}
+.topactions .topCommandPalette>svg{color:var(--accent)}
+.topactions .topCommandPalette kbd{font:600 10px Consolas,monospace;
+  padding:3px 5px;border-radius:4px;border:1px solid var(--border);
+  color:var(--muted);white-space:nowrap}
+.topactions .topCommandPalette:hover{background:var(--accentSoft);border-color:var(--accent)}
+@media(max-width:1160px){.topCommandPalette kbd{display:none}}
+@media(max-width:760px){.topCommandPalette span{display:none}.topactions .topCommandPalette{padding:7px 9px}}
+
+.filesRecoveryError{display:grid;gap:8px;max-width:100%;overflow-wrap:anywhere}
+.filesRecoveryError strong{font-size:12px}
+.filesRecoveryError>span{font:11px/1.6 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.filesRecoveryError>small{font-size:11px;line-height:1.65}
+.filesRecoveryActions{display:flex;flex-wrap:wrap;gap:8px;margin-top:3px}
+.filesRecoveryActions button{background:var(--panel2);color:var(--fg);
+  border:1px solid var(--border);padding:7px 12px;font-size:11px;border-radius:7px}
+.filesRecoveryActions button:hover:not(:disabled){border-color:var(--accent)}
+
+/* Separate session switch and disconnect targets. Never use a single accidental click
+   for a destructive SSH operation; the parent requests an explicit confirmation. */
+.sessionStripGroup{display:flex;align-items:center;flex:none;min-width:0;border:1px solid var(--border);
+  border-radius:7px;background:var(--panel2);overflow:hidden;transition:border-color .12s}
+.sessionStripGroup.active{border-color:var(--accent);background:var(--accentSoft)}
+.sessionStripGroup:hover{border-color:var(--accent)}
+.sessionStrip .sessionStripGroup .sessionStripItem{border:0;border-radius:0;background:transparent;
+  min-width:0;padding-right:5px}
+.sessionStrip .sessionStripGroup .sessionStripClose{border:0;border-left:1px solid var(--border);
+  border-radius:0;background:transparent;color:var(--muted);min-height:32px;padding:6px 9px}
+.sessionStrip .sessionStripGroup .sessionStripClose:hover,
+.sessionStrip .sessionStripGroup .sessionStripClose:focus-visible{background:color-mix(in srgb,#db666c 18%,var(--panel));
+  color:#f39a9d}
+.sessionStrip .sessionStripGroup .sessionStripClose:focus-visible{outline-offset:-2px}
+.sessionStrip .sessionStripGroup .sessionStripItem[aria-pressed="true"]{font-weight:750}
+@media(max-width:720px){
+ .sessionStripGroup{max-width:180px}
+ .sessionStrip .sessionStripGroup .sessionStripItem{max-width:143px}
+ .sessionStrip .sessionStripGroup .sessionStripClose{padding:6px 7px}
+}
+
+/* The current host identity is an obvious, keyboard-accessible switcher. */
+.topHost .topHostSwitch{position:relative;display:flex;flex-direction:column;align-items:flex-start;
+  justify-content:center;gap:4px;min-width:0;max-width:min(40vw,420px);
+  padding:7px 27px 7px 9px;text-align:left;background:transparent;
+  color:var(--fg);border:1px solid transparent;border-radius:7px}
+.topHost .topHostSwitch:hover,.topHost .topHostSwitch:focus-visible{
+  background:var(--accentSoft);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
+.topHostSwitch strong,.topHostSwitch small{display:block;max-width:100%;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis}
+.topHostSwitch svg{position:absolute;right:7px;top:50%;transform:translateY(-50%);color:var(--accent)}
+@media(max-width:860px){.topHost .topHostSwitch{max-width:190px}}
+@media(max-width:620px){.topHost .topHostSwitch{max-width:135px}
+ .topHostSwitch small{display:none}}
+
+/* Stable canvas datum across left navigation, no legacy right-side tabs. */
+.shell .workspaceFull>.context.fullContext{display:flex;min-height:0}
+.shell .workspaceFull>.context.fullContext>.contextBody{padding:0;flex:1;min-width:0;overflow:auto}
+.shell .workspacePageHeader{min-height:82px;align-items:center;flex:none;
+  box-sizing:border-box;margin:0;padding:10px 0 13px}
+.shell .widePage{padding-top:16px;row-gap:14px}
+.shell .workspacePageHeading h1{line-height:1.3}
+.shell .main>.identity{min-height:98px;align-items:center;box-sizing:border-box;padding:12px 17px}
+.shell .main>.identity h1{line-height:1.3}
+/* Consistent position of workspaces with or without a status badge on right. */
+.shell .workspacePageMeta{min-height:32px}
+.shell .workspacePageHeading{align-self:center}
+.shell .workspacePageIcon{align-self:center}
+.editConnectionModal{width:min(640px,calc(100vw - 32px));max-height:min(88vh,860px);
+  overflow:auto;scrollbar-width:thin}
+.editConnectionModal .wizardFields{gap:12px}
+.editConnectionModal .wizardFields>button{width:max-content;max-width:100%;
+  display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);
+  background:var(--panel2);padding:9px 13px;color:var(--fg);border-radius:7px}
+.editConnectionCheck{display:flex!important;grid-template-columns:none!important;
+  align-items:flex-start;gap:11px!important;padding:12px;border:1px solid var(--border);
+  background:var(--panel2);border-radius:8px;cursor:pointer}
+.editConnectionCheck input{width:16px!important;height:16px!important;margin:3px 0 0;
+  flex:none;accent-color:var(--accent)}
+.editConnectionCheck span{display:grid;gap:5px}
+.editConnectionDirty{margin-right:auto;font-size:11px;font-weight:600;color:var(--accent);align-self:center}
+.editConnectionCheck strong{font-size:12px}
+.editConnectionCheck small{color:var(--muted);font-size:11px;font-weight:450;line-height:1.6}
+.connectionInspectorActions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.connectionInspectorActions button{flex:1;white-space:nowrap}
+.connectionsPage .connectionRowActions button{white-space:nowrap}
+@media(max-width:760px){
+  .shell .workspacePageHeader{min-height:82px}
+  .editConnectionModal{max-height:calc(100dvh - 28px)}
+  .connectionInspectorActions button{min-width:0}
+}
+
+.sidebarHostRow{display:flex;align-items:center;gap:1px;min-width:0}
+.sidebarHostRow>.host{min-width:0;flex:1}
+.sidebarHostRow>.sidebarEditHost{width:28px;min-width:28px;height:28px;padding:4px;
+  display:grid;place-items:center;border:1px solid transparent;
+  color:var(--muted);background:transparent;border-radius:6px}
+.sidebarHostRow:hover>.sidebarEditHost,.sidebarHostRow:focus-within>.sidebarEditHost{
+  color:var(--accent);background:var(--panel2);border-color:var(--border)}
+.sidebarHostRow>.sidebarEditHost:hover{border-color:var(--accent);background:var(--accentSoft)}
+
+.editConnectionSessions{display:grid;gap:9px;line-height:1.6}
+.editConnectionSessions strong{font-size:12px}
+.editConnectionSessions small{font-size:11px}
+.editConnectionSessions>div{display:flex;flex-wrap:wrap;gap:7px}
+.editConnectionSessions button{padding:7px 11px;border:1px solid var(--border);border-radius:6px;
+  background:var(--panel2);color:var(--fg);font-size:11px}
+.editConnectionSessions button:hover:not(:disabled){border-color:var(--accent)}
+
+/* Persistent transfer visibility without growing the session bar vertically.
+   The source SSH session stays authoritative; the badge only navigates. */
+.sessionStrip .sessionStripTransfers{display:inline-flex;align-items:center;gap:6px;
+  min-width:0;max-width:190px;padding:7px 9px;flex:none;
+  background:color-mix(in srgb,var(--accent) 11%,var(--panel2));
+  border:1px solid color-mix(in srgb,var(--accent) 46%,var(--border));font-weight:700}
+.sessionStripTransfers>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sessionStripTransfers>svg{color:var(--accent);flex:none}
+.sessionStripTransfers>small{font-size:10px;color:var(--muted);white-space:nowrap}
+.sessionStrip .sessionStripTransferErrors{color:#e98c94;font-weight:750}
+.sessionStrip .sessionStripTransfers:hover{background:var(--accentSoft);border-color:var(--accent)}
+@media(max-width:960px){
+ .sessionStrip .sessionStripTransfers{max-width:130px}
+ .sessionStripTransfers>small:not(.sessionStripTransferErrors){display:none}
+}
+@media(max-width:600px){
+ .sessionStrip .sessionStripTransfers{max-width:90px;padding:7px}
+ .sessionStripTransfers>svg{display:none}
+ .sessionStripTransfers>span{font-size:10px}
+}
