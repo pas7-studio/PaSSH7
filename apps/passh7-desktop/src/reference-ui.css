@@ -1415,3 +1415,24 @@
 .editConnectionSessions button{padding:7px 11px;border:1px solid var(--border);border-radius:6px;
   background:var(--panel2);color:var(--fg);font-size:11px}
 .editConnectionSessions button:hover:not(:disabled){border-color:var(--accent)}
+
+/* Persistent transfer visibility without growing the session bar vertically.
+   The source SSH session stays authoritative; the badge only navigates. */
+.sessionStrip .sessionStripTransfers{display:inline-flex;align-items:center;gap:6px;
+  min-width:0;max-width:190px;padding:7px 9px;flex:none;
+  background:color-mix(in srgb,var(--accent) 11%,var(--panel2));
+  border:1px solid color-mix(in srgb,var(--accent) 46%,var(--border));font-weight:700}
+.sessionStripTransfers>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sessionStripTransfers>svg{color:var(--accent);flex:none}
+.sessionStripTransfers>small{font-size:10px;color:var(--muted);white-space:nowrap}
+.sessionStrip .sessionStripTransferErrors{color:#e98c94;font-weight:750}
+.sessionStrip .sessionStripTransfers:hover{background:var(--accentSoft);border-color:var(--accent)}
+@media(max-width:960px){
+ .sessionStrip .sessionStripTransfers{max-width:130px}
+ .sessionStripTransfers>small:not(.sessionStripTransferErrors){display:none}
+}
+@media(max-width:600px){
+ .sessionStrip .sessionStripTransfers{max-width:90px;padding:7px}
+ .sessionStripTransfers>svg{display:none}
+ .sessionStripTransfers>span{font-size:10px}
+}
