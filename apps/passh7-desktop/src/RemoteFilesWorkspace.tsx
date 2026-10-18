@@ -77,7 +77,7 @@ export default function RemoteFilesWorkspace(p:Props){
   const [historyIndex,setHistoryIndex]=useState(-1);
   const dir=p.entries?.session===p.session?p.entries:null;
   const path=dir?.path||p.pathInput;
-  useEffect(()=>{setSelected("");setSelectedNames([]);selectionAnchor.current="";setHistory([]);setHistoryIndex(-1);},[p.session]);
+  useEffect(()=>{setSelected("");setSelectedNames([]);setClipboardNotice("");selectionAnchor.current="";setHistory([]);setHistoryIndex(-1);},[p.session]);
   useEffect(()=>{setSelected("");setSelectedNames([]);setFileMenu(null);selectionAnchor.current="";autoPreviewRequested.current="";},[path]);
   useEffect(()=>{setVisibleLimit(250);},[p.session,path,p.filter,p.sort,p.showHidden]);
   const open=(next:string)=>{
