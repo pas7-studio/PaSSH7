@@ -18,7 +18,7 @@ const PENDING_LIMIT=40;
  */
 export default function useSftpTransferQueue(
   onUploadComplete:(session:string,directory:string)=>void,
-  liveSessions:{id:string;alias:string}[]
+  liveSessions:{id:string;alias:string}[],vaultUnlocked:boolean
 ){
   const liveSessionIds=liveSessions.map(session=>session.id);
   const jobsRef=useRef<TransferJob[]>([]);
@@ -125,6 +125,16 @@ export default function useSftpTransferQueue(
   // A disconnected session's queued jobs are invalid; native transport will
   // cancel the active transfer independently. Avoid accidentally showing a
   // new file picker for an SSH session that no longer exists.
+  // Local transfer history may contain remote paths or file names. When the
+  // encrypted Vault locks, discard it rather than showing old host paths on
+  // the unauthenticated workspace. Native SSH owns actual cancellation.
+  useEffect(()=>{
+    if(vaultUnlocked)return;
+    jobsRef.current=[];
+    setJobs([]);
+    pausedRef.current=false;
+    setPaused(false);
+  },[vaultUnlocked]);
   const sessionKey=liveSessionIds.join("|");
   useEffect(()=>{
     let changed=false;
