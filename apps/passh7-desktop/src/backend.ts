@@ -78,6 +78,15 @@ export async function addHost(host:AddHostInput):Promise<void>{
   await invoke("vault_add_host",{host});
 }
 
+export type UpdateHostInput={
+  alias:string;hostname:string;port:number;username:string;identityAlias:string;
+  resetHostKey:boolean;forgetCredentials:boolean;
+};
+export async function updateHost(host:UpdateHostInput):Promise<void>{
+  if(!desktop())throw new Error("Requires the PaSSH7 desktop app");
+  await invoke("vault_update_host",{host});
+}
+
 export async function setHostBackupDirectory(alias:string,directory:string|null):Promise<void>{
   await invoke<void>("vault_set_backup_directory",{alias,directory});
 }
