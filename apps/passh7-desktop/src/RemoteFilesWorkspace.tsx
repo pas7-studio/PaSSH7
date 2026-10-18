@@ -166,7 +166,7 @@ export default function RemoteFilesWorkspace(p:Props){
   return <div className="widePage remoteFilesPage" onKeyDown={e=>{if(e.key==="Escape")setFileMenu(null)}}>
     <WorkspaceHeader icon={FolderClosed} title="Remote Files"
       description={"Browse, preview and transfer remote files through SSH · "+p.host}
-      status={p.connected?"connected":"offline"} statusText={p.connected?"SFTP connected":"SSH disconnected"}/>
+      status={p.connected?"connected":"offline"} statusText={dir?"SFTP loaded":p.connected?"SSH connected · SFTP not loaded":"No SSH session"}/>
     <div className="filesPathBar">
       <button title="Back" disabled={!p.connected||historyIndex<=0} onClick={()=>{const index=historyIndex-1;setHistoryIndex(index);p.navigate(history[index])}}><ArrowLeft size={16}/></button>
       <button title="Forward" disabled={!p.connected||historyIndex<0||historyIndex>=history.length-1} onClick={()=>{const index=historyIndex+1;setHistoryIndex(index);p.navigate(history[index])}}><ArrowRight size={16}/></button>
@@ -196,7 +196,18 @@ export default function RemoteFilesWorkspace(p:Props){
       <label className="filesSearch"><Search size={15}/><input value={p.filter} onChange={e=>p.setFilter(e.target.value)} placeholder="Search in folder" aria-label="Filter files"/></label>
       <select value={p.sort} onChange={e=>p.setSort(e.target.value as Props["sort"])} aria-label="File sorting"><option value="folders">Folders first</option><option value="name">By name</option><option value="size">Largest first</option><option value="modified">Newest first</option></select>
     </div>
-    {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
+    {p.error&&<div className="workspaceError filesRecoveryError" role="alert">
+      <strong>Remote directory unavailable</strong><span>{p.error}</span>
+      <small>{/permission|denied|access/i.test(p.error)
+        ?"This SSH account cannot read that remote directory. Check folder permissions or open a permitted parent path."
+        :/SSH|disconnect|channel|closed/i.test(p.error)
+        ?"The SSH/SFTP channel may have closed. Reconnect this host in Terminal, then browse again."
+        :/not found|does not exist|no such/i.test(p.error)
+        ?"The directory does not exist on this server. Open Home or enter an existing remote path."
+        :"Verify the remote path and that this SSH server allows the SFTP subsystem."}</small>
+      <div className="filesRecoveryActions"><button type="button" disabled={!p.connected||p.busy} onClick={()=>open(".")}>Go to SSH Home</button>
+        <button type="button" disabled={!p.connected||p.busy} onClick={()=>open(path)}>Retry directory</button></div>
+    </div>}
     {p.notice&&<div className="workspaceNotice" role="status">{p.notice}</div>}
     {clipboardNotice&&<div className="workspaceNotice" role="status">{clipboardNotice}</div>}
     <div className="filesGrid resizableFilesGrid" style={{gridTemplateColumns:`minmax(150px,${treeWidth}px) 7px minmax(210px,1fr) 7px minmax(245px,${inspectorWidth}px)`}}>
