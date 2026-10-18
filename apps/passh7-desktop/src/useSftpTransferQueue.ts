@@ -23,9 +23,9 @@ export default function useSftpTransferQueue(
   const liveSessionIds=liveSessions.map(session=>session.id);
   const jobsRef=useRef<TransferJob[]>([]);
   const liveSessionsRef=useRef(new Set(liveSessionIds));
-  const ownerSessionsRef=useRef(new Map(liveSessions.map(session=>[session.alias,session.id])));
+  const ownerSessionsRef=useRef(new Map<string,string>(liveSessions.map(session=>[session.alias,session.id] as const)));
   liveSessionsRef.current=new Set(liveSessionIds);
-  ownerSessionsRef.current=new Map(liveSessions.map(session=>[session.alias,session.id]));
+  ownerSessionsRef.current=new Map<string,string>(liveSessions.map(session=>[session.alias,session.id] as const));
   const [jobs,setJobs]=useState<TransferJob[]>([]);
   const [paused,setPaused]=useState(false);
   const pausedRef=useRef(false);
