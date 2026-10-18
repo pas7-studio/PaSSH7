@@ -1226,8 +1226,17 @@ export default function App(){
   useModalFocus(topDialog);
   useEffect(()=>{
     const globalShortcut=(event:KeyboardEvent)=>{
-      if(!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=="k"||event.repeat)return;
-      if(topDialog)return; // Never open a new palette over SSH auth or Vault dialogs.
+      if(!(event.ctrlKey||event.metaKey)||event.altKey||event.repeat)return;
+      const key=event.key.toLowerCase();
+      const universal=key==="p"&&event.shiftKey;
+      const quick=key==="k"&&!event.shiftKey;
+      if(!universal&&!quick)return;
+      if(topDialog)return; // Never open a palette over SSH auth or Vault dialogs.
+      // Ctrl+K belongs to readline/terminal apps (delete to end of line).
+      // Do not swallow it from the native SSH xterm input. Ctrl+Shift+P
+      // remains a reliable global alternative, including inside xterm.
+      const target=event.target instanceof HTMLElement?event.target:document.activeElement;
+      if(quick&&target instanceof HTMLElement&&target.closest(".xterm"))return;
       event.preventDefault();
       event.stopPropagation();
       openCommandPalette();
@@ -1478,7 +1487,7 @@ export default function App(){
         <button type="button" className="topQuickButton" disabled={!active.id} onClick={()=>setPanel("terminal")}><TerminalSquare size={15}/><span>Open in Terminal</span></button>
         <button type="button" className="topQuickButton topDisconnect" disabled={!connected||sshBusy} title="Disconnect the selected host's active SSH session" onClick={()=>{const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===active.id)||sshTabs.find(t=>t.alias===active.id);if(session)requestDisconnect(session.id)}}><X size={15}/><span>Disconnect</span></button>
         <button type="button" className="lock" onClick={()=>{if(!desktopAvailable())return;if(vaultUnlocked){void lockVault()}else setVaultDialog(true)}}><LockKeyhole size={14}/><span>{vaultUnlocked?"Lock Vault":"Unlock Vault"}</span></button>
-        <button type="button" className="topCommandPalette" title="Search SSH sessions, hosts, workspaces and commands (Ctrl+K)" aria-label="Open command palette" onClick={()=>openCommandPalette()}><Search size={15}/><span>Search</span><kbd>Ctrl K</kbd></button>
+        <button type="button" className="topCommandPalette" title="Command palette: Ctrl+Shift+P anywhere, Ctrl+K outside SSH terminal" aria-label="Open command palette" onClick={()=>openCommandPalette()}><Search size={15}/><span>Search</span><kbd>Ctrl ⇧ P</kbd></button>
       </div>
     </header>
     {sessionNotice&&<div className="globalSessionNotice" role="alert" aria-live="polite">
