@@ -1,7 +1,7 @@
 import {useCallback,useRef,useState,type ReactNode} from "react";
 import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Maximize2, Minimize2, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
-import type {RemoteAgentAvailability,LocalAgentAvailability} from "./backend";
+import type {RemoteAgentAvailability,LocalAgentAvailability,LocalAgentConnection} from "./backend";
 import {WorkspaceHeader,WorkspaceStatus} from "./WorkspaceChrome";
 
 export type AgentProbeState=RemoteAgentAvailability&{session:string};
@@ -13,6 +13,7 @@ type Props={
   checking:boolean;error:string;status:string;context:string;
   mode:"auto"|"remote"|"local";onMode:(mode:"auto"|"remote"|"local")=>void;
   localAvailability:Partial<Record<AgentKind,LocalAgentAvailability>>;localChecking:boolean;
+  localConnections:LocalAgentConnection[];localRevoking:string;onRevokeLocal:(id:string)=>void;
   onCheck:()=>void;onLaunch:()=>void;onTerminal:()=>void;onSession:(id:string)=>void;
   onPrepareRdp:()=>void;
   liveTerminal?:boolean;onTerminalDock?:(node:HTMLDivElement|null)=>void;
@@ -152,6 +153,22 @@ export default function AgentWorkspace(p:Props){
           </div>}
           {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>}
           {p.status&&<p role="status" className="workspaceNotice">{p.status}</p>}
+        </section>
+        <section className="agentSection" aria-label="Local CLI SSH grants">
+          <div className="agentSectionHead"><div><h2>Active local CLI access</h2>
+            <p>These are live SSH tool grants, not provider logins. Each grant is bound to one SSH session. Revoking access leaves the local CLI window open.</p></div></div>
+          {!p.localConnections.length?<p className="agentHint">No local CLI has active SSH access. Launch a local assistant above to issue a temporary grant.</p>:
+            p.localConnections.map(item=><div className="agentLaunchRow" key={item.id}>
+              <div className="agentLaunchCommand">
+                <span>{item.host} · {item.sessionId===p.sessionId?"CURRENT SSH SESSION":"OTHER SSH SESSION"}</span>
+                <code>{AGENTS.find(a=>a.kind===item.agent)?.name??item.agent}</code>
+                <small>Access granted {item.ageSeconds<60?"less than a minute":Math.floor(item.ageSeconds/60)+" min"} ago</small>
+              </div>
+              <button type="button" disabled={p.localRevoking===item.id} onClick={()=>p.onRevokeLocal(item.id)}>
+                <LockKeyhole size={15}/>{p.localRevoking===item.id?"Revoking…":"Revoke SSH access"}
+              </button>
+            </div>)}
+          {p.localConnections.length>0&&<p className="agentHint">Revocation rejects new remote commands and file operations. It cannot undo or guarantee cancellation of work already running on the SSH host.</p>}
         </section>
         {(p.liveTerminal||p.terminalPreview)&&connected&&<section className="agentSection agentEmbeddedTerminal" aria-label="Live agent SSH terminal">
           <div className="agentSectionHead"><div><h2><TerminalSquare size={17}/> Interactive SSH terminal</h2>
