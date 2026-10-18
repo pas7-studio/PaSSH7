@@ -70,7 +70,7 @@ export default function ConnectionsWorkspace(p:Props){
         <div className="connectionsTableWrap"><table className="workspaceTable"><thead><tr><th>Host</th><th>Target</th><th>Trust</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>{filtered.map(host=><tr key={host.id} tabIndex={0} aria-selected={host.id===p.selected}
             className={host.id===p.selected?"selected":""} onClick={()=>p.onSelect(host.id)}
-            onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();p.onSelect(host.id)}}}>
+            onKeyDown={e=>{if(e.target!==e.currentTarget)return;if(e.key==="Enter"||e.key===" "){e.preventDefault();p.onSelect(host.id)}}}>
             <td><button className="connectionsHostName" onClick={event=>{event.stopPropagation();p.onSelect(host.id)}}><Server size={16}/><strong>{host.label}</strong></button></td>
             <td><div className="connectionsTarget">{host.user}@{host.address}:{host.port}{host.jumpAlias&&<small>Via {host.jumpAlias}</small>}</div></td>
             <td><WorkspaceStatus kind={host.fingerprint?"trusted":"warning"}>{host.fingerprint?"Pinned":"Verify key"}</WorkspaceStatus></td>
