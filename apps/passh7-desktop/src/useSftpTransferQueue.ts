@@ -16,10 +16,16 @@ const PENDING_LIMIT=40;
  * prevents overwrites, and owns cancellation. Jobs are UI history only: no local
  * absolute upload/download paths, credentials, file content or secrets are saved.
  */
-export default function useSftpTransferQueue(onUploadComplete:(session:string,directory:string)=>void,liveSessionIds:string[]){
+export default function useSftpTransferQueue(
+  onUploadComplete:(session:string,directory:string)=>void,
+  liveSessions:{id:string;alias:string}[]
+){
+  const liveSessionIds=liveSessions.map(session=>session.id);
   const jobsRef=useRef<TransferJob[]>([]);
   const liveSessionsRef=useRef(new Set(liveSessionIds));
+  const ownerSessionsRef=useRef(new Map(liveSessions.map(session=>[session.alias,session.id])));
   liveSessionsRef.current=new Set(liveSessionIds);
+  ownerSessionsRef.current=new Map(liveSessions.map(session=>[session.alias,session.id]));
   const [jobs,setJobs]=useState<TransferJob[]>([]);
   const [paused,setPaused]=useState(false);
   const pausedRef=useRef(false);
@@ -100,8 +106,21 @@ export default function useSftpTransferQueue(onUploadComplete:(session:string,di
   const retry=(id:string)=>{
     const job=jobsRef.current.find(j=>j.id===id);
     if(!job||!["failed","cancelled"].includes(job.status))return;
-    // New transfer ID is required: native SFTP transfer IDs are single-use.
-    enqueue({session:job.session,host:job.host,direction:job.direction,paths:[job.path]});
+    // Never reuse a dead PTY ID. A newly authenticated SSH session to the
+    // same saved host can be used only after an explicit confirmation.
+    const sameSession=liveSessionsRef.current.has(job.session);
+    const session=sameSession?job.session:ownerSessionsRef.current.get(job.host);
+    if(!session){
+      update(id,{status:"failed",result:"Reconnect SSH host "+job.host+
+        " before retrying. A cancelled SSH session cannot be reused."});
+      return;
+    }
+    if(!sameSession&&!window.confirm("Retry "+job.direction+" for "+job.name+
+      " on a NEW authenticated SSH session to "+job.host+"?\n\n"+
+      "The original SSH session has closed. PaSSH7 will reopen the normal system file picker "+
+      "and will not overwrite existing destination files."))return;
+    // Native SFTP transfer IDs are single-use even after a failed attempt.
+    enqueue({session,host:job.host,direction:job.direction,paths:[job.path]});
   };
   // A disconnected session's queued jobs are invalid; native transport will
   // cancel the active transfer independently. Avoid accidentally showing a
