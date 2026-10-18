@@ -1189,3 +1189,23 @@
 .agentPage>.agentDiagnosticSection .agentCard{min-height:128px}
 .agentPage>.agentDiagnosticSection .agentCards{margin-bottom:14px}
 @media(max-width:750px){.agentPage .agentLocalBanner>button{width:100%}}
+
+/* Docker logs are a first-class destination, rather than a panel beneath inventory. */
+.dockerLogHeading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
+  padding:13px 17px;background:var(--panel);border:1px solid var(--border);border-radius:10px}
+.dockerLogHeading>div{min-width:0}
+.dockerLogHeading strong{display:flex;align-items:center;gap:9px;font-size:15px}
+.dockerLogHeading strong svg{color:var(--accent)}
+.dockerLogHeading p{font-size:11px;color:var(--muted);line-height:1.5;margin:5px 0 0}
+.dockerLogHeading button{white-space:nowrap}
+.dockerLogsWorkspace{min-height:450px;flex:none}
+.dockerLogsWorkspace .dockerLogsBody{min-height:160px}
+.dockerLogsWorkspace .dockerLogToolbar button[aria-pressed="true"]{
+  background:var(--accentSoft);border-color:var(--accent)
+}
+.dockerLogsWorkspace .dockerLogFooter{flex-wrap:wrap;gap:8px}
+@media(max-width:780px){
+  .dockerLogHeading{align-items:stretch}
+  .dockerLogHeading button{width:100%}
+  .dockerLogsWorkspace{min-height:350px}
+}
