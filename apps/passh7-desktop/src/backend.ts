@@ -252,6 +252,18 @@ export async function probeLocalAgent(agent:"codex"|"claude"|"opencode"):Promise
 export async function launchLocalAgent(agent:"codex"|"claude"|"opencode",sessionId:string):Promise<string>{
   return invoke<string>("local_agent_launch",{agent,id:sessionId});
 }
+/** Non-secret inventory of SSH capabilities issued to live local CLI consoles. */
+export type LocalAgentConnection={
+  id:string;agent:"codex"|"claude"|"opencode";
+  sessionId:string;host:string;ageSeconds:number;
+};
+export async function listLocalAgentConnections():Promise<LocalAgentConnection[]>{
+  return invoke<LocalAgentConnection[]>("local_agent_connections");
+}
+/** Revokes SSH tool access only. Does not close or kill the local CLI console. */
+export async function revokeLocalAgentConnection(id:string):Promise<boolean>{
+  return invoke<boolean>("local_agent_revoke",{id});
+}
 export type RemoteExecResult={stdout:string;stderr:string;exitCode:number;truncated:boolean};
 export async function executeRemoteCommand(sessionId:string,command:string):Promise<RemoteExecResult>{
   return invoke<RemoteExecResult>("ssh_session_exec",{id:sessionId,command});
