@@ -1502,6 +1502,7 @@ export default function App(){
         {panel==="connections"?<ConnectionsWorkspace
   hosts={hosts} selected={selected} connectedAliases={sshTabs.map(t=>t.alias)} vaultUnlocked={vaultUnlocked}
   onSelect={selectHost} onConnect={alias=>void connectFromConnections(alias)}
+  onProbe={probeSshHost}
   onTerminal={alias=>{selectHost(alias);setPanel("terminal")}}
   onAdd={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}
   onImport={()=>void inspectLocalSshConfig()}
