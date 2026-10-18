@@ -1304,3 +1304,17 @@
  .sessionStripItem>span:nth-child(2){overflow:hidden;text-overflow:ellipsis}
  .sessionStripConnect{max-width:100px}
 }
+
+/* Make Ctrl+K discoverable without stealing terminal keyboard focus. */
+.topactions .topCommandPalette{
+  display:flex;align-items:center;gap:8px;min-height:34px;padding:7px 9px;
+  border:1px solid color-mix(in srgb,var(--accent) 37%,var(--border));border-radius:7px;
+  color:var(--fg);background:var(--panel2);font-size:11px
+}
+.topactions .topCommandPalette>svg{color:var(--accent)}
+.topactions .topCommandPalette kbd{font:600 10px Consolas,monospace;
+  padding:3px 5px;border-radius:4px;border:1px solid var(--border);
+  color:var(--muted);white-space:nowrap}
+.topactions .topCommandPalette:hover{background:var(--accentSoft);border-color:var(--accent)}
+@media(max-width:1160px){.topCommandPalette kbd{display:none}}
+@media(max-width:760px){.topCommandPalette span{display:none}.topactions .topCommandPalette{padding:7px 9px}}
