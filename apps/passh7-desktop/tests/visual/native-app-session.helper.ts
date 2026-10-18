@@ -430,5 +430,27 @@ export async function runNativeAppSession(page:Page){
   await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
   await expect(page.getByLabel("Remote host health check")).toContainText("Not checked yet");
   await expect(page.getByLabel("Remote host health check")).not.toContainText("codex test v1");
+  // The real connection editor protects unsaved profile changes. Escape and
+  // Close must use the same discard guard rather than silently losing edits.
+  await page.locator(".workspaceNav button").filter({hasText:"Connections"}).click();
+  await page.locator(".connectionsTableWrap").getByRole("button",{name:"Edit linux-test"}).click();
+  const editor=page.getByRole("dialog",{name:"Edit SSH connection"});
+  await expect(editor).toBeVisible();
+  await editor.getByRole("textbox",{name:"Display name"}).fill("Changed but not saved");
+  await expect(editor.getByText("Unsaved changes")).toBeVisible();
+  await page.evaluate(()=>{window.confirm=()=>false;});
+  await editor.getByRole("button",{name:"Close",exact:true}).click();
+  await expect(editor).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeVisible();
+  await page.evaluate(()=>{window.confirm=()=>true;});
+  await page.keyboard.press("Escape");
+  await expect(editor).not.toBeVisible();
+  await page.locator(".connectionsTableWrap").getByRole("button",{name:"Edit linux-test"}).click();
+  await expect(page.getByRole("dialog",{name:"Edit SSH connection"})
+    .getByRole("textbox",{name:"Display name"})).toHaveValue("linux-test");
+  await page.getByRole("dialog",{name:"Edit SSH connection"})
+    .getByRole("button",{name:"Close",exact:true}).click();
+  await expect(editor).not.toBeVisible();
   expect(browserErrors).toEqual([]);
 }
