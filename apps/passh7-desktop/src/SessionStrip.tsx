@@ -1,0 +1,58 @@
+import {Activity,ArrowRight,Command,LockKeyhole,Plus,TerminalSquare} from "lucide-react";
+
+type Session={id:string;alias:string};
+type Host={id:string;label:string};
+type Props={
+  sessions:Session[];hosts:Host[];
+  activeSession:string;selectedHost:string;vaultUnlocked:boolean;
+  onSelect:(id:string)=>void;onConnect:()=>void;
+  onUnlock:()=>void;onCommandPalette:()=>void;
+};
+/** Visible across Files, Docker, Ports, Settings and AI Agents.
+ * A click only changes the active native PTY; it never creates an SSH session,
+ * grants a CLI capability or sends a command to a remote machine. */
+export default function SessionStrip(p:Props){
+  const selected=p.hosts.find(host=>host.id===p.selectedHost);
+  if(!p.sessions.length){
+    return <div className="sessionStrip sessionStripEmpty" aria-label="SSH session status">
+      <div className="sessionStripCaption"><Activity size={15}/>
+        <span>No SSH sessions open</span>
+        <small>{p.vaultUnlocked?"Connect to a saved host to use its tools":"Vault is locked"}</small>
+      </div>
+      {p.vaultUnlocked&&selected?
+        <button type="button" onClick={p.onConnect}><Plus size={14}/> Connect {selected.label}</button>:
+        !p.vaultUnlocked?<button type="button" onClick={p.onUnlock}><LockKeyhole size={14}/> Unlock Vault</button>:null}
+      <button type="button" aria-label="Search sessions and commands" onClick={p.onCommandPalette}><Command size={15}/></button>
+    </div>;
+  }
+  return <div className="sessionStrip" aria-label="Live SSH sessions">
+    <div className="sessionStripCaption"><Activity size={15}/>
+      <span>SSH SESSIONS</span><small>{p.sessions.length} connected</small>
+    </div>
+    <div className="sessionStripItems" role="group" aria-label="Choose native SSH session">
+      {p.sessions.map(session=>{
+        const host=p.hosts.find(item=>item.id===session.alias);
+        const number=p.sessions.filter(item=>item.alias===session.alias)
+          .findIndex(item=>item.id===session.id)+1;
+        const active=session.id===p.activeSession&&session.alias===p.selectedHost;
+        return <button type="button" key={session.id}
+          aria-pressed={active} className={active?"sessionStripItem active":"sessionStripItem"}
+          title={"Switch to "+(host?.label||session.alias)+" SSH session "+number}
+          onClick={()=>p.onSelect(session.id)}>
+          <span className="sessionStripDot" aria-hidden="true"/>
+          <span>{host?.label||session.alias}</span>
+          <small>#{number}</small>
+          {active&&<TerminalSquare size={13} aria-hidden="true"/>}
+        </button>;
+      })}
+    </div>
+    {selected&&!p.sessions.some(session=>session.alias===selected.id)&&p.vaultUnlocked&&
+      <button type="button" className="sessionStripConnect" onClick={p.onConnect}>
+        <Plus size={14}/> Connect {selected.label}
+      </button>}
+    <button type="button" className="sessionStripSearch" aria-label="Search all SSH sessions"
+      title="Find sessions, hosts and commands (Ctrl+K)" onClick={p.onCommandPalette}>
+      <Command size={15}/><span>Switch</span><ArrowRight size={13}/>
+    </button>
+  </div>;
+}
