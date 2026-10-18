@@ -133,3 +133,10 @@ jobs:
         shell: pwsh
         run: |
           ./apps/passh7-desktop/scripts/windows-agent-mcp-smoke.ps1 -ExecutablePath "$env:GITHUB_WORKSPACE/windows-build/passh7-desktop.exe"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test all native MCP tools through authenticated framed loopback
+        shell: pwsh
+        run: |
+          python apps/passh7-desktop/scripts/windows-mcp-loopback-smoke.py "$env:GITHUB_WORKSPACE/windows-build/passh7-desktop.exe"
