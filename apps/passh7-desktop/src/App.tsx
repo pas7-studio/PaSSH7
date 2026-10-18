@@ -1341,7 +1341,7 @@ export default function App(){
   const filtered=useMemo(()=>hosts.filter(h=>(h.label+" "+h.address+" "+h.group).toLowerCase().includes(query.trim().toLowerCase())),[hosts,query]);
   const activeConnections=sshTabs.filter(t=>t.alias===active.id).length;
   const connected=activeConnections>0;
-  const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: "+(connected?`connected (${activeConnections} SSH session${activeConnections===1?"":"s"})`:"disconnected")+"\nVault: "+(vaultUnlocked?"unlocked":"locked")+"\nPermissions: "+(connected?"Remote SSH account privileges (not sandboxed)":"No active SSH account")+"\nSelected resources: none"+"\nSSH route: "+(active.jumpAlias?"via "+active.jumpAlias+" (gateway LAN → "+active.address+":"+active.port+")":"direct");
+  const context="Host: "+active.label+"\nTarget: "+active.user+"@"+active.address+"\nConnection: "+(connected?`connected (${activeConnections} SSH session${activeConnections===1?"":"s"})`:"disconnected")+"\nVault: "+(vaultUnlocked?"unlocked":"locked")+"\nPermissions: "+(connected?"Remote SSH account privileges (not sandboxed)":"No active SSH account")+"\nSelected resources: none"+"\nSSH route: "+(active.jumpAlias?"via "+active.jumpAlias+" (gateway LAN → "+active.address+":"+active.port+")":"direct")+(agentMode==="local"?"\\nLocal CLI: built-in shell and files are LOCAL. For actions on this SSH server, use passh7 remote_exec, remote_list, remote_read and remote_write. No separate ssh.exe or credential prompts.":"");
   return <div className={"shell "+theme+(preferences.density==="compact"?" compact":"")}
     onKeyDownCapture={noteLocalVaultActivity} onPointerDownCapture={noteLocalVaultActivity}>
     <header className="topbar">
