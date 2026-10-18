@@ -85,6 +85,28 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await expect(separator).toHaveAttribute("aria-valuenow",String(start));
   });
 
+  await test.step("SFTP transfer history filters and disclosure",async()=>{
+    await page.goto("/?__reference=1&screen=files");
+    const queue=page.locator(".transferQueuePanel");
+    const filters=queue.getByRole("group",{name:"Filter SFTP transfer history"});
+    await expect(queue.locator(".transferQueueItem")).toHaveCount(1);
+    await filters.getByRole("button",{name:/^Failed/}).click();
+    await expect(filters.getByRole("button",{name:/^Failed/})).toHaveAttribute("aria-pressed","true");
+    await expect(queue.locator(".transferQueueItem")).toHaveCount(0);
+    await expect(queue.getByText("No failed transfers.")).toBeVisible();
+    await filters.getByRole("button",{name:/^Finished/}).click();
+    await expect(queue.locator(".transferQueueItem")).toHaveCount(1);
+    await expect(queue.locator(".transferQueueItem")).toContainText("README.md");
+    const disclosure=queue.locator(".transferQueueTitle");
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute("aria-expanded","false");
+    await expect(filters).not.toBeVisible();
+    await disclosure.click();
+    await expect(disclosure).toHaveAttribute("aria-expanded","true");
+    await expect(filters).toBeVisible();
+    await expect(queue.getByRole("button",{name:"Cancel pending"})).toBeDisabled();
+  });
+
   await test.step("settings accordion",async()=>{
     await page.goto("/?__reference=1&screen=settings");
     await page.locator(".settingsNav button").filter({hasText:"Terminal"}).click();
