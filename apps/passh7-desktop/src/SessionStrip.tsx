@@ -4,7 +4,7 @@ import {Activity,ArrowRight,Command,LockKeyhole,Plus,TerminalSquare,X} from "luc
 type Session={id:string;alias:string};
 type Host={id:string;label:string};
 type Props={
-  sessions:Session[];hosts:Host[];
+  sessions:Session[];hosts:Host[];closingSessions:string[];
   activeSession:string;selectedHost:string;vaultUnlocked:boolean;
   onSelect:(id:string)=>void;onDisconnect:(id:string)=>void;onConnect:()=>void;
   onUnlock:()=>void;onCommandPalette:()=>void;
@@ -58,9 +58,10 @@ export default function SessionStrip(p:Props){
             {active&&<TerminalSquare size={13} aria-hidden="true"/>}
           </button>
           <button type="button" className="sessionStripClose"
+            disabled={p.closingSessions.includes(session.id)}
             title={"Disconnect "+(host?.label||session.alias)+" SSH session "+number}
             aria-label={"Disconnect "+(host?.label||session.alias)+" SSH session "+number}
-            onClick={()=>p.onDisconnect(session.id)}><X size={13}/></button>
+            onClick={()=>p.onDisconnect(session.id)}>{p.closingSessions.includes(session.id)?"…":<X size={13}/>}</button>
         </div>;
       })}
     </div>
