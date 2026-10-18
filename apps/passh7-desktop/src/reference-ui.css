@@ -1175,3 +1175,17 @@
   .agentPage .agentTerminalFrame.expanded{height:72vh}
 }
 @media(prefers-reduced-motion:reduce){.agentSpin{animation:none}}
+
+.agentLocalBanner{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px 16px
+}
+.agentLocalBanner>div{display:flex;align-items:flex-start;gap:11px;flex:1;min-width:220px}
+.agentLocalBanner>div>svg{flex:none;margin-top:2px;color:var(--accent)}
+.agentLocalBanner strong{font-size:12px}
+.agentLocalBanner p{margin:5px 0 0;color:var(--muted);font-size:11px;line-height:1.6}
+.agentPage .agentLocalBanner button{white-space:nowrap;min-height:37px}
+.agentPage>.agentDiagnosticSection{margin:0}
+.agentPage>.agentDiagnosticSection .agentCard{min-height:128px}
+.agentPage>.agentDiagnosticSection .agentCards{margin-bottom:14px}
+@media(max-width:750px){.agentPage .agentLocalBanner>button{width:100%}}
