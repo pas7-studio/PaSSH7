@@ -1221,3 +1221,15 @@
 .connectionProbePanel .workspaceNotice code{display:block;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
 .connectionProbePanel .workspaceNotice small,.connectionProbePanel .workspaceError small{font-size:10px;line-height:1.5}
 .connectionProbePanel>.prefInfo{margin:0;font-size:11px;line-height:1.55}
+
+/* Practical, explicitly reviewed loopback tunnel presets. */
+.forwardPresets{display:grid;gap:10px;border:1px solid var(--border);border-radius:9px;
+  padding:13px;background:var(--panel2)}
+.forwardPresets>span{font-size:10px;font-weight:800;letter-spacing:1.1px;color:var(--muted)}
+.forwardPresets>div{display:flex;flex-wrap:wrap;gap:7px}
+.forwardPresets button{min-height:34px;padding:7px 11px;font-size:11px;white-space:nowrap}
+.forwardPresets small{font-size:10px;line-height:1.65;color:var(--muted)}
+.forwardConflict{display:flex;align-items:flex-start;gap:8px;border:1px solid color-mix(in srgb,#f0b45e 45%,var(--border));
+  border-radius:8px;background:color-mix(in srgb,#f0b45e 9%,var(--panel));padding:11px 12px;
+  font-size:11px;line-height:1.6;color:var(--fg)}
+.forwardConflict svg{flex:none;margin-top:1px;color:#f0b45e}
