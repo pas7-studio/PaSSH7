@@ -1091,3 +1091,87 @@
 .agentModeOption.active{border-color:#4d9ce7;background:rgba(65,142,210,.13)}
 .agentModeOption:focus-visible{outline:2px solid #71baff;outline-offset:3px}
 @media(max-width:900px){.agentModeGrid{grid-template-columns:1fr}}
+
+/* Agent cockpit: action-first layout with the SSH PTY visible without scrolling. */
+.agentPage{max-width:1920px}
+.agentPage .agentHero{padding:15px 18px;gap:14px}
+.agentPage .agentHeroIdentity{flex:1;min-width:240px}
+.agentPage .agentHeroMeta{margin-left:0}
+.agentPage .agentHeroActions{margin-left:auto;align-items:flex-end}
+.agentPage .agentHeroActions select{width:clamp(195px,18vw,275px);max-width:100%}
+.agentQuickLaunch{
+  display:grid;gap:15px;min-width:0;padding:19px 20px;border-radius:12px;
+  border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));
+  background:linear-gradient(110deg,color-mix(in srgb,var(--accent) 9%,var(--panel)),var(--panel));
+}
+.agentQuickLaunchHead{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap}
+.agentEyebrow{font-size:10px;letter-spacing:1.5px;font-weight:800;color:var(--accent)}
+.agentQuickLaunchHead h2{font-size:19px;margin:5px 0 4px;line-height:1.3}
+.agentQuickLaunchHead h2 strong{font-weight:750}
+.agentQuickLaunchHead p{margin:0;font-size:12px;line-height:1.55;color:var(--muted);max-width:740px}
+.agentQuickMeta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.agentQuickMeta span{font-size:10px;font-weight:700;color:var(--muted);background:var(--bg);
+  border:1px solid var(--border);padding:6px 9px;border-radius:6px}
+.agentQuickControls{display:grid;grid-template-columns:minmax(135px,185px) minmax(246px,1fr) auto auto;align-items:end;gap:12px;min-width:0}
+.agentQuickSelect{display:grid;gap:7px;font-size:11px;font-weight:650;color:var(--muted);min-width:0}
+.agentPage .agentQuickSelect select{width:100%;height:43px;font-size:13px;font-weight:700;padding-right:7px}
+.agentQuickMode{display:flex;align-items:stretch;min-height:43px;background:var(--bg);
+  border:1px solid var(--border);border-radius:9px;padding:4px;gap:3px;min-width:0}
+.agentPage .agentQuickMode button{flex:1;min-width:0;white-space:nowrap;padding:8px 10px;font-weight:650;
+  background:transparent;border:1px solid transparent;border-radius:6px;min-height:34px}
+.agentPage .agentQuickMode button.active{color:var(--fg);background:var(--accentSoft);
+  border-color:color-mix(in srgb,var(--accent) 55%,var(--border))}
+.agentPage .agentRunButton{min-height:43px;padding:9px 18px;font-weight:750;white-space:nowrap}
+.agentPage .agentCheckButton{min-height:43px;white-space:nowrap}
+.agentQuickFooter{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;
+  padding-top:8px;border-top:1px solid color-mix(in srgb,var(--border) 75%,transparent)}
+.agentQuickFooter>span{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;line-height:1.5}
+.agentQuickFooter>span svg{flex-shrink:0}
+.agentQuickFooter button{border:0;background:transparent;padding:4px 7px;min-height:29px;color:var(--accent);font-weight:650}
+.agentQuickFooter button:hover{background:var(--accentSoft)}
+.agentSpin{animation:agent-spinning 1s linear infinite}
+@keyframes agent-spinning{to{transform:rotate(360deg)}}
+.agentPage .agentWorkspaceGrid{grid-template-columns:minmax(0,1fr) minmax(260px,310px);gap:15px}
+.agentPage .agentWorkspaceMain,.agentPage .agentWorkspaceSide{gap:15px}
+.agentPage .agentEmbeddedTerminal{padding:17px}
+.agentPage .agentEmbeddedTerminal .agentSectionHead{margin-bottom:13px}
+.agentPage .agentTerminalFrame{height:clamp(460px,64vh,820px);min-height:460px}
+.agentPage .agentTerminalFrame.expanded{height:clamp(620px,84vh,1150px)}
+.agentPage .agentDiagnosticSection .agentCard{min-height:130px}
+.agentPage .agentDiagnosticSection .agentCards{margin-bottom:14px}
+.agentPage .agentContextSection .agentSectionHead{margin-bottom:0}
+.agentPage .agentContextSection .agentContextPreview{margin-top:14px}
+.agentPage .agentContextSection>button{margin-top:10px}
+.agentPage .agentGrantRows .agentLaunchRow{display:flex;flex-direction:column;align-items:stretch;gap:8px}
+.agentPage .agentGrantRows .agentLaunchCommand{padding:11px}
+.agentPage .agentGrantRows .agentLaunchCommand code{font-size:13px}
+.agentPage .agentGrantRows .agentLaunchRow>button{min-height:37px}
+.agentPage .agentWorkspaceSide .agentSection{padding:16px}
+.agentPage .agentWorkspaceSide .agentSection h2{font-size:14px}
+.shell.light .agentQuickLaunch{background:linear-gradient(115deg,#e8f2ff,#f8fbff);border-color:#b6cfe8}
+.shell.light .agentQuickMeta span,.shell.light .agentQuickMode{background:#f7fbff}
+@media(max-width:1380px){
+  .agentQuickControls{grid-template-columns:minmax(150px,210px) minmax(220px,1fr) auto}
+  .agentQuickControls .agentCheckButton{grid-column:3;grid-row:1;align-self:start}
+  .agentQuickControls .agentRunButton{grid-column:3;grid-row:2}
+  .agentQuickControls .agentQuickSelect{grid-row:1 / span 2;align-self:center}
+  .agentQuickControls .agentQuickMode{grid-row:1 / span 2;align-self:center}
+}
+@media(max-width:1040px){
+  .agentPage .agentWorkspaceGrid{grid-template-columns:minmax(0,1fr)}
+  .agentPage .agentWorkspaceSide{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .agentPage .agentWorkspaceSide .agentSection:last-child{grid-column:1/-1}
+}
+@media(max-width:750px){
+  .agentQuickLaunch{padding:15px;gap:11px}
+  .agentQuickControls{display:flex;flex-direction:column;align-items:stretch;gap:9px}
+  .agentQuickControls .agentQuickSelect,.agentQuickControls .agentQuickMode,
+  .agentQuickControls .agentRunButton,.agentQuickControls .agentCheckButton{width:100%}
+  .agentPage .agentWorkspaceSide{grid-template-columns:minmax(0,1fr)}
+  .agentPage .agentHeroActions{margin-left:0;flex:1}
+  .agentPage .agentHeroActions label{flex:1}
+  .agentPage .agentHeroActions select{width:100%}
+  .agentPage .agentTerminalFrame{height:390px;min-height:320px}
+  .agentPage .agentTerminalFrame.expanded{height:72vh}
+}
+@media(prefers-reduced-motion:reduce){.agentSpin{animation:none}}
