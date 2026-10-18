@@ -1455,6 +1455,16 @@ export default function App(){
       activeSession={activeSsh} selectedHost={selected} vaultUnlocked={vaultUnlocked}
       onSelect={id=>{const target=sshTabs.find(session=>session.id===id);
         if(target){setSelected(target.alias);setActiveSsh(id)}}}
+      onDisconnect={id=>{
+        const session=sshTabs.find(tab=>tab.id===id);
+        if(!session)return;
+        const other=sshTabs.filter(tab=>tab.alias===session.alias);
+        if(!window.confirm("Disconnect SSH session "+other.findIndex(tab=>tab.id===id)+1+
+          " on "+session.alias+"?\n\nRunning terminal processes and session-bound tunnels can be interrupted. "+
+          "The session's SFTP and local AI MCP access will become unavailable. "+
+          "Other SSH sessions stay connected."))return;
+        void closeInteractive(id);
+      }}
       onConnect={()=>{if(selected)void connectFromConnections(selected)}}
       onUnlock={()=>setVaultDialog(true)}
       onCommandPalette={()=>setCommandOpen(true)}/>}
