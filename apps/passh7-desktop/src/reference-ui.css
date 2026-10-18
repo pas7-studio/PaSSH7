@@ -1318,3 +1318,12 @@
 .topactions .topCommandPalette:hover{background:var(--accentSoft);border-color:var(--accent)}
 @media(max-width:1160px){.topCommandPalette kbd{display:none}}
 @media(max-width:760px){.topCommandPalette span{display:none}.topactions .topCommandPalette{padding:7px 9px}}
+
+.filesRecoveryError{display:grid;gap:8px;max-width:100%;overflow-wrap:anywhere}
+.filesRecoveryError strong{font-size:12px}
+.filesRecoveryError>span{font:11px/1.6 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.filesRecoveryError>small{font-size:11px;line-height:1.65}
+.filesRecoveryActions{display:flex;flex-wrap:wrap;gap:8px;margin-top:3px}
+.filesRecoveryActions button{background:var(--panel2);color:var(--fg);
+  border:1px solid var(--border);padding:7px 12px;font-size:11px;border-radius:7px}
+.filesRecoveryActions button:hover:not(:disabled){border-color:var(--accent)}
