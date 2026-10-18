@@ -1198,7 +1198,7 @@
 .dockerLogHeading strong svg{color:var(--accent)}
 .dockerLogHeading p{font-size:11px;color:var(--muted);line-height:1.5;margin:5px 0 0}
 .dockerLogHeading button{white-space:nowrap}
-.dockerLogsWorkspace{min-height:450px;flex:none}
+.dockerLogsWorkspace{min-height:240px;flex:none}
 .dockerLogsWorkspace .dockerLogsBody{min-height:160px}
 .dockerLogsWorkspace .dockerLogToolbar button[aria-pressed="true"]{
   background:var(--accentSoft);border-color:var(--accent)
@@ -1207,7 +1207,7 @@
 @media(max-width:780px){
   .dockerLogHeading{align-items:stretch}
   .dockerLogHeading button{width:100%}
-  .dockerLogsWorkspace{min-height:350px}
+  .dockerLogsWorkspace{min-height:240px}
 }
 
 /* Host diagnostics are explicit about TCP reachability versus authentication. */
