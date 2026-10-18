@@ -131,6 +131,19 @@ impl SessionStore {
         session.last_used=Instant::now();
         Ok(true)
     }
+    /// Background local agents may READ the Vault's live/expired state but
+    /// must never extend its idle timeout. This is enforced for every MCP
+    /// remote operation, not just when the initial capability was issued.
+    pub(crate) fn live_without_touch(&self)->Result<bool,String>{
+        let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
+        match guard.as_ref(){
+            Some(session) if session.last_used.elapsed()<IDLE_TIMEOUT=>Ok(true),
+            _=>{
+                *guard=None;
+                Ok(false)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
