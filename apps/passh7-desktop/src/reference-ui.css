@@ -1327,3 +1327,24 @@
 .filesRecoveryActions button{background:var(--panel2);color:var(--fg);
   border:1px solid var(--border);padding:7px 12px;font-size:11px;border-radius:7px}
 .filesRecoveryActions button:hover:not(:disabled){border-color:var(--accent)}
+
+/* Separate session switch and disconnect targets. Never use a single accidental click
+   for a destructive SSH operation; the parent requests an explicit confirmation. */
+.sessionStripGroup{display:flex;align-items:center;flex:none;min-width:0;border:1px solid var(--border);
+  border-radius:7px;background:var(--panel2);overflow:hidden;transition:border-color .12s}
+.sessionStripGroup.active{border-color:var(--accent);background:var(--accentSoft)}
+.sessionStripGroup:hover{border-color:var(--accent)}
+.sessionStrip .sessionStripGroup .sessionStripItem{border:0;border-radius:0;background:transparent;
+  min-width:0;padding-right:5px}
+.sessionStrip .sessionStripGroup .sessionStripClose{border:0;border-left:1px solid var(--border);
+  border-radius:0;background:transparent;color:var(--muted);min-height:32px;padding:6px 9px}
+.sessionStrip .sessionStripGroup .sessionStripClose:hover,
+.sessionStrip .sessionStripGroup .sessionStripClose:focus-visible{background:color-mix(in srgb,#db666c 18%,var(--panel));
+  color:#f39a9d}
+.sessionStrip .sessionStripGroup .sessionStripClose:focus-visible{outline-offset:-2px}
+.sessionStrip .sessionStripGroup .sessionStripItem[aria-pressed="true"]{font-weight:750}
+@media(max-width:720px){
+ .sessionStripGroup{max-width:180px}
+ .sessionStrip .sessionStripGroup .sessionStripItem{max-width:143px}
+ .sessionStrip .sessionStripGroup .sessionStripClose{padding:6px 7px}
+}
