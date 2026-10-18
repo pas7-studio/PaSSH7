@@ -581,6 +581,52 @@ fn vault_add_host(host: HostInput, sessions: State<'_, SessionStore>) -> Result<
         }).map_err(safe_err)
     })
 }
+/// Update only the immutable-alias host's connection parameters. Changing SSH
+/// endpoint/identity requires a fresh host-key verification and login.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateHostInput {
+    alias:String, hostname:String, port:u16, username:String,
+    identity_alias:String, reset_host_key:bool, forget_credentials:bool,
+}
+#[tauri::command]
+fn vault_update_host(host:UpdateHostInput,sessions:State<'_,SessionStore>,
+    ssh:State<'_,SshSessionManager>)->Result<(),String>{
+    if host.alias.trim().is_empty()||host.hostname.trim().is_empty()||
+        host.hostname.len()>253||host.hostname.chars().any(|c|c.is_whitespace()||c.is_control())||
+        host.username.trim().is_empty()||host.username.len()>128||
+        host.username.chars().any(|c|c.is_whitespace()||c.is_control())||host.port==0{
+        return Err("Invalid SSH hostname, port or username".into());
+    }
+    // Updating a live host would mislabel an already authenticated PTY and
+    // let future SFTP/Docker operations appear to target the edited address.
+    // Reject rather than secretly disconnect sessions or modify their route.
+    let live=ssh.active_sessions()?;
+    if live.iter().any(|session|session.alias==host.alias){
+        return Err("Disconnect all SSH sessions for this host before editing its connection".into());
+    }
+    sessions.use_password(|password|{
+        passh7_core::transaction(&vault_path()?,password,|vault|{
+            if !host.identity_alias.is_empty()&&!vault.identities.iter().any(|identity|identity.alias==host.identity_alias){
+                return Err(HubError::InvalidInput("Choose a key that exists in the encrypted Vault"));
+            }
+            let current=vault.hosts.iter_mut().find(|saved|saved.alias==host.alias)
+                .ok_or(HubError::InvalidInput("Host was not found in Vault"))?;
+            let endpoint_changed=current.hostname!=host.hostname||current.port!=host.port;
+            let account_changed=current.username!=host.username||
+                current.identity_alias!=host.identity_alias;
+            current.hostname=host.hostname.clone();
+            current.port=host.port;
+            current.username=host.username.clone();
+            current.identity_alias=host.identity_alias.clone();
+            if endpoint_changed||host.reset_host_key { current.pinned_host_key=None; }
+            if endpoint_changed||account_changed||host.forget_credentials {
+                current.extensions.remove("passh7_saved_auth");
+            }
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
 #[tauri::command]
 fn vault_set_host_identity(alias:String,identity_alias:String,sessions:State<'_,SessionStore>)
     ->Result<(),String>{
@@ -1207,7 +1253,7 @@ fn main() {
         .manage(local_agent_bridge::LocalAgentBridge::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
-            vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
+            vault_list_hosts,vault_add_host,vault_update_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
             ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_inspect,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_exec,local_agent_bridge::local_agent_probe,local_agent_bridge::local_agent_launch,local_agent_bridge::local_agent_connections,local_agent_bridge::local_agent_revoke,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_read_image,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
