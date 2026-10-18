@@ -296,7 +296,7 @@ export default function RemoteFilesWorkspace(p:Props){
       })()}
     </div>}
     <div ref={transferQueueRef} className="filesTransferQueueAnchor">
-      <TransferQueuePanel jobs={p.transferJobs} paused={p.transferPaused}
+      <TransferQueuePanel jobs={p.transferJobs} paused={p.transferPaused} focusToken={p.transferFocusToken}
         onPause={p.onPauseQueue} onCancel={p.onCancelJob}
         onRetry={p.onRetryJob} onClear={p.onClearFinished}/>
     </div>
