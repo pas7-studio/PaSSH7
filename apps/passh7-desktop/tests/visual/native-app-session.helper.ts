@@ -189,7 +189,7 @@ export async function runNativeAppSession(page:Page){
       .__mockSshBridge.localAgentLaunches
   );
   expect(launches).toEqual([{id:"session-b",agent:"opencode"}]);
-  await page.getByRole("button",{name:"Remote CLI",exact:true}).click();
+  await page.locator(".agentModeOption").filter({hasText:"Run directly in the authenticated SSH terminal."}).click();
   await expect(page.getByRole("button",{name:"Launch remote CLI"})).toBeVisible();
   await page.getByRole("button",{name:/Auto · remote first/}).click();
   await page.locator(".agentCard.codex").click();
