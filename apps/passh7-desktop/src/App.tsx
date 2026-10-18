@@ -227,13 +227,23 @@ export default function App(){
     setEditTarget({alias,displayName:host.label,hostname:host.address,port:host.port,username:host.user,
       identityAlias:host.identityAlias||"",resetHostKey:false,forgetCredentials:false});
   };
+  const editorChangesConnection=(draft:NonNullable<typeof editTarget>)=>{
+    const existing=hosts.find(host=>host.id===draft.alias);
+    return !existing||existing.address!==draft.hostname.trim()||existing.port!==draft.port||
+      existing.user!==draft.username.trim()||(existing.identityAlias||"")!==draft.identityAlias||
+      draft.resetHostKey||draft.forgetCredentials;
+  };
   const saveEditedHost=async()=>{
     if(!editTarget||editBusy||!vaultUnlocked||!desktopAvailable())return;
     const draft={...editTarget,displayName:editTarget.displayName.trim(),hostname:editTarget.hostname.trim(),username:editTarget.username.trim()};
     const changed=hosts.find(h=>h.id===draft.alias);
     if(!changed){setEditError("This host is no longer in the Vault.");return}
-    if(sshTabs.some(session=>session.alias===draft.alias)){
-      setEditError("Disconnect this host's SSH sessions before editing its profile.");return
+    if(editorChangesConnection(draft)&&sshTabs.some(session=>session.alias===draft.alias)){
+      setEditError("Disconnect this host's SSH sessions before changing the connection. Display-name-only edits are safe while connected.");return
+    }
+    if(editorChangesConnection(draft)&&hosts.some(host=>host.jumpAlias===draft.alias&&
+      sshTabs.some(session=>session.alias===host.id))){
+      setEditError("Disconnect the downstream gateway sessions before changing SSH connection settings.");return
     }
     if(!draft.displayName||draft.displayName.length>80||/[\x00-\x1f]/.test(draft.displayName)||
       !draft.hostname||draft.hostname.length>253||/[\s\x00-\x1f]/.test(draft.hostname)||
@@ -1796,7 +1806,7 @@ export default function App(){
         </div>
         <p className="note">Update connection settings stored in your encrypted Vault. The saved host name
           <strong> {editTarget.alias}</strong> remains unchanged so gateway references stay valid.</p>
-        {sshTabs.some(t=>t.alias===editTarget.alias)&&<div className="workspaceError editConnectionSessions" role="alert">
+        {editorChangesConnection(editTarget)&&sshTabs.some(t=>t.alias===editTarget.alias)&&<div className="workspaceError editConnectionSessions" role="alert">
           <strong>Disconnect active SSH sessions to edit this host</strong>
           <small>Running shells and session-bound tunnels must be closed first. Each disconnect requires confirmation.</small>
           <div>{sshTabs.filter(t=>t.alias===editTarget.alias).map((session,index)=>
@@ -1805,11 +1815,13 @@ export default function App(){
               {closingSessions.includes(session.id)?"Disconnecting…":"Disconnect SSH #"+(index+1)}
             </button>)}</div>
         </div>}
-        {hosts.some(host=>host.jumpAlias===editTarget.alias&&sshTabs.some(tab=>tab.alias===host.id))&&
+        {editorChangesConnection(editTarget)&&hosts.some(host=>host.jumpAlias===editTarget.alias&&sshTabs.some(tab=>tab.alias===host.id))&&
           <div className="workspaceError editConnectionSessions" role="alert">
             This host is serving as a gateway for connected private SSH targets.
             Disconnect downstream SSH sessions before saving gateway changes.
           </div>}
+        {!editorChangesConnection(editTarget)&&sshTabs.some(tab=>tab.alias===editTarget.alias)&&
+          <div className="workspaceNotice" role="status">You can rename this host while its SSH sessions remain open. Changes to its address, username, SSH key or trust require disconnecting first.</div>}
         <div className="wizardFields">
           <label>Host ID (used by SSH gateway routing)<input value={editTarget.alias} disabled
             title="Host IDs remain stable. Create a new host if you need a different alias."/></label>
@@ -1847,8 +1859,9 @@ export default function App(){
         </div>
         <div className="wizardActions">
           <button type="button" disabled={editBusy} onClick={()=>{setEditTarget(null);setEditError("")}}>Cancel</button>
-          <button type="submit" className="primary" disabled={editBusy||sshTabs.some(t=>t.alias===editTarget.alias)||
-            hosts.some(host=>host.jumpAlias===editTarget.alias&&sshTabs.some(tab=>tab.alias===host.id))}>
+          <button type="submit" className="primary" disabled={editBusy||(editorChangesConnection(editTarget)&&(
+            sshTabs.some(t=>t.alias===editTarget.alias)||
+            hosts.some(host=>host.jumpAlias===editTarget.alias&&sshTabs.some(tab=>tab.alias===host.id))))}>
             {editBusy?"Saving securely…":"Save SSH connection"}
           </button>
         </div>
