@@ -374,3 +374,19 @@ loopback tests do not substitute for this manual validation.
 
 | APP-UX-33 | On host A start a slow, explicitly confirmed Docker restart. Switch to host B and run a separate Docker start while A is still busy | Host B is not blocked by host A's action busy state; both native operations run on their own SSH sessions and status/errors appear only on the matching selected session |
 | APP-UX-34 | With two simultaneous actions in SSH sessions A and B, let A finish before B | A clearing its busy state must not re-enable B's Docker action buttons. Neither command or result migrates between SSH hosts |
+
+
+## Host editor, Vault key replacement and layout migration (2026-10-18)
+
+| ID | Manual check | Required result |
+| --- | --- | --- |
+| HOST-EDIT-01 | From Connections table select Edit, change friendly name, hostname, port and SSH user, then Save | Form identifies stable Vault ID, validates required fields and confirms impact. All updates are atomic in the encrypted Vault and reflect in sidebar, Connections and Terminal after reload |
+| HOST-EDIT-02 | Change only the friendly display name | Gateway routing remains attached to immutable alias. Pinned host key and existing saved login are retained |
+| HOST-EDIT-03 | Change hostname or SSH port | Old pinned SHA-256 trust and stored credentials are cleared, new endpoint requires explicit independent host-key verification before credentials are sent |
+| HOST-EDIT-04 | Change SSH username or selected Vault identity without changing address/port | Saved authentication secrets are cleared, pinned server identity is retained. Key private material is not exposed or deleted |
+| HOST-EDIT-05 | Open Edit, choose Import / generate SSH key, create or import a new identity, then return | Newly imported/generated SSH key is preselected in the host editor; the user still must Save. Cancelling the editor does not change the host binding |
+| HOST-EDIT-06 | Edit host with an active SSH terminal/PTY | Editor explains why Save is disabled and native Vault update rejects racing writes. No existing terminal or tunnel is silently migrated or closed |
+| HOST-EDIT-07 | In Connections or Terminal select Remove on a host with open sessions | Dialog explicitly warns that running commands, tunnels and local MCP tools can be interrupted. Cancel preserves the host; confirmed removal deletes the profile and closes its sessions while retaining imported private keys |
+| HOST-EDIT-08 | Remove a gateway referenced by a saved private target | Dialog disables deletion with a clear dependency explanation, matching Rust Vault protection |
+| HOST-EDIT-09 | Switch among Terminal, Connections, Files, Docker, Snippets, Ports, AI Agents and Settings rapidly | The old four contextual navigation icons never appear on the right on any view. Global left nav and global session strip are the only navigation controls; the top title/header datum stays vertically consistent |
+| HOST-EDIT-10 | Use 100% / 125% / 150% Windows display scaling and resize to 760 px and below | No clipped Save/Cancel controls, no overlay underneath the app, no overlapping header or old contextual tabs |
