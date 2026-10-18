@@ -477,7 +477,7 @@ export default function App(){
       if(transferFolderRef.current.session===session&&transferFolderRef.current.path===directory)
         setSftpError("Upload succeeded; could not refresh folder: "+String(error));
     });
-  },sshTabs.map(tab=>tab.id));
+  },sshTabs);
   const sftpTransferBusy=transferQueue.active;
   const [transferFocusToken,setTransferFocusToken]=useState(0);
   const transferActivity=useMemo(()=>{
@@ -494,9 +494,16 @@ export default function App(){
   const openTransferQueue=()=>{
     const job=transferQueue.jobs.find(item=>["running","selecting","cancelling","queued"].includes(item.status)
       &&sshTabs.some(tab=>tab.id===item.session))
-      ||transferQueue.jobs.find(item=>item.status==="failed"&&sshTabs.some(tab=>tab.id===item.session));
-    const owner=job?sshTabs.find(tab=>tab.id===job.session):null;
+      ||transferQueue.jobs.slice().reverse().find(item=>item.status==="failed")
+      ||transferQueue.jobs.find(item=>item.status==="queued");
+    const owner=job?sshTabs.find(tab=>tab.id===job.session)
+      ||sshTabs.find(tab=>tab.alias===job.host):null;
     if(owner){setSelected(owner.alias);setActiveSsh(owner.id)}
+    else if(job&&hosts.some(host=>host.id===job.host)){
+      // A failed job from a disconnected server stays bound to that host.
+      // Never silently select an unrelated live SSH session.
+      setSelected(job.host);setActiveSsh("");
+    }
     setTransferFocusToken(current=>current+1);
     setPanel("files");
   };
