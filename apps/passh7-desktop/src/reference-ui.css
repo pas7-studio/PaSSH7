@@ -1362,3 +1362,39 @@
 @media(max-width:860px){.topHost .topHostSwitch{max-width:190px}}
 @media(max-width:620px){.topHost .topHostSwitch{max-width:135px}
  .topHostSwitch small{display:none}}
+
+/* Stable canvas datum across left navigation, no legacy right-side tabs. */
+.shell .workspaceFull>.context.fullContext{display:flex;min-height:0}
+.shell .workspaceFull>.context.fullContext>.contextBody{padding:0;flex:1;min-width:0;overflow:auto}
+.shell .workspacePageHeader{min-height:82px;align-items:center;flex:none;
+  box-sizing:border-box;margin:0;padding:10px 0 13px}
+.shell .widePage{padding-top:16px;row-gap:14px}
+.shell .workspacePageHeading h1{line-height:1.3}
+.shell .main>.identity{min-height:112px;align-items:center;box-sizing:border-box}
+.shell .main>.identity h1{line-height:1.3}
+/* Consistent position of workspaces with or without a status badge on right. */
+.shell .workspacePageMeta{min-height:32px}
+.shell .workspacePageHeading{align-self:center}
+.shell .workspacePageIcon{align-self:center}
+.editConnectionModal{width:min(640px,calc(100vw - 32px));max-height:min(88vh,860px);
+  overflow:auto;scrollbar-width:thin}
+.editConnectionModal .wizardFields{gap:12px}
+.editConnectionModal .wizardFields>button{width:max-content;max-width:100%;
+  display:inline-flex;align-items:center;gap:8px;border:1px solid var(--border);
+  background:var(--panel2);padding:9px 13px;color:var(--fg);border-radius:7px}
+.editConnectionCheck{display:flex!important;grid-template-columns:none!important;
+  align-items:flex-start;gap:11px!important;padding:12px;border:1px solid var(--border);
+  background:var(--panel2);border-radius:8px;cursor:pointer}
+.editConnectionCheck input{width:16px!important;height:16px!important;margin:3px 0 0;
+  flex:none;accent-color:var(--accent)}
+.editConnectionCheck span{display:grid;gap:5px}
+.editConnectionCheck strong{font-size:12px}
+.editConnectionCheck small{color:var(--muted);font-size:11px;font-weight:450;line-height:1.6}
+.connectionInspectorActions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.connectionInspectorActions button{flex:1;white-space:nowrap}
+.connectionsPage .connectionRowActions button{white-space:nowrap}
+@media(max-width:760px){
+  .shell .workspacePageHeader{min-height:82px}
+  .editConnectionModal{max-height:calc(100dvh - 28px)}
+  .connectionInspectorActions button{min-width:0}
+}
