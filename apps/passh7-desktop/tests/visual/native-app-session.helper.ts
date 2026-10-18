@@ -23,6 +23,8 @@ export async function runNativeAppSession(page:Page){
     const exports:Array<{containerName:string;contents:string}>=[];
     const delayedSftp:Array<()=>void>=[];
     const agentProbes:Array<{id:string;agent:string}>=[];
+    const localAgentLaunches:Array<{id:string;agent:string}>=[];
+    const localAgentProbes:string[]=[];
     const delayedForwards:Array<()=>void>=[];
     const forwards=new Map<string,Array<{localPort:number;targetHost:string;remotePort:number}>>();
     const file=(name:string)=>({name,isDir:false,sizeBytes:100,modifiedAt:null,
@@ -78,6 +80,13 @@ export async function runNativeAppSession(page:Page){
           ID:"aaaaaaaaaaaa",Names:"api-test",Image:"api:latest",State:"running",Status:"Up 1 hour",Ports:""
         });
         case "ssh_session_docker_catalog":return "";
+        case "local_agent_probe":
+          localAgentProbes.push(String(args.agent));
+          return {installed:args.agent==="opencode",path:args.agent==="opencode"?"C:\\Tools\\opencode.cmd":null,
+            diagnostic:args.agent==="opencode"?"Local signed-in CLI ready":"Not installed"};
+        case "local_agent_launch":
+          localAgentLaunches.push({id:String(args.id),agent:String(args.agent)});
+          return "Launched local "+String(args.agent)+" with SSH tool access";
         case "ssh_session_agent_probe":
           agentProbes.push({id:String(args.id),agent:String(args.agent)});
           if(args.agent==="codex")return {installed:true,version:"codex test v1",
@@ -124,7 +133,7 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_INTERNALS__=mock;
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
-      writes,resized,ready,exports,agentProbes,
+      writes,resized,ready,exports,agentProbes,localAgentProbes,localAgentLaunches,
       localTouches(){return localTouches;},
       failDockerList(message:string){dockerListFailure=message;},
       pendingForwards(){return delayedForwards.length;},
@@ -167,6 +176,23 @@ export async function runNativeAppSession(page:Page){
   const chooser=page.getByRole("combobox",{name:"Choose SSH terminal for agent"});
   await chooser.selectOption("session-b");
   await expect(page.locator(".agentTerminalFrame .terminalSessionSurface")).toHaveAttribute("data-ssh-session","session-b");
+
+  // Migrate the old remote-only agent view: when a remote CLI is absent,
+  // Auto uses an already signed-in local CLI and grants access only to the
+  // selected native SSH session (not to the SSH identity or account password).
+  await page.evaluate(()=>{window.confirm=()=>true;});
+  await page.locator(".agentCard.opencode").click();
+  await page.getByRole("button",{name:"Launch automatically"}).click();
+  await expect(page.locator(".agentLaunch .workspaceNotice")).toContainText("Launched local opencode");
+  const launches=await page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{localAgentLaunches:Array<{id:string;agent:string}>}})
+      .__mockSshBridge.localAgentLaunches
+  );
+  expect(launches).toEqual([{id:"session-b",agent:"opencode"}]);
+  await page.getByRole("button",{name:"Remote CLI",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Launch remote CLI"})).toBeVisible();
+  await page.getByRole("button",{name:/Auto · remote first/}).click();
+  await page.locator(".agentCard.codex").click();
   await page.getByRole("button",{name:"Focus console"}).click();
   await page.keyboard.type("echo persistent");
   await page.keyboard.press("Enter");
