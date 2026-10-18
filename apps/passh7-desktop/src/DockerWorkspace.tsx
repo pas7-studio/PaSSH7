@@ -181,7 +181,7 @@ export default function DockerWorkspace(p:Props){
     activeLog?{session:p.session,id:activeLog.containerId,name:activeLog.containerName}:null;
   const paused=!!pausedSnapshot&&pausedSnapshot.session===p.session&&
     pausedSnapshot.id===displayedTarget?.id;
-  const logText=paused?pausedSnapshot.text:(activeLog?.containerId===displayedTarget?.id?activeLog.text:"");
+  const logText=paused&&pausedSnapshot?pausedSnapshot.text:(activeLog?.containerId===displayedTarget?.id?activeLog.text:"");
   const logLines=useMemo(()=>logText.split(/\r?\n/)
     .filter(Boolean).filter(line=>line.toLowerCase().includes(logsSearch.toLowerCase()))
     .filter(line=>level==="all"||(level==="error"?/\berror\b|\bfatal\b|\bpanic\b/i.test(line):/\bwarn(ing)?\b/i.test(line)))
@@ -344,7 +344,7 @@ export default function DockerWorkspace(p:Props){
         ?"Reading recent container logs over your SSH session…"
         :p.logsError?"Log retrieval failed. Check the actionable error above and retry."
         :"Select a container above to view stdout/stderr logs through SSH."}</div>}
-    </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines · {new Blob([logLines.join("\n")]).size.toLocaleString()} UTF-8 bytes</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
+    </div><div className="dockerLogFooter"><span>{paused?"Ⅱ View paused · live SSH stream continues":activeLog?.containerId===displayedTarget?.id?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines · {new Blob([logLines.join("\n")]).size.toLocaleString()} UTF-8 bytes</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
     </section></>}
     {tab!=="containers"&&tab!=="logs"&&<section className="dockerCatalogWorkspace">
       <div className="dockerToolbar">
