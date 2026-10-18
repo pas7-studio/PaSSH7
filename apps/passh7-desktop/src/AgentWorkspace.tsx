@@ -161,7 +161,7 @@ export default function AgentWorkspace(p:Props){
               </button>
             })}
           </div>
-                    {probe&&<div className="agentDiscovery" aria-label="Remote CLI discovery">
+          {probe&&<div className="agentDiscovery" aria-label="Remote CLI discovery">
             <div><strong>Detected platform</strong><span>{probe.platform==="windows"?"Windows SSH":probe.platform==="unix"?"Unix SSH":"Unknown"}</span></div>
             <div><strong>CLI availability</strong><span>{cliStatus(probe)}</span></div>
             {probe.source&&<div><strong>Discovery source</strong><span>{probe.source}</span></div>}
@@ -184,13 +184,6 @@ export default function AgentWorkspace(p:Props){
             <p>The install command is never executed automatically. Reconnect SSH or re-check CLI detection after installation.</p>
           </div>}
 
-          {p.mode==="remote"&&probe?.platform==="windows"&&!probe.installed&&<div className="agentInstallHelp">
-            <strong>{probe.desktopApp?"Desktop app ≠ SSH terminal CLI":"Remote CLI not found"}</strong>
-            <p>A desktop application cannot run in an SSH text session. Install the terminal CLI on that SSH account, or use Local + SSH with an installed local CLI.</p>
-            <div><code>{installation[p.agent].command}</code><button type="button" onClick={()=>void copyInstall()}><Clipboard size={14}/> Copy install command</button></div>
-            <a href={installation[p.agent].url} target="_blank" rel="noreferrer">{installation[p.agent].label} <ExternalLink size={12}/></a>
-            {probe.desktopApp&&<button type="button" onClick={p.onPrepareRdp}><ExternalLink size={14}/> Configure RDP tunnel</button>}
-          </div>}
           {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>}
         </section>}
 
