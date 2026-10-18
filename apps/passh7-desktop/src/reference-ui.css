@@ -1080,3 +1080,14 @@
 .remoteHealthRow>span:last-child{display:flex;flex-direction:column;gap:5px;min-width:0}
 .remoteHealthRow strong{font-size:12px;line-height:1.35}
 .remoteHealthRow small{font-size:11px;line-height:1.5;color:var(--muted,#93a8bf);overflow-wrap:anywhere}
+
+/* Agent execution mode: one path for existing remote CLIs, one local fallback. */
+.agentModeGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.agentModeOption{display:flex;flex-direction:column;gap:7px;align-items:flex-start;text-align:left;min-width:0;
+  border:1px solid var(--line,#33465d);border-radius:11px;background:rgba(100,129,163,.05);
+  color:inherit;padding:13px 14px;cursor:pointer;transition:border-color .15s,background .15s}
+.agentModeOption strong{font-size:12px;line-height:1.35}
+.agentModeOption small{font-size:11px;line-height:1.5;color:var(--muted,#91a3ba)}
+.agentModeOption.active{border-color:#4d9ce7;background:rgba(65,142,210,.13)}
+.agentModeOption:focus-visible{outline:2px solid #71baff;outline-offset:3px}
+@media(max-width:900px){.agentModeGrid{grid-template-columns:1fr}}
