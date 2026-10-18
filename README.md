@@ -64,6 +64,16 @@ The agent's own built-in shell and file tools still run on your **local machine*
 
 **Connections** shows distinct counts for connected hosts and native SSH sessions. A directly reachable saved host can be tested for a valid SSH identification banner and response time; that test does not authenticate or verify the host key. Jump-routed private targets intentionally cannot be misleadingly probed directly from the PC. **Settings** includes a searchable category navigation, with actual local MCP architecture, CLI sign-in limitations and permission scope documented in AI Agents settings.
 
+## Edit and remove SSH connections
+
+Use **Connections → Edit** (in a host row or inspector), the small pencil beside the host in the **left sidebar**, or the pencil in **Terminal**. The encrypted Vault editor updates a host's friendly name, SSH hostname/IP, port, username and assigned private-key identity together. You can import or generate a new Ed25519 key directly from the editor; the resulting key is selected for the host but is not attached until you choose **Save**. Display names are independent of immutable Vault IDs, so renaming does not break a jump-host route.
+
+**Security invariants:** editing a connected SSH host is blocked rather than silently moving live terminals or MCP grants to a different address. Changing the server address/port forgets the old pinned host fingerprint and saved login: the new server must be independently verified before authentication. Changing SSH account or identity clears saved login, but retains a verified host key for the unchanged server. You can also explicitly reset the host-key pin or forget saved login. Imported private keys are never deleted by editing or removing a host.
+
+Use **Connections → Remove**, the inspector's **Remove**, or Terminal's trash icon to delete a host. The dialog warns about connected PTYs, remote commands, SFTP, tunnels and local agent capabilities. Deleting a jump gateway referenced by other saved hosts is blocked until those routes are removed. The host's standalone SSH keys remain encrypted in Vault.
+
+The redundant four-icon navigation previously shown on the right has been removed. The left sidebar is the primary workspace navigation, while the shared session strip now appears across **every** workspace, including Terminal; this avoids duplicate terminal tab bars and vertical layout shifts.
+
 ## Navigation without extra SSH sessions
 
 The global command palette uses **Ctrl/Cmd+Shift+P everywhere** or **Ctrl/Cmd+K outside the live SSH xterm**. When xterm has keyboard focus, Ctrl+K stays available to remote shells and agents for normal command-line editing. The palette searches individual live SSH PTYs, saved hosts, workspaces and safe app actions. Clicking the **current host name in the top bar** also opens this palette prefiltered to SSH hosts and terminal sessions. Use `@` to filter hosts/sessions or `>` for workspaces/actions. Enter on a live terminal reuses that exact native SSH session. Enter on a saved host selects it and opens Terminal; **Ctrl/Cmd+Enter** on a host explicitly runs the normal Connect flow (pinned host-key verification and regular login still apply). Adding a host or unlocking Vault from the palette uses the existing dialogs. The palette never executes remote shell commands.
