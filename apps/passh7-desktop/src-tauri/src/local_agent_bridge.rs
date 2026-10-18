@@ -227,6 +227,42 @@ fn cleanup_temp_config(path:Option<&Path>){
         }
     }
 }
+// An empty, disposable local cwd is important: built-in agent shell/file tools
+// must never accidentally treat PaSSH7's installation directory as the SSH host.
+// Codex/OpenCode read AGENTS.md; Claude Code reads CLAUDE.md from their cwd.
+const REMOTE_WORKSPACE_INSTRUCTIONS:&str="You were started locally by PaSSH7 to work on the SSH host selected in the PaSSH7 app.\\n\\nFor ALL commands and file operations on that host, use the passh7 MCP tools: remote_exec, remote_list, remote_read, and remote_write. Your built-in shell and file tools operate on the LOCAL machine, not the SSH host. Do not run host commands using your local shell or another SSH connection.\\n\\nThis is not a sandbox. Confirm destructive operations with the user and never reveal credentials. If PaSSH7's MCP tools are unavailable, tell the user and stop remote actions rather than silently using local tools.\\n";
+fn prepare_agent_workspace(config:Option<&Path>)->Result<PathBuf,String>{
+    let dir=if is_opencode_v2_config(config){
+        config.and_then(Path::parent).ok_or("Missing OpenCode V2 working directory")?.to_path_buf()
+    }else{
+        let dir=std::env::temp_dir().join(format!("passh7-agent-workspace-{}",rand::random::<u64>()));
+        fs::create_dir(&dir).map_err(|_|"Cannot create private agent working directory")?;
+        dir
+    };
+    let result=(||->Result<(),String>{
+        for filename in ["AGENTS.md","CLAUDE.md"]{
+            let file=dir.join(filename);
+            let mut f=OpenOptions::new().write(true).create_new(true).open(file)
+                .map_err(|_|"Cannot create temporary agent instructions")?;
+            f.write_all(REMOTE_WORKSPACE_INSTRUCTIONS.as_bytes())
+                .map_err(|_|"Cannot write temporary agent instructions")?;
+        }
+        Ok(())
+    })();
+    if let Err(error)=result{
+        for name in ["AGENTS.md","CLAUDE.md"]{let _=fs::remove_file(dir.join(name));}
+        if !is_opencode_v2_config(config){let _=fs::remove_dir(&dir);}
+        return Err(error);
+    }
+    Ok(dir)
+}
+fn cleanup_local_launch(config:Option<&Path>,workspace:&Path){
+    for filename in ["AGENTS.md","CLAUDE.md"]{
+        let _=fs::remove_file(workspace.join(filename));
+    }
+    cleanup_temp_config(config);
+    if !is_opencode_v2_config(config){let _=fs::remove_dir(workspace);}
+}
 fn new_config(agent:&str,executable:&Path,opencode_major:Option<u32>)->Result<Option<PathBuf>,String>{
     // Config contains only our own executable path, never SSH/Vault secrets or
     // local-bridge tokens. The CLI process inherits the ephemeral grant via env.
@@ -292,10 +328,14 @@ pub async fn local_agent_launch(agent:String,id:String,
             .map_err(|_|"OpenCode CLI version probe interrupted".to_owned())??)
     }else{None};
     let config=new_config(&agent,&self_exe,major)?;
+    let workspace=match prepare_agent_workspace(config.as_deref()){
+        Ok(path)=>path,
+        Err(error)=>{cleanup_temp_config(config.as_deref());return Err(error);}
+    };
     let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id).await{
         Ok(grant)=>grant,
         Err(error)=>{
-            cleanup_temp_config(config.as_deref());
+            cleanup_local_launch(config.as_deref(),&workspace);
             return Err(error);
         }
     };
@@ -313,6 +353,7 @@ pub async fn local_agent_launch(agent:String,id:String,
         let _=config.as_ref();
         return Err("Local interactive CLI launch currently requires Windows; Unix desktop terminal integration is not enabled.".into());
     }
+    cmd.current_dir(&workspace);
     // The local CLI is interactive. Do NOT redirect its standard handles to
     // NUL: terminal coding assistants would start but could not accept input
     // or render their UI in the newly created Windows console. CREATE_NEW_CONSOLE
@@ -336,13 +377,13 @@ pub async fn local_agent_launch(agent:String,id:String,
             std::thread::spawn(move||{
                 let _=child.wait();
                 if let Ok(mut active)=grants.lock(){active.remove(&token);}
-                cleanup_temp_config(config.as_deref());
+                cleanup_local_launch(config.as_deref(),&workspace);
             });
             Ok(format!("Launched local {agent} CLI in a separate console with SSH tool access to the selected authenticated session. Local CLI login remains unchanged."))
         },
         Err(error)=>{
             if let Ok(mut active)=bridge.grants.lock(){active.remove(&token);}
-            cleanup_temp_config(config.as_deref());
+            cleanup_local_launch(config.as_deref(),&workspace);
             Err(error)
         }
     }
@@ -466,6 +507,18 @@ mod tests{
         cleanup_temp_config(Some(&v2));
         assert!(!v1.exists());
         assert!(!parent.exists());
+    }
+    #[test]
+    fn local_agents_start_in_disposable_remote_tool_workspace(){
+        let path=prepare_agent_workspace(None).unwrap();
+        for name in ["AGENTS.md","CLAUDE.md"]{
+            let read=fs::read_to_string(path.join(name)).unwrap();
+            assert!(read.contains("passh7 MCP tools"));
+            assert!(read.contains("LOCAL machine"));
+            assert!(!read.contains("PASSH7_BRIDGE_TOKEN"));
+        }
+        cleanup_local_launch(None,&path);
+        assert!(!path.exists());
     }
     #[test]
     fn opencode_version_probe_recognizes_v1_and_v2(){
