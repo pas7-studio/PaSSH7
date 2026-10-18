@@ -1,6 +1,7 @@
-import {useMemo,useState} from "react";
-import {CheckCircle2,KeyRound,LockKeyhole,Plus,Search,Server,ShieldAlert,ShieldCheck,TerminalSquare,Upload,WifiOff} from "lucide-react";
+import {useMemo,useRef,useState} from "react";
+import {CheckCircle2,KeyRound,LockKeyhole,Plus,RefreshCw,Search,Server,ShieldAlert,ShieldCheck,TerminalSquare,Upload,WifiOff} from "lucide-react";
 import {WorkspaceHeader,WorkspaceEmpty,WorkspaceMetric,WorkspaceStatus} from "./WorkspaceChrome";
+import type {SshProbeResult} from "./backend";
 
 export type ConnectionHost={
   id:string;label:string;address:string;user:string;port:number;fingerprint:boolean;
@@ -9,12 +10,28 @@ export type ConnectionHost={
 type Props={
   hosts:ConnectionHost[];selected:string;connectedAliases:string[];vaultUnlocked:boolean;
   onSelect:(alias:string)=>void;onConnect:(alias:string)=>void;onTerminal:(alias:string)=>void;
-  onAdd:()=>void;onImport:()=>void;
+  onAdd:()=>void;onImport:()=>void;onProbe:(alias:string)=>Promise<SshProbeResult>;
 };
 export default function ConnectionsWorkspace(p:Props){
   const [search,setSearch]=useState("");
   const [view,setView]=useState<"all"|"connected"|"trusted">("all");
   const connected=new Set(p.connectedAliases);
+  const [testing,setTesting]=useState("");
+  const [testResult,setTestResult]=useState<{alias:string;result:SshProbeResult|null;error:string}|null>(null);
+  const testGeneration=useRef(0);
+  const testHost=async(alias:string)=>{
+    if(!p.vaultUnlocked||testing)return;
+    const generation=++testGeneration.current;
+    setTesting(alias);setTestResult(null);
+    try{
+      const result=await p.onProbe(alias);
+      if(generation===testGeneration.current)setTestResult({alias,result,error:""});
+    }catch(error){
+      if(generation===testGeneration.current)setTestResult({alias,result:null,error:String(error)});
+    }finally{
+      if(generation===testGeneration.current)setTesting("");
+    }
+  };
   const filtered=useMemo(()=>p.hosts.filter(host=>{
     if(view==="connected"&&!connected.has(host.id))return false;
     if(view==="trusted"&&!host.fingerprint)return false;
@@ -28,7 +45,7 @@ export default function ConnectionsWorkspace(p:Props){
       trailing={<span className="workspaceHeaderCount">{p.hosts.length} saved hosts</span>}/>
     <div className="connectionsMetrics workspaceMetrics">
       <WorkspaceMetric icon={Server} label="Saved hosts" value={p.hosts.length} detail="Encrypted Vault entries"/>
-      <WorkspaceMetric icon={CheckCircle2} label="Connected hosts" value={connected.size} intent="good" detail="Authenticated sessions"/>
+      <WorkspaceMetric icon={CheckCircle2} label="Connected hosts" value={connected.size} intent="good" detail={p.connectedAliases.length+" authenticated session(s) across these hosts"}/>
       <WorkspaceMetric icon={ShieldCheck} label="Trusted keys" value={p.hosts.filter(host=>host.fingerprint).length} detail="Pinned host fingerprints"/>
     </div>
     <div className="connectionsBody">
@@ -46,12 +63,12 @@ export default function ConnectionsWorkspace(p:Props){
           <tbody>{filtered.map(host=><tr key={host.id} tabIndex={0} aria-selected={host.id===p.selected}
             className={host.id===p.selected?"selected":""} onClick={()=>p.onSelect(host.id)}
             onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();p.onSelect(host.id)}}}>
-            <td><button className="connectionsHostName" onClick={()=>p.onSelect(host.id)}><Server size={16}/><strong>{host.label}</strong></button></td>
+            <td><button className="connectionsHostName" onClick={event=>{event.stopPropagation();p.onSelect(host.id)}}><Server size={16}/><strong>{host.label}</strong></button></td>
             <td><div className="connectionsTarget">{host.user}@{host.address}:{host.port}{host.jumpAlias&&<small>Via {host.jumpAlias}</small>}</div></td>
             <td><WorkspaceStatus kind={host.fingerprint?"trusted":"warning"}>{host.fingerprint?"Pinned":"Verify key"}</WorkspaceStatus></td>
-            <td><WorkspaceStatus kind={connected.has(host.id)?"connected":"offline"}>{connected.has(host.id)?"Connected":"Offline"}</WorkspaceStatus></td>
-            <td><div className="connectionRowActions"><button onClick={()=>p.onTerminal(host.id)}><TerminalSquare size={14}/> Terminal</button>
-              <button className="workspacePrimary" onClick={()=>p.onConnect(host.id)}>{connected.has(host.id)?"New session":host.hasSavedCredentials?"Quick connect":"Connect"}</button></div></td>
+            <td><WorkspaceStatus kind={connected.has(host.id)?"connected":"offline"}>{connected.has(host.id)?p.connectedAliases.filter(alias=>alias===host.id).length+" session(s)":"Not connected"}</WorkspaceStatus></td>
+            <td><div className="connectionRowActions"><button onClick={event=>{event.stopPropagation();p.onTerminal(host.id)}}><TerminalSquare size={14}/> Terminal</button>
+              <button className="workspacePrimary" onClick={event=>{event.stopPropagation();p.onConnect(host.id)}}>{connected.has(host.id)?"New session":host.hasSavedCredentials?"Quick connect":"Connect"}</button></div></td>
           </tr>)}</tbody></table>
           {filtered.length===0&&<WorkspaceEmpty icon={p.hosts.length===0?Server:Search}
             title={p.hosts.length===0?"No saved hosts":"No matching hosts"}
@@ -61,12 +78,27 @@ export default function ConnectionsWorkspace(p:Props){
       <aside className="connectionsInspector">
         <h2><Server size={17}/> Host details</h2>
         {selected?<><div className="connectionPreview"><Server size={27}/><strong>{selected.label}</strong><span>{selected.user}@{selected.address}:{selected.port}</span></div>
-          <dl className="diagnosticList"><dt>Connection</dt><dd>{connected.has(selected.id)?"Connected":"Offline"}</dd>
+          <dl className="diagnosticList"><dt>Connection</dt><dd>{connected.has(selected.id)?p.connectedAliases.filter(alias=>alias===selected.id).length+" active SSH session(s)":"Not connected"}</dd>
             <dt>Server identity</dt><dd>{selected.fingerprint?"Pinned SHA-256":"Verification required"}</dd>
             <dt>Route</dt><dd>{selected.jumpAlias?"Via "+selected.jumpAlias:"Direct SSH"}</dd>
             <dt>Saved login</dt><dd>{selected.hasSavedCredentials?"In encrypted Vault":"Manual login"}</dd></dl>
           <button className="workspacePrimary" onClick={()=>p.onConnect(selected.id)}><TerminalSquare size={15}/> {connected.has(selected.id)?"Open another session":"Connect securely"}</button>
           <button onClick={()=>p.onTerminal(selected.id)}>Open in Terminal</button>
+          <div className="connectionProbePanel">
+            <div><strong>SSH service check</strong><p>Read the SSH identification banner without using a password or logging in. A successful response does not verify the host key or authenticate you.</p></div>
+            {selected.jumpAlias?<p className="prefInfo">This host uses a jump route via {selected.jumpAlias}. A direct TCP probe from your computer would bypass that route, so it is disabled here. Open an authenticated session through the gateway instead.</p>:
+              <button type="button" disabled={!p.vaultUnlocked||testing===selected.id}
+                onClick={()=>void testHost(selected.id)}><RefreshCw size={14}/>{testing===selected.id?"Checking SSH…":"Test SSH service"}</button>}
+            {testResult?.alias===selected.id&&testResult.result&&<div className="workspaceNotice" role="status">
+              <strong>SSH port responded in {testResult.result.elapsedMs} ms</strong>
+              <code>{testResult.result.banner}</code>
+              <small>TCP/banner only · host key and account not verified</small>
+            </div>}
+            {testResult?.alias===selected.id&&testResult.error&&<div className="workspaceError" role="alert">
+              <strong>SSH service test failed</strong><span>{testResult.error}</span>
+              <small>{/resolve|DNS/i.test(testResult.error)?"Check the hostname or local DNS/VPN connection.":/reach|timed out|timeout/i.test(testResult.error)?"Check routing, firewall, SSH port and whether the server is powered on.":/identification|protocol|banner|closed/i.test(testResult.error)?"The endpoint responded but did not provide a valid SSH banner; check the target port and sshd service.":"Check this host's address, SSH service and network access."}</small>
+            </div>}
+          </div>
           <p className="prefInfo"><KeyRound size={14}/> A trusted host fingerprint is required before sending any SSH credentials.</p>
         </>:<WorkspaceEmpty icon={WifiOff} title="No selected host" description="Choose a saved host to inspect its connection and launch options."/>}
         {!p.vaultUnlocked&&<div className="workspaceError"><LockKeyhole size={14}/> Unlock your Vault before connecting.</div>}
