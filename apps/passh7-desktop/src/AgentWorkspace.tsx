@@ -1,5 +1,5 @@
 import {useCallback,useRef,useState,type ReactNode} from "react";
-import {Activity, Bot, CheckCircle2, Clipboard, ChevronDown, ExternalLink, LockKeyhole, Maximize2, Minimize2, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
+import {Activity, Bot, CheckCircle2, Clipboard, ChevronDown, ExternalLink, LockKeyhole, Monitor, Maximize2, Minimize2, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
 import type {RemoteAgentAvailability,LocalAgentAvailability,LocalAgentConnection} from "./backend";
 import {WorkspaceHeader,WorkspaceStatus} from "./WorkspaceChrome";
@@ -24,6 +24,7 @@ export default function AgentWorkspace(p:Props){
   const [expandedConsole,setExpandedConsole]=useState(false);
   const [showTools,setShowTools]=useState(false);
   const [showContext,setShowContext]=useState(false);
+  const [briefFeedback,setBriefFeedback]=useState("");
   const terminalPane=useRef<HTMLDivElement>(null);
   const setDock=useCallback((node:HTMLDivElement|null)=>{
     terminalPane.current=node;
@@ -52,6 +53,19 @@ export default function AgentWorkspace(p:Props){
   const copyInstall=async()=>{
     try{await navigator.clipboard.writeText(installation[p.agent].command);setInstallFeedback("Install command copied. Review it before running on the remote host.")}
     catch(error){setInstallFeedback("Clipboard unavailable: "+String(error))}
+  };
+  const copyRemoteInstructions=async()=>{
+    const instructions=[
+      "I am working on the SSH server selected in PaSSH7: "+p.host+".",
+      "Use ONLY the passh7 MCP tools remote_exec, remote_list, remote_read and remote_write for operations on this server.",
+      "Your built-in shell and file tools run on my LOCAL computer, not on that SSH host.",
+      "Do not start another ssh client or request SSH credentials; the PaSSH7 MCP connection already uses my authenticated session.",
+      "Confirm destructive operations first. If the MCP bridge is unavailable, report the problem rather than silently acting locally."
+    ].join("\n");
+    try{
+      await navigator.clipboard.writeText(instructions);
+      setBriefFeedback("Agent instructions copied");
+    }catch(error){setBriefFeedback("Clipboard unavailable: "+String(error))}
   };
   const copyContext=async()=>{
     try{await navigator.clipboard.writeText(p.context);setCopyFeedback("Context copied (no secrets included).")}
@@ -126,24 +140,6 @@ export default function AgentWorkspace(p:Props){
       {p.status&&<p role="status" className="workspaceNotice">{p.status}</p>}
       {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
     </section>
-    <div className="agentWorkspaceGrid">
-      <div className="agentWorkspaceMain">
-        {(p.liveTerminal||p.terminalPreview)&&connected&&<section className="agentSection agentEmbeddedTerminal" aria-label="Live agent SSH terminal">
-          <div className="agentSectionHead"><div><h2><TerminalSquare size={17}/> Live SSH console</h2>
-            <p>{p.mode==="local"?"This is the SSH console, not the local agent window. Your local assistant opens in its own Windows console.":"This is your authenticated SSH PTY. Remote agents render and accept input right here."}</p></div>
-            <div className="agentTerminalActions">
-              <button type="button" onClick={focusTerminal}><TerminalSquare size={14}/> Focus console</button>
-              <button type="button" aria-pressed={expandedConsole} onClick={()=>setExpandedConsole(open=>!open)}>
-                {expandedConsole?<Minimize2 size={14}/>:<Maximize2 size={14}/>}
-                {expandedConsole?"Compact console":"Expand console"}
-              </button>
-              <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
-            </div>
-          </div>
-          <div className={"agentTerminalFrame"+(expandedConsole?" expanded":"")} ref={setDock}>{p.terminalPreview}</div>
-          <p className="agentHint">{p.mode==="local"?"Use the separate local CLI window for the assistant. The SSH terminal remains available for direct commands.":"Click Focus console to type in the live SSH session; you can switch targets from the toolbar above."}</p>
-        </section>}
-
         {showTools&&<section className="agentSection agentDiagnosticSection" aria-label="CLI setup and diagnostics">
           <div className="agentSectionHead"><div><h2>CLI availability & setup</h2>
             <p>A successful version check means the executable works; the agent confirms sign-in when launched.</p></div>
@@ -185,6 +181,28 @@ export default function AgentWorkspace(p:Props){
           </div>}
 
           {installFeedback&&<p className="workspaceNotice" role="status">{installFeedback}</p>}
+        </section>}
+    {connected&&p.mode==="local"&&<div className="agentLocalBanner">
+      <div><Monitor size={20}/><div><strong>Local assistant runs in a separate window</strong>
+        <p>The SSH console below stays available for direct work. Give the assistant remote tasks through its own CLI and the four PaSSH7 MCP tools.</p></div></div>
+      <button type="button" onClick={()=>void copyRemoteInstructions()}><Clipboard size={14}/>{briefFeedback||"Copy instructions"}</button>
+    </div>}
+    <div className="agentWorkspaceGrid">
+      <div className="agentWorkspaceMain">
+        {(p.liveTerminal||p.terminalPreview)&&connected&&<section className="agentSection agentEmbeddedTerminal" aria-label="Live agent SSH terminal">
+          <div className="agentSectionHead"><div><h2><TerminalSquare size={17}/> Live SSH console</h2>
+            <p>{p.mode==="local"?"This is the SSH console, not the local agent window. Your local assistant opens in its own Windows console.":"This is your authenticated SSH PTY. Remote agents render and accept input right here."}</p></div>
+            <div className="agentTerminalActions">
+              <button type="button" onClick={focusTerminal}><TerminalSquare size={14}/> Focus console</button>
+              <button type="button" aria-pressed={expandedConsole} onClick={()=>setExpandedConsole(open=>!open)}>
+                {expandedConsole?<Minimize2 size={14}/>:<Maximize2 size={14}/>}
+                {expandedConsole?"Compact console":"Expand console"}
+              </button>
+              <button type="button" onClick={p.onTerminal}><ExternalLink size={14}/> Full Terminal workspace</button>
+            </div>
+          </div>
+          <div className={"agentTerminalFrame"+(expandedConsole?" expanded":"")} ref={setDock}>{p.terminalPreview}</div>
+          <p className="agentHint">{p.mode==="local"?"Use the separate local CLI window for the assistant. The SSH terminal remains available for direct commands.":"Click Focus console to type in the live SSH session; you can switch targets from the toolbar above."}</p>
         </section>}
 
         <section className="agentSection agentContextSection">
