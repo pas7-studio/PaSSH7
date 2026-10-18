@@ -144,6 +144,16 @@ during this checklist. Use a throwaway identity and Docker container.
 
 | AGENT-UI-06 | Have two sessions for the same host and select one in AI Agent | Launch targets the explicitly selected session; no command is written to a different host |
 | AGENT-UI-07 | Copy SSH context; inspect remote terminal and settings | Context contains non-secret host and route information only; no passwords, private keys or Vault secrets are copied or supplied to the agent |
+| AGENT-LOCAL-01 | Windows has an authenticated OpenCode CLI, Linux SSH account has no OpenCode CLI, choose Auto and Launch | Remote probe finds no CLI; local CLI opens in a separate local console; only the selected authenticated SSH session is granted remote_exec, remote_list, remote_read, remote_write via stdio MCP |
+| AGENT-LOCAL-02 | Codex CLI installed locally and logged in; choose Local CLI + SSH | Opens the local CLI with ephemeral MCP configuration. Existing Codex login remains local; no API keys, passwords, Vault private keys or agent binaries are sent to the server |
+| AGENT-LOCAL-03 | Claude Code CLI signed in locally; choose Local CLI + SSH | Uses temporary non-secret --mcp-config and starts in a separate local console; MCP child can access only the selected live SSH session and never a remote provider API |
+| AGENT-LOCAL-04 | Start a local CLI for host A, change selected host to B without restarting the CLI | Existing local CLI tools remain bound to A, never silently retarget to B. Launching a new agent for B uses a distinct temporary grant |
+| AGENT-LOCAL-05 | Lock Vault, disconnect SSH, close the local CLI console or close PaSSH7 | Tools fail closed on revoked/missing native SSH session; console exit revokes its temporary token; a new GUI/app process never inherits a previous grant |
+| AGENT-LOCAL-06 | Probe invalid local CLI shim, path with spaces/apostrophes and a GUI-only desktop installation | Local probe checks actual CLI --version and refuses broken aliases; quoted command paths do not execute interpolated shell text |
+| AGENT-LOCAL-07 | Through local CLI, run remote command that exits nonzero, output exceeds 256 KiB, or runs longer than 60s | Exit status/stdout/stderr are separate and bounded; missing SSH exit status, closed session, output truncation and timeout are explicit |
+| AGENT-LOCAL-08 | Local agent reads remote UTF-8 text, lists folder, and overwrites a test file | Operates via the existing SFTP subsystem with a 256 KiB bound. Write is explicitly destructive: test backups/permissions and ensure normal SSH account access applies |
+| AGENT-LOCAL-09 | Local CLI has built-in shell and files tools | They remain LOCAL and are never falsely presented as server operations. Agent must use passh7 remote_* MCP tools for all remote operations |
+
 
 
 ## Reference UI and sanitized Docker inspection acceptance (2026-10-17)
