@@ -983,6 +983,9 @@ export default function App(){
   const [panel,setPanel]=useState<Panel>(()=>{
     try{const value=localStorage.getItem("passh7.workspace.v1");return ["connections","terminal","agent","files","docker","snippets","ports","settings"].includes(value||"")?value as Panel:"connections"}catch{return "agent"}
   });
+  // A transfer shortcut scrolls Files only on the explicit click, not on
+  // future routine visits to the workspace.
+  useEffect(()=>{if(panel!=="files")setTransferFocusToken(0)},[panel]);
   // Rust bridge owns the actual grants. Poll only while AI Agents is open,
   // including after a WebView reload, console exit or SSH disconnect.
   useEffect(()=>{
