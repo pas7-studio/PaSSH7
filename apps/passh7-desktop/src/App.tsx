@@ -1390,7 +1390,13 @@ export default function App(){
     try{await writeSshSession(session.id,'net user "'+profile.user+'" *\r')}
     catch(e){setProbeError(String(e))}
   };
+  const sessionCloseInFlight=useRef(new Set<string>());
+  const [closingSessions,setClosingSessions]=useState<string[]>([]);
   const closeInteractive=async(id:string)=>{
+    if(sessionCloseInFlight.current.has(id))return;
+    if(!sshTabsRef.current.some(tab=>tab.id===id))return;
+    sessionCloseInFlight.current.add(id);
+    setClosingSessions(previous=>[...previous,id]);
     const alias=sshTabsRef.current.find(tab=>tab.id===id)?.alias||"SSH host";
     try{
       await closeSshSession(id);
@@ -1407,6 +1413,9 @@ export default function App(){
         }
       }catch{/* Cannot establish backend state: preserve the visible session. */}
       setSessionNotice({alias,kind:"close-failed",detail:"Could not confirm SSH disconnect; session may still be active. "+String(error)});
+    }finally{
+      sessionCloseInFlight.current.delete(id);
+      setClosingSessions(previous=>previous.filter(session=>session!==id));
     }
   };
   // User-initiated host changes update the alias and its PTY in one React
@@ -1451,7 +1460,7 @@ export default function App(){
         <button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button>
       </div>
     </div>}
-    {panel!=="terminal"&&<SessionStrip sessions={sshTabs} hosts={hosts}
+    {panel!=="terminal"&&<SessionStrip sessions={sshTabs} hosts={hosts} closingSessions={closingSessions}
       activeSession={activeSsh} selectedHost={selected} vaultUnlocked={vaultUnlocked}
       onSelect={id=>{const target=sshTabs.find(session=>session.id===id);
         if(target){setSelected(target.alias);setActiveSsh(id)}}}
@@ -1504,8 +1513,9 @@ export default function App(){
 {credentialWarning&&<p className="wizardError" role="alert">{credentialWarning}</p>}{probeError&&sshTabs.length>0&&!loginOpen&&<p className="wizardError" role="alert">{connectionHelp(probeError).title}: {probeError}</p>}<div className="terminal"><div className="terminalbar"><span><TerminalSquare size={15}/> Terminal</span><small>{connected?`${activeConnections} active session(s) on this host`:"NO ACTIVE SESSION ON THIS HOST"}</small><div className="terminalbarSpacer"/><button type="button" className={terminalDetailsOpen?"terminalInfoToggle active":"terminalInfoToggle"} aria-expanded={terminalDetailsOpen} aria-controls="passh7-terminal-inspector" onClick={()=>setTerminalDetailsOpen(open=>!open)}><CircleHelp size={15}/>{terminalDetailsOpen?"Hide session details":"Session details"}</button>{activeSsh&&<button onClick={()=>{setAccessOpen(true);setAccessPublicKey("");setError("")}}>Windows Access Manager</button>}{activeSsh&&<button title="Windows local account: interactive password change. Requires appropriate account permissions." onClick={()=>void changeWindowsPassword()}>Change Windows password</button>}</div>{sshTabs.length>0&&<div className="sshTabBar" role="tablist" aria-label="Active SSH terminals">{sshTabs.map(t=><div key={t.id} className={activeSsh===t.id?"sshTab active":"sshTab"}>
   <button type="button" role="tab" aria-selected={activeSsh===t.id} className="sshTabSelect"
     onClick={()=>{setSelected(t.alias);setActiveSsh(t.id)}}><span className="sshTabConnectionDot" aria-hidden="true"/>{t.alias}</button>
-  <button type="button" className="sshTabClose" title={"Disconnect "+t.alias}
-    aria-label={"Disconnect "+t.alias} onClick={()=>void closeInteractive(t.id)}><X size={14}/></button>
+  <button type="button" className="sshTabClose" disabled={closingSessions.includes(t.id)}
+    title={"Disconnect "+t.alias} aria-label={"Disconnect "+t.alias}
+    onClick={()=>void closeInteractive(t.id)}>{closingSessions.includes(t.id)?"…":<X size={14}/>}</button>
 </div>)}</div>}
         <div ref={mainTerminalDock} className="terminalDockSlot" style={{display:connected?"block":"none"}} aria-label="Interactive terminal session"/>
         <div ref={parkedTerminals} className="terminalParked" aria-hidden="true"/>
