@@ -785,7 +785,10 @@ export default function App(){
       try{
         const notice=await launchLocalAgent(agent,session.id);
         if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)setAgentStatus(notice);
-      }catch(error){setAgentStatus("Could not launch local CLI: "+String(error))}
+      }catch(error){
+        if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
+          setAgentStatus("Could not launch local CLI: "+String(error));
+      }
       return;
     }
     if(agentMode==="auto"){
@@ -805,10 +808,17 @@ export default function App(){
           try{
             const notice=await launchLocalAgent(agent,session.id);
             if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)setAgentStatus(notice);
-          }catch(error){setAgentStatus("Local CLI launch failed: "+String(error))}
+          }catch(error){
+            if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
+              setAgentStatus("Local CLI launch failed: "+String(error));
+          }
           return;
         }
-      }catch(error){setAgentStatus("Could not determine remote/local CLI availability: "+String(error));return}
+      }catch(error){
+        if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)
+          setAgentStatus("Could not determine remote/local CLI availability: "+String(error));
+        return;
+      }
     }
     await launchRemoteAgent();
   };
