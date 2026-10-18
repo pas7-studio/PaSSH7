@@ -5,7 +5,7 @@ import type {SshProbeResult} from "./backend";
 
 export type ConnectionHost={
   id:string;label:string;address:string;user:string;port:number;fingerprint:boolean;
-  jumpAlias?:string|null;hasSavedCredentials?:boolean;group?:string
+  jumpAlias?:string|null;hasSavedCredentials?:boolean;group?:string;identityAlias?:string|null
 };
 type Props={
   hosts:ConnectionHost[];selected:string;connectedAliases:string[];vaultUnlocked:boolean;
@@ -95,6 +95,7 @@ export default function ConnectionsWorkspace(p:Props){
           <dl className="diagnosticList"><dt>Connection</dt><dd>{connected.has(selected.id)?p.connectedAliases.filter(alias=>alias===selected.id).length+" active SSH session(s)":"Not connected"}</dd>
             <dt>Server identity</dt><dd>{selected.fingerprint?"Pinned SHA-256":"Verification required"}</dd>
             <dt>Route</dt><dd>{selected.jumpAlias?"Via "+selected.jumpAlias:"Direct SSH"}</dd>
+            <dt>SSH key</dt><dd>{selected.identityAlias||"None (password login)"}</dd>
             <dt>Saved login</dt><dd>{selected.hasSavedCredentials?"In encrypted Vault":"Manual login"}</dd></dl>
           <div className="connectionInspectorActions">
             <button onClick={()=>p.onEdit(selected.id)} disabled={!p.vaultUnlocked}><Pencil size={14}/> Edit connection</button>
