@@ -175,53 +175,16 @@ async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&s
     Ok((addr,token))
 }
 
-fn has_opencode_v2_config(version:&str)->bool{
-    version.split(|ch:char|!ch.is_ascii_digit()&&ch!='.')
-        .find(|part|part.chars().next().is_some_and(|x|x.is_ascii_digit()))
-        .and_then(|value|value.split('.').next())
-        .and_then(|value|value.parse::<u32>().ok())
-        .is_some_and(|major|major>=2)
-}
-fn opencode_v2(cli:&Path)->bool{
-    // Newer OpenCode versions nest MCP definitions under mcp.servers;
-    // older signed-in CLIs expect mcp.<name>. This is the only version
-    // distinction required; no OpenCode HTTP server or cloud API is used.
-    let mut cmd=if cfg!(windows){
-        let mut c=Command::new("powershell.exe");
-        c.args(["-NoProfile","-NonInteractive","-Command",
-            &format!("& {} --version",ps_quote(&cli.to_string_lossy()))]);c
-    }else{
-        let mut c=Command::new(cli);c.arg("--version");c
-    };
-    let Ok(mut child)=cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
-        else{return false};
-    let start=Instant::now();
-    loop{
-        match child.try_wait(){
-            Ok(Some(status))=>{
-                if !status.success(){return false;}
-                let Ok(output)=child.wait_with_output() else{return false};
-                let version=String::from_utf8_lossy(&output.stdout);
-                return has_opencode_v2_config(&version);
-            },
-            Ok(None) if start.elapsed()>Duration::from_secs(3)=>{
-                let _=child.kill();let _=child.wait();return false;
-            },
-            Err(_)=>return false,
-            _=>std::thread::sleep(Duration::from_millis(40))
-        }
-    }
-}
-fn new_config(agent:&str,executable:&Path,cli:&Path)->Result<Option<PathBuf>,String>{
+fn new_config(agent:&str,executable:&Path)->Result<Option<PathBuf>,String>{
     // Config contains only our own executable path, never SSH/Vault secrets or
     // local-bridge tokens. The CLI process inherits the ephemeral grant via env.
     let exe=executable.to_string_lossy().into_owned();
     if agent=="codex"{return Ok(None);}
     let json=if agent=="claude"{
         json!({"mcpServers":{"passh7":{"command":exe,"args":["--passh7-mcp"]}}})
-    }else if opencode_v2(cli){
-        json!({"mcp":{"servers":{"passh7":{"type":"local","command":[exe,"--passh7-mcp"]}}}})
     }else{
+        // OpenCode uses a flat mcp.<name> entry, including in current releases.
+        // A nested mcp.servers object is NOT a supported OpenCode MCP schema.
         json!({"mcp":{"passh7":{"type":"local","command":[exe,"--passh7-mcp"],"enabled":true}}})
     };
     let bytes=serde_json::to_vec_pretty(&json).map_err(|_|"Cannot encode agent MCP config")?;
@@ -256,7 +219,7 @@ pub async fn local_agent_launch(agent:String,id:String,
         .map_err(|_|"Local CLI detection failed".to_owned())??;
     // Perform all fallible local setup before issuing an SSH capability token.
     let self_exe=std::env::current_exe().map_err(|_|"PaSSH7 executable path unavailable")?;
-    let config=new_config(&agent,&self_exe,&cli)?;
+    let config=new_config(&agent,&self_exe)?;
     let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id).await{
         Ok(grant)=>grant,
         Err(error)=>{
@@ -400,10 +363,17 @@ pub fn run_stdio_mcp(){
 mod tests{
     use super::*;
     #[test]
-    fn opencode_mcp_version_schema_is_backward_compatible(){
-        assert!(!has_opencode_v2_config("OpenCode v1.2.3"));
-        assert!(has_opencode_v2_config("opencode 2.0.1"));
-        assert!(!has_opencode_v2_config("version unavailable"));
+    fn opencode_config_uses_documented_flat_mcp_schema(){
+        let exe=std::env::current_exe().expect("test executable exists");
+        let config=new_config("opencode",&exe).unwrap().unwrap();
+        let bytes=fs::read(&config).unwrap();
+        let _=fs::remove_file(&config);
+        let parsed:Value=serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(parsed["mcp"]["passh7"]["type"],"local");
+        assert_eq!(parsed["mcp"]["passh7"]["enabled"],true);
+        assert_eq!(parsed["mcp"]["passh7"]["command"][1],"--passh7-mcp");
+        assert!(parsed["mcp"].get("servers").is_none());
+        assert!(!parsed.to_string().contains("PASSH7_BRIDGE_TOKEN"));
     }
     #[test]
     fn only_three_cli_kinds_are_allowed(){
