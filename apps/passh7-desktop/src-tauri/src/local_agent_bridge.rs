@@ -215,9 +215,16 @@ pub async fn local_agent_launch(agent:String,id:String,
     let agent_name=agent.clone();
     let cli=tokio::task::spawn_blocking(move||discover_local_cli(&agent_name)).await
         .map_err(|_|"Local CLI detection failed".to_owned())??;
-    let (address,token)=grant_session(bridge.inner(),ssh.inner().clone(),&id).await?;
+    // Perform all fallible local setup before issuing an SSH capability token.
     let self_exe=std::env::current_exe().map_err(|_|"PaSSH7 executable path unavailable")?;
     let config=new_config(&agent,&self_exe)?;
+    let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id).await{
+        Ok(grant)=>grant,
+        Err(error)=>{
+            if let Some(path)=config{let _=fs::remove_file(path);}
+            return Err(error);
+        }
+    };
     let mut cmd=if cfg!(windows){Command::new("powershell.exe")}else{Command::new("sh")};
     if cfg!(windows){
         cmd.args(["-NoLogo","-NoProfile","-Command",
