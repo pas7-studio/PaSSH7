@@ -175,6 +175,13 @@ async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&s
     Ok((addr,token))
 }
 
+fn has_opencode_v2_config(version:&str)->bool{
+    version.split(|ch:char|!ch.is_ascii_digit()&&ch!='.')
+        .find(|part|part.chars().next().is_some_and(|x|x.is_ascii_digit()))
+        .and_then(|value|value.split('.').next())
+        .and_then(|value|value.parse::<u32>().ok())
+        .is_some_and(|major|major>=2)
+}
 fn opencode_v2(cli:&Path)->bool{
     // Newer OpenCode versions nest MCP definitions under mcp.servers;
     // older signed-in CLIs expect mcp.<name>. This is the only version
@@ -195,11 +202,7 @@ fn opencode_v2(cli:&Path)->bool{
                 if !status.success(){return false;}
                 let Ok(output)=child.wait_with_output() else{return false};
                 let version=String::from_utf8_lossy(&output.stdout);
-                let major=version.split(|ch:char|!ch.is_ascii_digit()&&ch!='.')
-                    .find(|part|part.chars().next().is_some_and(|x|x.is_ascii_digit()))
-                    .and_then(|value|value.split('.').next())
-                    .and_then(|value|value.parse::<u32>().ok());
-                return major.is_some_and(|n|n>=2);
+                return has_opencode_v2_config(&version);
             },
             Ok(None) if start.elapsed()>Duration::from_secs(3)=>{
                 let _=child.kill();let _=child.wait();return false;
@@ -393,6 +396,12 @@ pub fn run_stdio_mcp(){
 #[cfg(test)]
 mod tests{
     use super::*;
+    #[test]
+    fn opencode_mcp_version_schema_is_backward_compatible(){
+        assert!(!has_opencode_v2_config("OpenCode v1.2.3"));
+        assert!(has_opencode_v2_config("opencode 2.0.1"));
+        assert!(!has_opencode_v2_config("version unavailable"));
+    }
     #[test]
     fn only_three_cli_kinds_are_allowed(){
         assert!(allowed_agent("codex").is_ok());
