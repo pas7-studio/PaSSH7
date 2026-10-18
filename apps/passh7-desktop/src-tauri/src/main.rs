@@ -150,6 +150,29 @@ impl SessionStore {
 mod vault_local_activity_tests{
     use super::*;
     #[test]
+    fn local_bridge_liveness_check_does_not_extend_vault_timeout(){
+        let prior=Instant::now()-Duration::from_secs(120);
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:prior,
+        })));
+        assert!(store.live_without_touch().unwrap());
+        let guard=store.0.lock().unwrap();
+        let elapsed=guard.as_ref().unwrap().last_used.elapsed();
+        assert!(elapsed>=Duration::from_secs(119));
+    }
+    #[test]
+    fn local_bridge_check_rejects_expired_or_locked_vault(){
+        let expired=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()-IDLE_TIMEOUT-Duration::from_secs(1),
+        })));
+        assert!(!expired.live_without_touch().unwrap());
+        assert!(expired.0.lock().unwrap().is_none());
+        let locked=SessionStore::default();
+        assert!(!locked.live_without_touch().unwrap());
+    }
+    #[test]
     fn real_local_activity_refreshes_live_vault_ttl(){
         let store=SessionStore(Mutex::new(Some(UnlockedSession{
             password:Zeroizing::new("only-in-test".to_owned()),
