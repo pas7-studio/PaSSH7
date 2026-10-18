@@ -68,6 +68,8 @@ The agent's own built-in shell and file tools still run on your **local machine*
 
 The global **Ctrl/Cmd+K command palette** searches individual live SSH PTYs, saved hosts, workspaces and safe app actions. Use `@` to filter hosts/sessions or `>` for workspaces/actions. Enter on a live terminal reuses that exact native SSH session. Enter on a saved host selects it and opens Terminal; **Ctrl/Cmd+Enter** on a host explicitly runs the normal Connect flow (pinned host-key verification and regular login still apply). Adding a host or unlocking Vault from the palette uses the existing dialogs. The palette never executes remote shell commands.
 
+Every session has a separate, keyboard-accessible **Disconnect** control. Topbar, terminal tabs and the session strip all request explicit confirmation, serialize repeated native close attempts and keep the tab visible if the backend cannot verify closure. Confirmations name active local tunnels and warn when the SSH host serves as a gateway for other connected targets; those dependent sessions may also be affected. In Port Forwarding, stopping a tunnel also confirms the owning PTY, local port, remote endpoint and interruption of connected clients.
+
 A compact **SSH session strip** stays visible above Connections, Files, Docker, Port Forwarding, Snippets, AI Agents and Settings. Click a session to change the current host and PTY together while remaining in the current workspace. Sessions stay open on the other hosts; context changes do not migrate MCP grants or Docker/SFTP requests to another server. The strip offers a clear Connect or Unlock Vault action when no SSH session is active, and respects the same authenticated native SSH lifecycle.
 
 ## Remote host readiness diagnostics
