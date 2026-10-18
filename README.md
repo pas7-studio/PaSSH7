@@ -48,6 +48,20 @@ The encrypted envelope version and the decrypted data schema version are indepen
 
 **Not yet guaranteed:** concurrent-writer isolation, filesystem ACL retention, power-loss rollback and full Windows crash recovery. Until those are implemented and independently verified, do not rely on PaSSH7 for irreplaceable keys.
 
+## AI agents: remote signed-in CLI or local CLI over PaSSH7 SSH
+
+PaSSH7 uses your existing **Codex CLI, Claude Code CLI and OpenCode CLI logins**. It does **not** use provider APIs, pass API keys into another process, or install a daemon on SSH hosts.
+
+In **AI Agents**, connect to a saved pinned SSH host and choose:
+
+- **Auto**: probe the SSH user's CLI; if missing, probe the local machine and launch its CLI with PaSSH7 remote tools.
+- **Remote CLI**: launch the remote signed-in CLI in the existing native SSH PTY.
+- **Local CLI + SSH**: launch a local CLI in its **own Windows console**. A temporary per-session grant enables four MCP tools: `remote_exec`, `remote_list`, `remote_read`, `remote_write`.
+
+The local bridge is integrated into the desktop binary (`--passh7-mcp` stdio child mode) and talks to PaSSH7 through an authenticated **127.0.0.1-only** IPC channel. It reuses PaSSH7's already authenticated and host-key-pinned Rust SSH transport, SFTP and permissions. The token is randomly generated for that launch, passed through process environment rather than agent command arguments, and revoked when its local console exits. Closing the native SSH session or locking Vault makes tools fail closed. MCP configuration is ephemeral and contains no SSH secrets. Remote shell results have a 60-second timeout, 256 KiB combined output cap, stderr and exit code; file reads/writes are UTF-8 up to 256 KiB. **remote_write overwrites existing files**. Do not use on untrusted servers or with an untrusted local CLI session.
+
+The agent's own built-in shell and file tools still run on your **local machine**. For remote operations, instruct the agent to use the `passh7` `remote_*` MCP tools. A local CLI is **not** a remote sandbox, and its ability to use MCP tools depends on its installed CLI version and local login. Opening an interactive local terminal is currently implemented for **Windows desktop**; Unix local CLI console launch is not enabled. No background service, provider SDK, API token storage, or GUI app automation is installed.
+
 ## Remote host readiness diagnostics
 
 Open **Settings → About & Diagnostics → Live SSH host health** with an authenticated host selected, then choose **Run host checks**. PaSSH7 checks the selected SSH account's SFTP directory access, Docker inventory and Codex/Claude Code/OpenCode terminal CLI availability without modifying files, containers or services. It distinguishes a usable Windows CLI from a Start Menu desktop application that cannot run in an SSH PTY. Results and failures are specific to the currently selected SSH session; switching hosts clears them. **Copy safe health summary** omits host addresses, usernames, file and container names, credentials and raw remote command output.
