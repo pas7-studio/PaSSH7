@@ -8,7 +8,7 @@ type Props={
   sessions:Session[];hosts:Host[];closingSessions:string[];
   activeSession:string;selectedHost:string;vaultUnlocked:boolean;
   onSelect:(id:string)=>void;onDisconnect:(id:string)=>void;onConnect:()=>void;
-  onUnlock:()=>void;onCommandPalette:()=>void;
+  onUnlock:()=>void;onAddHost:()=>void;onCommandPalette:()=>void;
   transfers:TransferActivity;onTransfers:()=>void;
 };
 /** Visible across Files, Docker, Ports, Settings and AI Agents.
@@ -51,7 +51,8 @@ export default function SessionStrip(p:Props){
       </div>
       {p.vaultUnlocked&&selected?
         <button type="button" onClick={p.onConnect}><Plus size={14}/> Connect {selected.label}</button>:
-        !p.vaultUnlocked?<button type="button" onClick={p.onUnlock}><LockKeyhole size={14}/> Unlock Vault</button>:null}
+        p.vaultUnlocked?<button type="button" onClick={p.onAddHost}><Plus size={14}/> Add SSH host</button>:
+        <button type="button" onClick={p.onUnlock}><LockKeyhole size={14}/> Unlock Vault</button>}
       {transferButton}
       <button type="button" aria-label="Search sessions and commands" onClick={p.onCommandPalette}><Command size={15}/></button>
     </div>;
