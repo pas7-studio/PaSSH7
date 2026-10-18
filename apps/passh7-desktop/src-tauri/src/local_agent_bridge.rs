@@ -356,7 +356,8 @@ mod tests{
     }
     #[test]
     fn mcp_has_expected_tools_and_no_secrets_in_schema(){
-        let names=mcp_tools().as_array().unwrap().iter()
+        let catalog=mcp_tools();
+        let names=catalog.as_array().unwrap().iter()
             .filter_map(|x|x.get("name").and_then(Value::as_str)).collect::<Vec<_>>();
         assert_eq!(names,vec!["remote_exec","remote_list","remote_read","remote_write"]);
         assert!(!mcp_tools().to_string().contains("PASSH7_BRIDGE_TOKEN"));
