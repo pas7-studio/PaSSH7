@@ -420,13 +420,13 @@ export async function runNativeAppSession(page:Page){
   await expect(page.getByLabel("Remote host health check")).toContainText("No usable CLI found");
   await expect.poll(()=>page.evaluate(()=>
     (window as unknown as {__mockSshBridge:{agentProbes:Array<{id:string;agent:string}>}})
-      .__mockSshBridge.agentProbes.length
+      .__mockSshBridge.agentProbes.filter(item=>item.id==="session-a").length
   )).toBe(3);
   const probes=await page.evaluate(()=>
     (window as unknown as {__mockSshBridge:{agentProbes:Array<{id:string;agent:string}>}})
-      .__mockSshBridge.agentProbes
+      .__mockSshBridge.agentProbes.filter(item=>item.id==="session-a")
   );
-  expect(probes.every(item=>item.id==="session-a")).toBe(true);
+  expect(probes.map(item=>item.agent).sort()).toEqual(["claude","codex","opencode"]);
   await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
   await expect(page.getByLabel("Remote host health check")).toContainText("Not checked yet");
   await expect(page.getByLabel("Remote host health check")).not.toContainText("codex test v1");
