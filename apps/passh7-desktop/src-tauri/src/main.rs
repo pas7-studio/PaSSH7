@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod ssh_sessions;
+mod local_agent_bridge;
 
 mod openssh_config;
 use std::{io::{BufReader, Read}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
@@ -1157,17 +1158,23 @@ async fn tokio_timeout_connect<A: tokio::net::ToSocketAddrs>(
 }
 
 fn main() {
+    // An MCP stdio child must not initialize a second desktop/WebView instance.
+    if std::env::args().nth(1).as_deref()==Some("--passh7-mcp"){
+        local_agent_bridge::run_stdio_mcp();
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionStore::default())
         .manage(PendingVaultRestore::default())
         .manage(SshSessionManager::default())
+        .manage(local_agent_bridge::LocalAgentBridge::default())
         .invoke_handler(tauri::generate_handler![
             vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
-            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_inspect,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_read_image,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
+            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_inspect,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_exec,local_agent_bridge::local_agent_probe,local_agent_bridge::local_agent_launch,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_read_image,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");
