@@ -5,7 +5,7 @@ export type WorkspaceRoute="connections"|"terminal"|"files"|"docker"|"agent"|"sn
 type HostItem={id:string;label:string;address:string;user:string;group:string;fingerprint:boolean};
 type SessionItem={id:string;alias:string};
 type Props={
-  hosts:HostItem[];sessions:SessionItem[];connectedAliases:string[];
+  hosts:HostItem[];sessions:SessionItem[];connectedAliases:string[];initialQuery?:string;
   selected:string;selectedSession:string;vaultUnlocked:boolean;
   onChooseHost:(id:string)=>void;onChooseSession:(id:string)=>void;
   onConnectHost:(id:string)=>void;onAddHost:()=>void;onUnlockVault:()=>void;
@@ -43,7 +43,7 @@ function matchScore(hit:Hit,terms:string[]):number{
   return score+(hit.selected?18:0)+(hit.connected?12:0);
 }
 export default function QuickSwitch(p:Props){
-  const [query,setQuery]=useState("");
+  const [query,setQuery]=useState(p.initialQuery||"");
   const [index,setIndex]=useState(0);
   const listRef=useRef<HTMLDivElement>(null);
   const searchRef=useRef<HTMLInputElement>(null);
