@@ -16,7 +16,19 @@ use crate::{SessionStore,ssh_sessions::SshSessionManager};
 const MAX_RPC:usize=2*1024*1024;
 const GRANT_MAX_AGE:Duration=Duration::from_secs(12*3600);
 type Grants=Arc<Mutex<HashMap<String,Grant>>>;
-struct Grant{session:String,created:Instant}
+struct Grant{id:String,agent:String,session:String,created:Instant}
+#[derive(Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct LocalAgentConnection{
+    id:String,agent:String,session_id:String,host:String,age_seconds:u64,
+}
+fn revoke_grant_by_id(grants:&Grants,id:&str)->Result<bool,String>{
+    let mut guard=grants.lock().map_err(|_|"Local CLI grants unavailable")?;
+    let Some(token)=guard.iter().find_map(|(token,grant)|
+        (grant.id==id).then(||token.clone())) else{return Ok(false)};
+    guard.remove(&token);
+    Ok(true)
+}
 
 #[derive(Default)]
 pub struct LocalAgentBridge{
@@ -151,7 +163,7 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
         let _=socket.write_all(&encoded).await;
     }
 }
-async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&str,app:tauri::AppHandle)->Result<(SocketAddr,String),String>{
+async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&str,agent:&str,app:tauri::AppHandle)->Result<(SocketAddr,String),String>{
     // Validate the session before generating a grant.
     if !ssh.active_sessions()?.iter().any(|live|live.id==session){
         return Err("Select a live authenticated SSH session".into());
@@ -177,9 +189,45 @@ async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&s
     };
     let bytes:[u8;32]=rand::random();
     let token=bytes.iter().map(|b|format!("{b:02x}")).collect::<String>();
+    let launch_id=format!("{:032x}",rand::random::<u128>());
     bridge.grants.lock().map_err(|_|"Cannot issue local CLI grant")?
-        .insert(token.clone(),Grant{session:session.to_owned(),created:Instant::now()});
+        .insert(token.clone(),Grant{id:launch_id,agent:agent.to_owned(),
+            session:session.to_owned(),created:Instant::now()});
     Ok((addr,token))
+}
+
+/// List only current, unexpired SSH capabilities, never raw bridge tokens.
+/// A native SSH disconnect or Vault lock makes the corresponding grants unusable.
+#[tauri::command]
+pub fn local_agent_connections(bridge:State<'_,LocalAgentBridge>,
+    ssh:State<'_,SshSessionManager>,vault:State<'_,SessionStore>
+)->Result<Vec<LocalAgentConnection>,String>{
+    if !vault.live_without_touch()?{
+        ssh.stop_all();
+        bridge.grants.lock().map_err(|_|"Local CLI grants unavailable")?.clear();
+        return Ok(Vec::new());
+    }
+    let active=ssh.active_sessions()?;
+    let mut guard=bridge.grants.lock().map_err(|_|"Local CLI grants unavailable")?;
+    guard.retain(|_,grant|grant.created.elapsed()<=GRANT_MAX_AGE
+        &&active.iter().any(|session|session.id==grant.session));
+    let mut items=guard.values().filter_map(|grant|{
+        let host=active.iter().find(|session|session.id==grant.session)?.alias.clone();
+        Some(LocalAgentConnection{id:grant.id.clone(),agent:grant.agent.clone(),
+            session_id:grant.session.clone(),host,
+            age_seconds:grant.created.elapsed().as_secs()})
+    }).collect::<Vec<_>>();
+    items.sort_by(|a,b|a.host.cmp(&b.host).then(a.agent.cmp(&b.agent)));
+    Ok(items)
+}
+/// Removing a grant blocks all subsequent MCP calls from that local console.
+/// It intentionally leaves the user's independently signed-in CLI running.
+#[tauri::command]
+pub fn local_agent_revoke(id:String,bridge:State<'_,LocalAgentBridge>)->Result<bool,String>{
+    if id.len()!=32||!id.as_bytes().iter().all(u8::is_ascii_hexdigit){
+        return Err("Invalid local agent grant identifier".into());
+    }
+    revoke_grant_by_id(&bridge.grants,&id)
 }
 
 // OpenCode V1 uses mcp.<name>; V2 requires mcp.servers.<name>.
@@ -343,7 +391,7 @@ pub async fn local_agent_launch(agent:String,id:String,app:tauri::AppHandle,
         Ok(path)=>path,
         Err(error)=>{cleanup_temp_config(config.as_deref());return Err(error);}
     };
-    let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id,app).await{
+    let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id,&agent,app).await{
         Ok(grant)=>grant,
         Err(error)=>{
             cleanup_local_launch(config.as_deref(),&workspace);
@@ -544,6 +592,25 @@ mod tests{
         assert_eq!(opencode_major_from_version("OpenCode v1.18.35"),Some(1));
         assert_eq!(opencode_major_from_version("opencode v2.0.26"),Some(2));
         assert_eq!(opencode_major_from_version("version unavailable"),None);
+    }
+    #[test]
+    fn capability_revocation_targets_only_one_local_agent_grant(){
+        let grants:Grants=Arc::new(Mutex::new(HashMap::new()));
+        let first="11111111111111111111111111111111".to_owned();
+        let second="22222222222222222222222222222222".to_owned();
+        {
+            let mut guard=grants.lock().unwrap();
+            guard.insert("private-secret-1".into(),Grant{id:first.clone(),
+                agent:"codex".into(),session:"ssh-a".into(),created:Instant::now()});
+            guard.insert("private-secret-2".into(),Grant{id:second.clone(),
+                agent:"claude".into(),session:"ssh-b".into(),created:Instant::now()});
+        }
+        assert!(revoke_grant_by_id(&grants,&first).unwrap());
+        assert!(!revoke_grant_by_id(&grants,&first).unwrap());
+        let current=grants.lock().unwrap();
+        assert_eq!(current.len(),1);
+        assert!(current.contains_key("private-secret-2"));
+        assert!(!current.contains_key("private-secret-1"));
     }
     #[test]
     fn codex_explicitly_forwards_ephemeral_bridge_vars_without_values(){
