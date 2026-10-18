@@ -1790,6 +1790,60 @@ export default function App(){
         <><div className="contextTitle"><Activity size={18}/><h3>Local SSH tunnels</h3></div><p className="muted">Bind to localhost only. Route connections through this verified SSH session to a remote destination. Stops on disconnect or vault lock.</p><label className="fieldLabel">Local TCP port<input type="number" min={1} max={65535} value={tunnelLocalPort} onChange={e=>setTunnelLocalPort(Number(e.target.value))}/></label><label className="fieldLabel">Remote destination hostname<input value={tunnelRemoteHost} onChange={e=>setTunnelRemoteHost(e.target.value)} placeholder="127.0.0.1"/></label><label className="fieldLabel">Remote destination TCP port<input type="number" min={1} max={65535} value={tunnelRemotePort} onChange={e=>setTunnelRemotePort(Number(e.target.value))}/></label><button className="contextAction" disabled={!connected||!activeSsh||tunnelBusy||tunnelLocalPort<1||tunnelLocalPort>65535||tunnelRemotePort<1||tunnelRemotePort>65535||!tunnelRemoteHost.trim()} onClick={()=>void addTunnel()}>{tunnelBusy?"Working…":"Start local forwarding"}</button><button className="contextAction" type="button" disabled={!connected||tunnelBusy} onClick={()=>void refreshLocalForwarding()}>Refresh active forwards</button>{tunnelError&&<p role="alert" className="wizardError">{tunnelError}</p>}<div className="dockerInventory">{!tunnels.some(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected))&&<p className="note">No active local forwards for this host. Start one above to map a localhost port through SSH, or refresh to retrieve active native tunnels.</p>}{tunnels.filter(t=>sshTabs.some(s=>s.id===t.session&&s.alias===selected)).map(t=><div className="dockerItem" key={t.session+":"+t.localPort}><strong>127.0.0.1:{t.localPort}</strong><small>→ {t.targetHost}:{t.remotePort} via SSH</small><button disabled={tunnelBusySessions.includes(t.session)} onClick={()=>void removeTunnel(t.session,t.localPort)}>Stop tunnel</button></div>)}</div></>}
       </div></aside>}
     </div>
+    {editTarget&&!keyDialog&&<div className="overlay" onMouseDown={()=>{if(!editBusy){setEditTarget(null);setEditError("")}}}>
+      <form className="modal wizard editConnectionModal" role="dialog" aria-modal="true" aria-label="Edit SSH connection"
+        onMouseDown={event=>event.stopPropagation()} onSubmit={event=>{event.preventDefault();void saveEditedHost()}}>
+        <div className="modalTitle"><Pencil size={18}/> Edit SSH connection
+          <button type="button" aria-label="Close connection editor" disabled={editBusy}
+            onClick={()=>{setEditTarget(null);setEditError("")}}><X size={17}/></button>
+        </div>
+        <p className="note">Update connection settings stored in your encrypted Vault. The saved host name
+          <strong> {editTarget.alias}</strong> remains unchanged so gateway references stay valid.</p>
+        {sshTabs.some(t=>t.alias===editTarget.alias)&&<div className="workspaceError" role="alert">
+          Disconnect {sshTabs.filter(t=>t.alias===editTarget.alias).length} SSH session(s) for this host before saving changes.
+          Your active shells will not be closed automatically.
+        </div>}
+        <div className="wizardFields">
+          <label>Host name (Vault ID)<input value={editTarget.alias} disabled
+            title="Host IDs remain stable. Create a new host if you need a different alias."/></label>
+          <label>Server address / hostname<input autoFocus value={editTarget.hostname} spellCheck={false}
+            disabled={editBusy} onChange={event=>setEditTarget(value=>value&&({...value,hostname:event.target.value}))}
+            placeholder="192.168.1.10 or server.example.com"/></label>
+          <div className="twoFields">
+            <label>SSH username<input value={editTarget.username} spellCheck={false} disabled={editBusy}
+              onChange={event=>setEditTarget(value=>value&&({...value,username:event.target.value}))}/></label>
+            <label>SSH port<input type="number" min={1} max={65535} required value={editTarget.port}
+              disabled={editBusy} onChange={event=>setEditTarget(value=>value&&({...value,port:Number(event.target.value)}))}/></label>
+          </div>
+          <label>SSH private key from encrypted Vault
+            <select value={editTarget.identityAlias} disabled={editBusy}
+              onChange={event=>setEditTarget(value=>value&&({...value,identityAlias:event.target.value}))}>
+              <option value="">Password authentication (no vault key attached)</option>
+              {identities.map(name=><option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+          <button type="button" onClick={()=>{setKeyDialog(true);setGeneratedKey(null);setError("")}}
+            disabled={editBusy}><KeyRound size={15}/> Import / generate SSH key…</button>
+          <label className="editConnectionCheck"><input type="checkbox" checked={editTarget.resetHostKey}
+            disabled={editBusy} onChange={event=>setEditTarget(value=>value&&({...value,resetHostKey:event.target.checked}))}/>
+            <span><strong>Re-verify the server host key</strong>
+              <small>Clear the stored fingerprint; next connection requires explicit verification. Automatically required if the address or port changes.</small></span>
+          </label>
+          <label className="editConnectionCheck"><input type="checkbox" checked={editTarget.forgetCredentials}
+            disabled={editBusy} onChange={event=>setEditTarget(value=>value&&({...value,forgetCredentials:event.target.checked}))}/>
+            <span><strong>Forget saved SSH login</strong>
+              <small>Account credentials are automatically forgotten when the server endpoint, SSH username or key changes. Imported private keys are never deleted by this action.</small></span>
+          </label>
+          {editError&&<p role="alert" className="wizardError">{editError}</p>}
+        </div>
+        <div className="wizardActions">
+          <button type="button" disabled={editBusy} onClick={()=>{setEditTarget(null);setEditError("")}}>Cancel</button>
+          <button type="submit" className="primary" disabled={editBusy||sshTabs.some(t=>t.alias===editTarget.alias)}>
+            {editBusy?"Saving securely…":"Save SSH connection"}
+          </button>
+        </div>
+      </form>
+    </div>}
     {deleteTarget&&<div className="overlay" onMouseDown={()=>{setDeleteTarget(null);setError("")}}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm vault removal" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}<button aria-label="Close" onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button></div><p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted vault? This cannot be undone. Removing a host keeps its SSH key; removing a key used by a host is blocked.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<div className="wizardActions"><button onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button><button className="primary" onClick={()=>void confirmRemove()}>Confirm removal</button></div></div></div>}
     {vaultDialog&&<div className="overlay" onMouseDown={()=>setVaultDialog(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Unlock encrypted vault" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><LockKeyhole size={18}/> {vaultPresent?"Unlock vault":"Create vault"}<button aria-label="Close" onClick={()=>setVaultDialog(false)}><X size={17}/></button></div><p>Master password stays in this application session only. Lock the vault when finished.</p><form onSubmit={async e=>{e.preventDefault();await unlockVault()}} className="wizardFields"><label>Master password<input autoFocus type="password" autoComplete="off" value={vaultPassword} onChange={e=>setVaultPassword(e.target.value)} minLength={12} required/></label>{error&&<p role="alert" className="wizardError">{error}</p>}<button className="primary" type="submit">{vaultPresent?"Unlock":"Create encrypted vault"}</button></form></div></div>}
     {accessOpen&&<div className="overlay" onMouseDown={()=>setAccessOpen(false)}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Windows SSH Access Manager" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Windows Access Manager<button aria-label="Close" onClick={()=>setAccessOpen(false)}><X size={17}/></button></div><div className="wizardFields"><p className="note">Commands run under the connected Windows account. Administrator operations require the appropriate Windows permissions. Output appears in the SSH terminal.</p><button onClick={()=>void runWindowsAccessAction("users")}>List Windows local users</button><button onClick={()=>void runWindowsAccessAction("keys")}>Show administrator authorized SSH keys</button><label>Public SSH key (for add / revoke)<textarea rows={4} value={accessPublicKey} onChange={e=>setAccessPublicKey(e.target.value)} placeholder="ssh-ed25519 AAAA… colleague-device"/></label><button onClick={()=>void runWindowsAccessAction("add")}>Add public key to administrator access</button><button onClick={()=>void runWindowsAccessAction("remove")}>Revoke exact public key (with backup)</button><p className="note">Before removing a key, verify an alternative login. This tool never changes sshd_config or grants Windows administrator membership.</p>{error&&<p className="wizardError" role="alert">{error}</p>}</div></div></div>}
