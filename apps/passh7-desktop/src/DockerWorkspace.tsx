@@ -305,12 +305,19 @@ export default function DockerWorkspace(p:Props){
       {p.logsError&&<div className="workspaceError dockerActionableError" role="alert">
         <strong>Docker logs unavailable</strong><span>{p.logsError}</span>
         <small>{dockerRecoveryAdvice(p.logsError)}</small>
-        <button type="button" disabled={p.logsBusy||!chosen?.ID} onClick={()=>{if(chosen?.ID)p.onLogs(chosen.ID,chosen.Names||chosen.ID)}}>Retry logs</button>
+        <button type="button" disabled={p.logsBusy||!(p.logs?.session===p.session?p.logs.containerId:chosen?.ID)} onClick={()=>{
+          const current=p.logs?.session===p.session?p.logs:null;
+          if(current)selectLogContainer(current.containerId,current.containerName);
+          else if(chosen?.ID)selectLogContainer(chosen.ID,chosen.Names||chosen.ID);
+        }}>Retry logs</button>
       </div>}<div className={"dockerLogsBody "+(wrap?"wrapped":"")} ref={logBodyRef} onScroll={event=>{const target=event.currentTarget;setAutoScroll(target.scrollHeight-target.scrollTop-target.clientHeight<90)}}>
       {p.logs?.session===p.session?<>{p.logsBusy&&<div className="logsLoading">Refreshing latest Docker logs…</div>}
         {logLines.map((line,index)=><div className="dockerLogLine" key={index}><span>{index+1}</span><code className={/\berror\b|fatal|panic/i.test(line)?"logError":/\bwarn/i.test(line)?"logWarn":""}>{line}</code></div>)}
-        {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">No log lines match the selected filters.</div>}
-      </>:<div className="workspaceEmpty">Select a container and click View logs. Log output is fetched through a dedicated SSH exec channel.</div>}
+        {!logLines.length&&!p.logsBusy&&<div className="workspaceEmpty">{logsSearch||level!=="all"?"No log lines match the selected filters. Clear search or switch to All levels.":"Docker returned no recent stdout/stderr logs. This container may not have emitted anything yet, or may write logs to files instead of stdout. Try Follow live."}</div>}
+      </>:<div className="workspaceEmpty">{p.logsBusy
+        ?"Reading recent container logs over your SSH session…"
+        :p.logsError?"Log retrieval failed. Check the actionable error above and retry."
+        :"Select a container above to view stdout/stderr logs through SSH."}</div>}
     </div><div className="dockerLogFooter"><span>{p.logs?.session===p.session?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines · {new Blob([logLines.join("\n")]).size.toLocaleString()} UTF-8 bytes</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
     </section></>}
     {tab!=="containers"&&tab!=="logs"&&<section className="dockerCatalogWorkspace">
