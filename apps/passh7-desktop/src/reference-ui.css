@@ -1209,3 +1209,15 @@
   .dockerLogHeading button{width:100%}
   .dockerLogsWorkspace{min-height:350px}
 }
+
+/* Host diagnostics are explicit about TCP reachability versus authentication. */
+.connectionProbePanel{display:grid;gap:9px;padding:14px;margin-top:14px;
+  border:1px solid var(--border);border-radius:9px;background:var(--panel2)}
+.connectionProbePanel>div:first-child strong{font-size:12px}
+.connectionProbePanel>div:first-child p{font-size:11px;line-height:1.6;color:var(--muted);margin:6px 0 0}
+.connectionProbePanel .workspaceNotice,.connectionProbePanel .workspaceError{
+  display:grid;gap:7px;margin:0;overflow-wrap:anywhere
+}
+.connectionProbePanel .workspaceNotice code{display:block;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.connectionProbePanel .workspaceNotice small,.connectionProbePanel .workspaceError small{font-size:10px;line-height:1.5}
+.connectionProbePanel>.prefInfo{margin:0;font-size:11px;line-height:1.55}
