@@ -407,3 +407,13 @@ loopback tests do not substitute for this manual validation.
 | APP-UX-43 | Start an SFTP transfer, disconnect its SSH session, reconnect the same saved host with a newly authenticated SSH PTY, then retry the old job | Retry explicitly asks permission to use the new same-host session and opens the native file picker. No stale native session ID is reused, no cross-host transfer occurs, and the destination is never silently overwritten |
 | APP-UX-44 | Retry a failed SFTP job while the originating host has no live SSH session | The job remains failed and explains that the host must reconnect. No new system picker is launched or unrelated SSH session used |
 | APP-UX-45 | Lock Vault while background SFTP transfer history includes filenames and remote paths, then inspect the locked workspace | Native SSH handles cancellation; the global transfer badge disappears immediately and UI job/path history is cleared without revealing old host paths after a future unlock |
+
+## SSH editor draft safety and queue management (2026-10-18)
+
+| ID | Manual check | Required result |
+| --- | --- | --- |
+| HOST-EDIT-11 | Open Edit connection, modify display name, click outside modal or press Escape and reject discard confirmation | Editor stays open with every unsaved value intact. No Vault mutation or SSH reconnect occurs |
+| HOST-EDIT-12 | Repeat with Close and Cancel; accept discard, reopen same SSH profile | Draft is discarded only after confirmation; previously saved fields are restored. Closing an unchanged form needs no confirmation. Escape works through the shared accessible modal handler |
+| APP-UX-46 | Pause an SFTP queue, let pending work drain/cancel until no queued job remains | Resume stays enabled while queue is paused, even with zero pending jobs. New jobs do not get permanently stuck behind an inaccessible paused flag |
+| APP-UX-47 | Collapse Transfer Manager, switch to Docker, click global SFTP indicator, then filter Failed/Finished/Pending | Files opens the originating SSH session, the manager expands and resets to All. Filters only change visible UI history, not the running native transfer |
+| APP-UX-48 | Queue several downloads, click Cancel pending, reject confirmation, then accept | Reject changes nothing. Accept cancels only queued jobs; active byte streams and OS file-picker dialogs are not interrupted. Other sessions are unaffected |
