@@ -477,10 +477,11 @@ export default function App(){
       if(transferFolderRef.current.session===session&&transferFolderRef.current.path===directory)
         setSftpError("Upload succeeded; could not refresh folder: "+String(error));
     });
-  },sshTabs);
+  },sshTabs,vaultUnlocked);
   const sftpTransferBusy=transferQueue.active;
   const [transferFocusToken,setTransferFocusToken]=useState(0);
   const transferActivity=useMemo(()=>{
+    if(!vaultUnlocked)return {active:0,queued:0,failed:0,paused:false,progress:null};
     const jobs=transferQueue.jobs;
     const active=jobs.filter(job=>["selecting","running","cancelling"].includes(job.status));
     const queued=jobs.filter(job=>job.status==="queued").length;
@@ -490,7 +491,7 @@ export default function App(){
     const progress=running&&running.totalBytes
       ?Math.max(0,Math.min(100,Math.round(running.bytes/running.totalBytes*100))):null;
     return {active:active.length,queued,failed,paused:transferQueue.paused,progress};
-  },[transferQueue.jobs,transferQueue.paused]);
+  },[transferQueue.jobs,transferQueue.paused,vaultUnlocked]);
   const openTransferQueue=()=>{
     const job=transferQueue.jobs.find(item=>["running","selecting","cancelling","queued"].includes(item.status)
       &&sshTabs.some(tab=>tab.id===item.session))
