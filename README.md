@@ -68,11 +68,17 @@ The agent's own built-in shell and file tools still run on your **local machine*
 
 Use **Connections → Edit** (in a host row or inspector), the small pencil beside the host in the **left sidebar**, or the pencil in **Terminal**. The encrypted Vault editor updates a host's friendly name, SSH hostname/IP, port, username and assigned private-key identity together. You can import or generate a new Ed25519 key directly from the editor; the resulting key is selected for the host but is not attached until you choose **Save**. Display names are independent of immutable Vault IDs, so renaming does not break a jump-host route.
 
-**Security invariants:** editing a connected SSH host is blocked rather than silently moving live terminals or MCP grants to a different address. Changing the server address/port forgets the old pinned host fingerprint and saved login: the new server must be independently verified before authentication. Changing SSH account or identity clears saved login, but retains a verified host key for the unchanged server. You can also explicitly reset the host-key pin or forget saved login. Imported private keys are never deleted by editing or removing a host.
+**Security invariants:** changing only a host's friendly display name is allowed during active SSH sessions: the native endpoint, trust and local MCP grants stay unchanged. Editing an active SSH host's connection settings is blocked rather than silently moving live terminals or MCP grants to a different address. Changing the server address/port forgets the old pinned host fingerprint and saved login: the new server must be independently verified before authentication. Changing SSH account or identity clears saved login, but retains a verified host key for the unchanged server. You can also explicitly reset the host-key pin or forget saved login. Imported private keys are never deleted by editing or removing a host.
 
 Use **Connections → Remove**, the inspector's **Remove**, or Terminal's trash icon to delete a host. The dialog warns about connected PTYs, remote commands, SFTP, tunnels and local agent capabilities. Deleting a jump gateway referenced by other saved hosts is blocked until those routes are removed. The host's standalone SSH keys remain encrypted in Vault.
 
 The redundant four-icon navigation previously shown on the right has been removed. The left sidebar is the primary workspace navigation, while the shared session strip now appears across **every** workspace, including Terminal; this avoids duplicate terminal tab bars and vertical layout shifts.
+
+### Background SFTP transfer visibility
+
+An unobtrusive transfer badge in the global SSH session strip shows active transfers, queued/paused operations, known progress and unresolved failures even while working in Docker, AI Agents or Terminal. Clicking the badge switches to the owning active SSH session, opens Remote Files and scrolls to the native SFTP transfer queue, without restarting transfers or creating a new connection. Failed transfers remain available for explicit retry/clear actions; the app never automatically retries or overwrites a remote/local file.
+
+The host picker in the global command palette preserves the current workspace when selecting a host; choosing a specific SSH terminal is an explicit Terminal navigation action. The empty session strip offers Add SSH host (unlocked Vault) or Unlock Vault (locked).
 
 ## Navigation without extra SSH sessions
 
