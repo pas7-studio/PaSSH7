@@ -68,6 +68,7 @@ enum SessionCommand {
     DockerLogFinished(String),
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
+    Exec(String,tokio::sync::oneshot::Sender<Result<RemoteExecResult,String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpImage(String, tokio::sync::oneshot::Sender<Result<String,String>>),
@@ -163,6 +164,12 @@ pub struct ActiveLocalForward {
     pub local_port:u16,
     pub target_host:String,
     pub remote_port:u16,
+}
+
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
+pub struct RemoteExecResult {
+    pub stdout:String,pub stderr:String,pub exit_code:u32,pub truncated:bool,
 }
 
 #[derive(Clone,Serialize)]
@@ -282,6 +289,17 @@ impl SshSessionManager {
 
     /// Jump traffic runs only over an already authenticated, pinned gateway
     /// session; the local machine never contacts the target's private address.
+    /// Reuse an already authenticated/pinned SSH session: no Vault secrets.
+    pub async fn execute_remote(&self,id:&str,command:&str)->Result<RemoteExecResult,String>{
+        if command.is_empty()||command.len()>8192||command.as_bytes().contains(&0){
+            return Err("Remote command must be 1–8192 bytes without NUL".into());
+        }
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        self.sender(id)?.send(SessionCommand::Exec(command.to_owned(),tx)).await
+            .map_err(|_|"SSH connection ended before exec could start")?;
+        rx.await.map_err(|_|"Remote command interrupted by SSH disconnect".to_owned())?
+    }
+
     pub async fn jump_stream(&self,gateway_alias:&str,target:&str,port:u16)
         ->Result<russh::ChannelStream<russh::client::Msg>,String>{
         if target.trim().is_empty()||target.len()>253||port==0||
@@ -846,6 +864,54 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                     "Gateway rejected forwarding to private SSH target: {e}"
                                 )));
                             let _=response.send(opened.map(|channel|channel.into_stream()));
+                            Ok(())
+                        },
+                        Some(SessionCommand::Exec(command,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut ch=connection.channel_open_session().await
+                                    .map_err(|_|"Cannot open SSH exec channel".to_owned())?;
+                                ch.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"Remote SSH server rejected command".to_owned())?;
+                                Ok::<_,String>(ch)
+                            }).await.unwrap_or_else(|_|Err("SSH exec setup timed out".into()));
+                            match opened{
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut ch)=>{
+                                    tauri::async_runtime::spawn(async move{
+                                        let result=tokio::time::timeout(Duration::from_secs(60),async {
+                                            let mut stdout=Vec::new();
+                                            let mut stderr=Vec::new();
+                                            let mut exit=None;
+                                            let mut truncated=false;
+                                            const MAX_OUTPUT:usize=256*1024;
+                                            while let Some(event)=ch.wait().await{
+                                                match event{
+                                                    russh::ChannelMsg::Data{data}=>{
+                                                        let room=MAX_OUTPUT.saturating_sub(stdout.len()+stderr.len());
+                                                        if data.len()>room{truncated=true;}
+                                                        stdout.extend_from_slice(&data[..room.min(data.len())]);
+                                                    },
+                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        let room=MAX_OUTPUT.saturating_sub(stdout.len()+stderr.len());
+                                                        if data.len()>room{truncated=true;}
+                                                        stderr.extend_from_slice(&data[..room.min(data.len())]);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status}=>exit=Some(exit_status),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
+                                            }
+                                            let exit_code=exit.ok_or("Remote SSH exec closed without exit status")?;
+                                            Ok::<RemoteExecResult,String>(RemoteExecResult{
+                                                stdout:String::from_utf8_lossy(&stdout).into_owned(),
+                                                stderr:String::from_utf8_lossy(&stderr).into_owned(),
+                                                exit_code,truncated
+                                            })
+                                        }).await.unwrap_or_else(|_|Err("Remote SSH command exceeded 60-second timeout".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::AgentProbe(binary,response)) => {
@@ -1953,6 +2019,12 @@ fn allowed_agent_binary(kind:&str)->Option<&'static str>{
         "opencode"=>Some("opencode"),
         _=>None
     }
+}
+
+#[tauri::command]
+pub async fn ssh_session_exec(id:String,command:String,
+    manager:State<'_,SshSessionManager>)->Result<RemoteExecResult,String>{
+    manager.execute_remote(&id,&command).await
 }
 
 #[tauri::command]
