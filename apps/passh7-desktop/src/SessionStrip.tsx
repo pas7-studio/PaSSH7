@@ -3,11 +3,13 @@ import {Activity,ArrowRight,Command,LockKeyhole,Plus,TerminalSquare,X} from "luc
 
 type Session={id:string;alias:string};
 type Host={id:string;label:string};
+type TransferActivity={active:number;queued:number;failed:number;paused:boolean;progress:number|null};
 type Props={
   sessions:Session[];hosts:Host[];closingSessions:string[];
   activeSession:string;selectedHost:string;vaultUnlocked:boolean;
   onSelect:(id:string)=>void;onDisconnect:(id:string)=>void;onConnect:()=>void;
   onUnlock:()=>void;onCommandPalette:()=>void;
+  transfers:TransferActivity;onTransfers:()=>void;
 };
 /** Visible across Files, Docker, Ports, Settings and AI Agents.
  * A click only changes the active native PTY; it never creates an SSH session,
@@ -27,6 +29,20 @@ export default function SessionStrip(p:Props){
     seen.set(session.alias,number);
     return {...session,number};
   });
+  const transferCount=p.transfers.active+p.transfers.queued+p.transfers.failed;
+  const transferButton=transferCount>0?<button type="button" className="sessionStripTransfers"
+    title="Open SFTP transfer queue in Remote Files"
+    aria-label={"Open SFTP transfer queue: "+p.transfers.active+" active, "+
+      p.transfers.queued+" pending, "+p.transfers.failed+" failed"}
+    onClick={p.onTransfers}>
+    <Activity size={14}/>
+    <span>{p.transfers.active?""+p.transfers.active+" transferring":
+      p.transfers.queued?""+p.transfers.queued+(p.transfers.paused?" paused":" queued"):
+      ""+p.transfers.failed+" failed"}</span>
+    {p.transfers.progress!==null&&p.transfers.active>0&&
+      <small>{p.transfers.progress}%</small>}
+    {p.transfers.failed>0&&<small className="sessionStripTransferErrors">{p.transfers.failed} failed</small>}
+  </button>:null;
   if(!p.sessions.length){
     return <div className="sessionStrip sessionStripEmpty" aria-label="SSH session status">
       <div className="sessionStripCaption"><Activity size={15}/>
@@ -36,6 +52,7 @@ export default function SessionStrip(p:Props){
       {p.vaultUnlocked&&selected?
         <button type="button" onClick={p.onConnect}><Plus size={14}/> Connect {selected.label}</button>:
         !p.vaultUnlocked?<button type="button" onClick={p.onUnlock}><LockKeyhole size={14}/> Unlock Vault</button>:null}
+      {transferButton}
       <button type="button" aria-label="Search sessions and commands" onClick={p.onCommandPalette}><Command size={15}/></button>
     </div>;
   }
@@ -69,6 +86,7 @@ export default function SessionStrip(p:Props){
       <button type="button" className="sessionStripConnect" onClick={p.onConnect}>
         <Plus size={14}/> Connect {selected.label}
       </button>}
+    {transferButton}
     <button type="button" className="sessionStripSearch" aria-label="Search all SSH sessions"
       title="Find sessions, hosts and commands (Ctrl+Shift+P; Ctrl+K outside terminal)" onClick={p.onCommandPalette}>
       <Command size={15}/><span>Switch</span><ArrowRight size={13}/>
