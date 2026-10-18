@@ -146,7 +146,7 @@ export default function QuickSwitch(p:Props){
         }}
         placeholder="Search servers, sessions, pages or actions…"/>
       {query?<button type="button" className="quickClearQuery" title="Clear search" onClick={()=>{setQuery("");searchRef.current?.focus()}}>Clear</button>:
-        <kbd>Ctrl K</kbd>}
+        <kbd>Ctrl ⇧ P</kbd>}
     </label>
     <div className="quickPaletteHelp"><span>Use <kbd>@</kbd> for SSH targets</span><span><kbd>&gt;</kbd> for commands</span><span>{p.sessions.length} live terminal{p.sessions.length===1?"":"s"}</span></div>
     <div className="quickSwitchResults" id="passh7-command-results" ref={listRef} role="listbox" aria-label="Command palette results">
