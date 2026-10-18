@@ -13,7 +13,7 @@ use tauri::State;
 use tokio::{io::{AsyncReadExt,AsyncWriteExt},net::TcpListener,sync::Mutex as AsyncMutex};
 use crate::{SessionStore,ssh_sessions::SshSessionManager};
 
-const MAX_RPC:usize=512*1024;
+const MAX_RPC:usize=2*1024*1024;
 const GRANT_MAX_AGE:Duration=Duration::from_secs(12*3600);
 type Grants=Arc<Mutex<HashMap<String,Grant>>>;
 struct Grant{session:String,created:Instant}
@@ -208,6 +208,9 @@ pub async fn local_agent_launch(agent:String,id:String,
     bridge:State<'_,LocalAgentBridge>,ssh:State<'_,SshSessionManager>,vault:State<'_,SessionStore>
 )->Result<String,String>{
     allowed_agent(&agent)?;
+    if !cfg!(windows){
+        return Err("Interactive local CLI launch currently requires Windows desktop. Remote CLI over SSH remains available.".into());
+    }
     if !vault.touch_if_live()?{return Err("Unlock Vault before granting a local agent SSH access".into());}
     let agent_name=agent.clone();
     let cli=tokio::task::spawn_blocking(move||discover_local_cli(&agent_name)).await
