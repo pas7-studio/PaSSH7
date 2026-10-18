@@ -235,7 +235,11 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
         </>}
         {section==="shortcuts"&&<>
           {sectionCard("Available keyboard shortcuts",<>
-            {infoRow("Command palette","Search and switch between saved hosts.","Ctrl / Cmd + K")}
+            {infoRow("Command palette","Search live SSH sessions, saved hosts, workspaces and safe app actions.","Ctrl / Cmd + K")}
+            {infoRow("Target filter","In the command palette, type @ to show SSH hosts and live sessions.","@")}
+            {infoRow("Action filter","In the command palette, type > to show workspaces and safe app actions.",">")}
+            {infoRow("Connect selected host","With a host result focused in the command palette, use the normal SSH authentication and host-key checks.","Ctrl / Cmd + Enter")}
+            {infoRow("Choose live SSH context","Use the session strip above full-width workspaces to switch the target PTY without leaving Files, Docker or AI Agents.","Session strip")}
             {infoRow("Close quick switch","Dismiss the command palette or modal overlay.","Escape")}
             {infoRow("Terminal shortcuts","Other bindings belong to your selected remote CLI or terminal app.","Remote-dependent")}
             <p className="prefInfo">Editable keybindings are not implemented yet. Shortcuts shown here reflect current behavior, not planned functionality.</p>
