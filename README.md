@@ -52,7 +52,7 @@ The encrypted envelope version and the decrypted data schema version are indepen
 
 PaSSH7 uses your existing **Codex CLI, Claude Code CLI and OpenCode CLI logins**. It does **not** use provider APIs, pass API keys into another process, or install a daemon on SSH hosts.
 
-In **AI Agents**, connect to a saved pinned SSH host and choose:
+In **AI Agents**, the compact launcher keeps the CLI selector, **Auto / Remote SSH / Local + SSH** mode, discovery status, and main launch action together. The live SSH PTY is the primary work surface, with local-agent SSH grants and revoke controls alongside it. Choose *any connected SSH session* from the top target picker without disconnecting other hosts. Setup diagnostics and the non-secret context preview open only when needed. PaSSH7 remembers the last selected CLI and run mode as non-secret local UI preferences; it never persists a grant or login. Local CLI execution still opens a **separate Windows console** (the embedded terminal is the remote SSH PTY, not a local ConPTY console). Connect to a saved pinned SSH host and choose:
 
 - **Auto**: probe the SSH user's CLI; if missing, probe the local machine and launch its CLI with PaSSH7 remote tools.
 - **Remote CLI**: launch the remote signed-in CLI in the existing native SSH PTY.
