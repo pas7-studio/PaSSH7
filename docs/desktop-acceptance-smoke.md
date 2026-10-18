@@ -153,6 +153,7 @@ during this checklist. Use a throwaway identity and Docker container.
 | AGENT-LOCAL-07 | Through local CLI, run remote command that exits nonzero, output exceeds 256 KiB, or runs longer than 60s | Exit status/stdout/stderr are separate and bounded; missing SSH exit status, closed session, output truncation and timeout are explicit |
 | AGENT-LOCAL-08 | Local agent reads remote UTF-8 text, lists folder, and overwrites a test file | Operates via the existing SFTP subsystem with a 256 KiB bound. Write is explicitly destructive: test backups/permissions and ensure normal SSH account access applies |
 | AGENT-LOCAL-09 | Local CLI has built-in shell and files tools | They remain LOCAL and are never falsely presented as server operations. Agent must use passh7 remote_* MCP tools for all remote operations |
+| AGENT-LOCAL-10 | Launch a locally signed-in CLI in its separate Windows console, type a prompt and interact with its TUI | New console has usable stdin/stdout/stderr; prompt, keyboard input and streamed responses work. No standard streams are redirected to NUL by PaSSH7 |
 
 
 
