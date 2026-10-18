@@ -10,6 +10,7 @@ import ConnectionsWorkspace from "./ConnectionsWorkspace";
 import SnippetsWorkspace from "./SnippetsWorkspace";
 import PortForwardingWorkspace from "./PortForwardingWorkspace";
 import QuickSwitch from "./QuickSwitch";
+import SessionStrip from "./SessionStrip";
 import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
@@ -1450,6 +1451,13 @@ export default function App(){
         <button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button>
       </div>
     </div>}
+    {panel!=="terminal"&&<SessionStrip sessions={sshTabs} hosts={hosts}
+      activeSession={activeSsh} selectedHost={selected} vaultUnlocked={vaultUnlocked}
+      onSelect={id=>{const target=sshTabs.find(session=>session.id===id);
+        if(target){setSelected(target.alias);setActiveSsh(id)}}}
+      onConnect={()=>{if(selected)void connectFromConnections(selected)}}
+      onUnlock={()=>setVaultDialog(true)}
+      onCommandPalette={()=>setCommandOpen(true)}/>}
     <div className={"workspace "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"workspaceFull":"")}>
       {sidebar&&<aside className="sidebar"><nav className="workspaceNav" aria-label="Workspaces">
 {([["connections","Connections",Server],["terminal","Terminal",TerminalSquare],["files","Remote Files",FolderClosed],["docker","Docker",Container],["ports","Port Forwarding",Activity],["snippets","Snippets",FileText],["agent","AI Agents",Bot],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=>
