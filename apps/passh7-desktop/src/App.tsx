@@ -1432,13 +1432,13 @@ export default function App(){
         <button type="button" className="hostSelectIcon" title={sidebar?"Collapse host sidebar":"Expand host sidebar"} aria-label={sidebar?"Collapse host sidebar":"Expand host sidebar"} onClick={()=>toggleSidebar()}><ChevronDown size={17}/></button>
         <span className={"hostDot "+(connected?"connected":active.fingerprint?"trusted":"untrusted")} title={connected?"SSH connected":active.fingerprint?"Host-key pinned, disconnected":"Not connected"}/>
         <div className="topHostIdentity"><strong>{active.label}</strong><small>{active.id?active.user+" · "+active.address+" · SSH (port "+active.port+")"+(active.jumpAlias?" · via "+active.jumpAlias:""):"Choose a saved SSH host"}</small></div>
-        <span className="hostStatusLabel">{connected?activeConnections+" live session"+(activeConnections===1?"":"s"):active.fingerprint?"Verified key · Offline":"Disconnected"}</span>
+        <span className="hostStatusLabel">{connected?activeConnections+" live session"+(activeConnections===1?"":"s"):active.fingerprint?"Key pinned · No SSH session":"No SSH session"}</span>
       </div>
       <div className="topactions">
         <button type="button" className="topQuickButton" disabled={!active.id} onClick={()=>setPanel("terminal")}><TerminalSquare size={15}/><span>Open in Terminal</span></button>
         <button type="button" className="topQuickButton topDisconnect" disabled={!connected||sshBusy} title="Disconnect the selected host's active SSH session" onClick={()=>{const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===active.id)||sshTabs.find(t=>t.alias===active.id);if(session)void closeInteractive(session.id)}}><X size={15}/><span>Disconnect</span></button>
         <button type="button" className="lock" onClick={()=>{if(!desktopAvailable())return;if(vaultUnlocked){void lockVault()}else setVaultDialog(true)}}><LockKeyhole size={14}/><span>{vaultUnlocked?"Lock Vault":"Unlock Vault"}</span></button>
-        <button type="button" className="iconbtn" title="Command palette (Ctrl+K)" aria-label="Open command palette" onClick={()=>setCommandOpen(true)}><Command size={17}/></button>
+        <button type="button" className="topCommandPalette" title="Search SSH sessions, hosts, workspaces and commands (Ctrl+K)" aria-label="Open command palette" onClick={()=>setCommandOpen(true)}><Search size={15}/><span>Search</span><kbd>Ctrl K</kbd></button>
       </div>
     </header>
     {sessionNotice&&<div className="globalSessionNotice" role="alert" aria-live="polite">
