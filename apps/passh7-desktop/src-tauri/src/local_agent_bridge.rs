@@ -594,6 +594,19 @@ mod tests{
         assert_eq!(opencode_major_from_version("version unavailable"),None);
     }
     #[test]
+    fn agent_grant_inventory_never_serializes_bridge_secret(){
+        let item=LocalAgentConnection{
+            id:"a".repeat(32),agent:"opencode".into(),
+            session_id:"ssh-123".into(),host:"development".into(),age_seconds:5,
+        };
+        let text=serde_json::to_string(&item).unwrap();
+        let value:Value=serde_json::from_str(&text).unwrap();
+        assert_eq!(value["sessionId"],"ssh-123");
+        assert_eq!(value["ageSeconds"],5);
+        assert!(value.get("token").is_none());
+        assert!(!text.contains("PASSH7_BRIDGE_TOKEN"));
+    }
+    #[test]
     fn capability_revocation_targets_only_one_local_agent_grant(){
         let grants:Grants=Arc::new(Mutex::new(HashMap::new()));
         let first="11111111111111111111111111111111".to_owned();
