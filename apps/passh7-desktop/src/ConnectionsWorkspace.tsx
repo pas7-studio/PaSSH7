@@ -1,5 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from "react";
-import {CheckCircle2,KeyRound,LockKeyhole,Plus,RefreshCw,Search,Server,ShieldAlert,ShieldCheck,TerminalSquare,Upload,WifiOff} from "lucide-react";
+import {CheckCircle2,KeyRound,LockKeyhole,Pencil,Plus,RefreshCw,Search,Server,Trash2,ShieldAlert,ShieldCheck,TerminalSquare,Upload,WifiOff} from "lucide-react";
 import {WorkspaceHeader,WorkspaceEmpty,WorkspaceMetric,WorkspaceStatus} from "./WorkspaceChrome";
 import type {SshProbeResult} from "./backend";
 
@@ -11,6 +11,7 @@ type Props={
   hosts:ConnectionHost[];selected:string;connectedAliases:string[];vaultUnlocked:boolean;
   onSelect:(alias:string)=>void;onConnect:(alias:string)=>void;onTerminal:(alias:string)=>void;
   onAdd:()=>void;onImport:()=>void;onProbe:(alias:string)=>Promise<SshProbeResult>;
+  onEdit:(alias:string)=>void;onDelete:(alias:string)=>void;
 };
 export default function ConnectionsWorkspace(p:Props){
   const [search,setSearch]=useState("");
@@ -74,7 +75,13 @@ export default function ConnectionsWorkspace(p:Props){
             <td><div className="connectionsTarget">{host.user}@{host.address}:{host.port}{host.jumpAlias&&<small>Via {host.jumpAlias}</small>}</div></td>
             <td><WorkspaceStatus kind={host.fingerprint?"trusted":"warning"}>{host.fingerprint?"Pinned":"Verify key"}</WorkspaceStatus></td>
             <td><WorkspaceStatus kind={connected.has(host.id)?"connected":"offline"}>{connected.has(host.id)?p.connectedAliases.filter(alias=>alias===host.id).length+" session(s)":"Not connected"}</WorkspaceStatus></td>
-            <td><div className="connectionRowActions"><button onClick={event=>{event.stopPropagation();p.onTerminal(host.id)}}><TerminalSquare size={14}/> Terminal</button>
+            <td><div className="connectionRowActions">
+              <button title={"Edit "+host.label+" SSH connection"} aria-label={"Edit "+host.label}
+                disabled={!p.vaultUnlocked} onClick={event=>{event.stopPropagation();p.onEdit(host.id)}}><Pencil size={14}/> Edit</button>
+              <button title={"Remove "+host.label+" from Vault"} aria-label={"Remove "+host.label}
+                className="dangerButton" disabled={!p.vaultUnlocked}
+                onClick={event=>{event.stopPropagation();p.onDelete(host.id)}}><Trash2 size={14}/></button>
+              <button onClick={event=>{event.stopPropagation();p.onTerminal(host.id)}}><TerminalSquare size={14}/> Terminal</button>
               <button className="workspacePrimary" onClick={event=>{event.stopPropagation();p.onConnect(host.id)}}>{connected.has(host.id)?"New session":host.hasSavedCredentials?"Quick connect":"Connect"}</button></div></td>
           </tr>)}</tbody></table>
           {filtered.length===0&&<WorkspaceEmpty icon={p.hosts.length===0?Server:Search}
@@ -89,6 +96,10 @@ export default function ConnectionsWorkspace(p:Props){
             <dt>Server identity</dt><dd>{selected.fingerprint?"Pinned SHA-256":"Verification required"}</dd>
             <dt>Route</dt><dd>{selected.jumpAlias?"Via "+selected.jumpAlias:"Direct SSH"}</dd>
             <dt>Saved login</dt><dd>{selected.hasSavedCredentials?"In encrypted Vault":"Manual login"}</dd></dl>
+          <div className="connectionInspectorActions">
+            <button onClick={()=>p.onEdit(selected.id)} disabled={!p.vaultUnlocked}><Pencil size={14}/> Edit connection</button>
+            <button className="dangerButton" onClick={()=>p.onDelete(selected.id)} disabled={!p.vaultUnlocked}><Trash2 size={14}/> Remove</button>
+          </div>
           <button className="workspacePrimary" onClick={()=>p.onConnect(selected.id)}><TerminalSquare size={15}/> {connected.has(selected.id)?"Open another session":"Connect securely"}</button>
           <button onClick={()=>p.onTerminal(selected.id)}>Open in Terminal</button>
           <div className="connectionProbePanel">
