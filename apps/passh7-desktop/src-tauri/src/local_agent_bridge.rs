@@ -220,7 +220,7 @@ pub async fn local_agent_launch(agent:String,id:String,
     let config=new_config(&agent,&self_exe)?;
     let mut cmd=if cfg!(windows){Command::new("powershell.exe")}else{Command::new("sh")};
     if cfg!(windows){
-        cmd.args(["-NoLogo","-NoExit","-Command",
+        cmd.args(["-NoLogo","-NoProfile","-Command",
             &shell_launch_command(&agent,&cli,&self_exe,config.as_deref())]);
         #[cfg(windows)]{
             use std::os::windows::process::CommandExt;
