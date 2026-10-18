@@ -175,24 +175,88 @@ async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&s
     Ok((addr,token))
 }
 
-fn new_config(agent:&str,executable:&Path)->Result<Option<PathBuf>,String>{
+// OpenCode V1 uses mcp.<name>; V2 requires mcp.servers.<name>.
+// Query the actual local executable instead of assuming a schema from the
+// name of the package or the existence of an unrelated GUI application.
+fn opencode_major_from_version(raw:&str)->Option<u32>{
+    raw.split(|c:char|!c.is_ascii_digit()&&c!='.')
+        .find(|part|part.chars().next().is_some_and(|ch|ch.is_ascii_digit()))
+        .and_then(|part|part.split('.').next()?.parse::<u32>().ok())
+}
+fn opencode_major_version(cli:&Path)->Result<u32,String>{
+    let mut cmd=if cfg!(windows){
+        let mut cmd=Command::new("powershell.exe");
+        cmd.args(["-NoProfile","-NonInteractive","-Command",
+            &format!("& {} --version",ps_quote(&cli.to_string_lossy()))]);cmd
+    }else{
+        let mut cmd=Command::new(cli);cmd.arg("--version");cmd
+    };
+    let mut child=cmd.stdin(Stdio::null()).stdout(Stdio::piped())
+        .stderr(Stdio::piped()).spawn()
+        .map_err(|_|"Could not inspect local OpenCode CLI version")?;
+    let started=Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status))=>{
+                let out=child.wait_with_output().map_err(|_|"OpenCode version output unavailable")?;
+                if !status.success(){return Err("OpenCode --version failed".into());}
+                let text=format!("{} {}",String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr));
+                return opencode_major_from_version(&text)
+                    .filter(|major|*major>=1)
+                    .ok_or_else(||"Cannot determine OpenCode major version for MCP configuration".into());
+            },
+            Ok(None) if started.elapsed()>=Duration::from_secs(5)=>{
+                let _=child.kill();let _=child.wait();
+                return Err("OpenCode version probe timed out".into());
+            },
+            Err(_)=>return Err("OpenCode version probe failed".into()),
+            _=>std::thread::sleep(Duration::from_millis(40))
+        }
+    }
+}
+fn is_opencode_v2_config(path:Option<&Path>)->bool{
+    path.and_then(Path::file_name).is_some_and(|name|name=="opencode.json")
+}
+fn cleanup_temp_config(path:Option<&Path>){
+    if let Some(path)=path{
+        let _=fs::remove_file(path);
+        if is_opencode_v2_config(Some(path)){
+            // Our private workspace was created exclusively for this launch.
+            if let Some(dir)=path.parent(){let _=fs::remove_dir(dir);}
+        }
+    }
+}
+fn new_config(agent:&str,executable:&Path,opencode_major:Option<u32>)->Result<Option<PathBuf>,String>{
     // Config contains only our own executable path, never SSH/Vault secrets or
     // local-bridge tokens. The CLI process inherits the ephemeral grant via env.
     let exe=executable.to_string_lossy().into_owned();
     if agent=="codex"{return Ok(None);}
+    let v2=agent=="opencode"&&opencode_major.is_some_and(|major|major>=2);
     let json=if agent=="claude"{
         json!({"mcpServers":{"passh7":{"command":exe,"args":["--passh7-mcp"]}}})
+    }else if v2{
+        json!({"mcp":{"servers":{"passh7":{"type":"local","command":[exe,"--passh7-mcp"],"codemode":false}}}})
     }else{
-        // OpenCode uses a flat mcp.<name> entry, including in current releases.
-        // A nested mcp.servers object is NOT a supported OpenCode MCP schema.
         json!({"mcp":{"passh7":{"type":"local","command":[exe,"--passh7-mcp"],"enabled":true}}})
     };
     let bytes=serde_json::to_vec_pretty(&json).map_err(|_|"Cannot encode agent MCP config")?;
-    let name=format!("passh7-{}-{}.json",agent,rand::random::<u64>());
-    let path=std::env::temp_dir().join(name);
-    let mut opts=OpenOptions::new();opts.write(true).create_new(true);
-    let mut f=opts.open(&path).map_err(|_|"Cannot create temporary MCP configuration")?;
-    f.write_all(&bytes).map_err(|_|"Cannot write temporary MCP configuration")?;
+    let path=if v2{
+        // OpenCode V2 ignores OPENCODE_CONFIG on affected versions.
+        // Use a private project workspace, which V2 definitely discovers.
+        let dir=std::env::temp_dir().join(format!("passh7-opencode-v2-{}",rand::random::<u64>()));
+        fs::create_dir(&dir).map_err(|_|"Cannot create OpenCode V2 workspace")?;
+        dir.join("opencode.json")
+    }else{
+        std::env::temp_dir().join(format!("passh7-{agent}-{}.json",rand::random::<u64>()))
+    };
+    let result=(||->Result<(),String>{
+        let mut f=OpenOptions::new().write(true).create_new(true).open(&path)
+            .map_err(|_|"Cannot create temporary MCP configuration")?;
+        f.write_all(&bytes).map_err(|_|"Cannot write temporary MCP configuration")?;
+        Ok(())
+    })();
+    if let Err(err)=result{cleanup_temp_config(Some(&path));return Err(err);}
     Ok(Some(path))
 }
 fn shell_launch_command(agent:&str,cli:&Path,self_exe:&Path,config:Option<&Path>)->String{
@@ -203,6 +267,9 @@ fn shell_launch_command(agent:&str,cli:&Path,self_exe:&Path,config:Option<&Path>
         format!("& {binary} -c {} -c {}",ps_quote(&cmd),ps_quote(args))
     }else if agent=="claude"{
         format!("& {binary} --mcp-config {}",ps_quote(&config.unwrap().to_string_lossy()))
+    }else if is_opencode_v2_config(config){
+        // Force a private V2 server so it loads this workspace's MCP config.
+        format!("& {binary} --standalone")
     }else{format!("& {binary}")}
 }
 #[tauri::command]
@@ -219,11 +286,16 @@ pub async fn local_agent_launch(agent:String,id:String,
         .map_err(|_|"Local CLI detection failed".to_owned())??;
     // Perform all fallible local setup before issuing an SSH capability token.
     let self_exe=std::env::current_exe().map_err(|_|"PaSSH7 executable path unavailable")?;
-    let config=new_config(&agent,&self_exe)?;
+    let major=if agent=="opencode"{
+        let path=cli.clone();
+        Some(tokio::task::spawn_blocking(move||opencode_major_version(&path)).await
+            .map_err(|_|"OpenCode CLI version probe interrupted".to_owned())??)
+    }else{None};
+    let config=new_config(&agent,&self_exe,major)?;
     let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id).await{
         Ok(grant)=>grant,
         Err(error)=>{
-            if let Some(path)=config{let _=fs::remove_file(path);}
+            cleanup_temp_config(config.as_deref());
             return Err(error);
         }
     };
@@ -248,7 +320,14 @@ pub async fn local_agent_launch(agent:String,id:String,
     cmd.env("PASSH7_BRIDGE_ADDR",address.to_string())
         .env("PASSH7_BRIDGE_TOKEN",&token);
     if let Some(path)=config.as_ref(){
-        if agent=="opencode"{cmd.env("OPENCODE_CONFIG",path);}
+        if agent=="opencode"{
+            if is_opencode_v2_config(Some(path)){
+                if let Some(dir)=path.parent(){cmd.current_dir(dir);}
+                // V2 currently ignores these legacy overrides; avoid inheriting
+                // a stale config from PaSSH7's own parent process.
+                cmd.env_remove("OPENCODE_CONFIG").env_remove("OPENCODE_CONFIG_CONTENT");
+            }else{cmd.env("OPENCODE_CONFIG",path);}
+        }
     }
     let child=cmd.spawn().map_err(|e|format!("Cannot open local CLI terminal: {e}"));
     match child{
@@ -257,13 +336,13 @@ pub async fn local_agent_launch(agent:String,id:String,
             std::thread::spawn(move||{
                 let _=child.wait();
                 if let Ok(mut active)=grants.lock(){active.remove(&token);}
-                if let Some(path)=config{let _=fs::remove_file(path);}
+                cleanup_temp_config(config.as_deref());
             });
             Ok(format!("Launched local {agent} CLI in a separate console with SSH tool access to the selected authenticated session. Local CLI login remains unchanged."))
         },
         Err(error)=>{
             if let Ok(mut active)=bridge.grants.lock(){active.remove(&token);}
-            if let Some(path)=config{let _=fs::remove_file(path);}
+            cleanup_temp_config(config.as_deref());
             Err(error)
         }
     }
@@ -363,17 +442,36 @@ pub fn run_stdio_mcp(){
 mod tests{
     use super::*;
     #[test]
-    fn opencode_config_uses_documented_flat_mcp_schema(){
+    fn opencode_v1_and_v2_configs_match_their_own_schemas(){
         let exe=std::env::current_exe().expect("test executable exists");
-        let config=new_config("opencode",&exe).unwrap().unwrap();
-        let bytes=fs::read(&config).unwrap();
-        let _=fs::remove_file(&config);
-        let parsed:Value=serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(parsed["mcp"]["passh7"]["type"],"local");
-        assert_eq!(parsed["mcp"]["passh7"]["enabled"],true);
-        assert_eq!(parsed["mcp"]["passh7"]["command"][1],"--passh7-mcp");
-        assert!(parsed["mcp"].get("servers").is_none());
-        assert!(!parsed.to_string().contains("PASSH7_BRIDGE_TOKEN"));
+        let v1=new_config("opencode",&exe,Some(1)).unwrap().unwrap();
+        let v2=new_config("opencode",&exe,Some(2)).unwrap().unwrap();
+        let one:Value=serde_json::from_slice(&fs::read(&v1).unwrap()).unwrap();
+        let two:Value=serde_json::from_slice(&fs::read(&v2).unwrap()).unwrap();
+        assert!(one["mcp"].get("servers").is_none());
+        assert_eq!(one["mcp"]["passh7"]["enabled"],true);
+        assert_eq!(one["mcp"]["passh7"]["command"][1],"--passh7-mcp");
+        assert!(two["mcp"].get("passh7").is_none());
+        assert_eq!(two["mcp"]["servers"]["passh7"]["type"],"local");
+        assert_eq!(two["mcp"]["servers"]["passh7"]["codemode"],false);
+        assert_eq!(two["mcp"]["servers"]["passh7"]["command"][1],"--passh7-mcp");
+        assert!(is_opencode_v2_config(Some(&v2)));
+        assert!(!is_opencode_v2_config(Some(&v1)));
+        let launch=shell_launch_command("opencode",&exe,&exe,Some(&v2));
+        assert!(launch.contains("--standalone"));
+        assert!(!one.to_string().contains("PASSH7_BRIDGE_TOKEN"));
+        assert!(!two.to_string().contains("PASSH7_BRIDGE_TOKEN"));
+        let parent=v2.parent().unwrap().to_path_buf();
+        cleanup_temp_config(Some(&v1));
+        cleanup_temp_config(Some(&v2));
+        assert!(!v1.exists());
+        assert!(!parent.exists());
+    }
+    #[test]
+    fn opencode_version_probe_recognizes_v1_and_v2(){
+        assert_eq!(opencode_major_from_version("OpenCode v1.18.35"),Some(1));
+        assert_eq!(opencode_major_from_version("opencode v2.0.26"),Some(2));
+        assert_eq!(opencode_major_from_version("version unavailable"),None);
     }
     #[test]
     fn only_three_cli_kinds_are_allowed(){
