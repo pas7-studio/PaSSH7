@@ -734,13 +734,19 @@ export default function App(){
     const grant=localAgentConnections.find(item=>item.id===id);
     if(!grant)return;
     if(!window.confirm("Revoke "+grant.agent+" SSH tools for "+grant.host+"? This blocks new remote operations but does not close its local CLI window or cancel already running SSH commands."))return;
+    const contextAtStart={...agentContext.current};
+    const stillCurrent=()=>agentContext.current.session===contextAtStart.session
+      &&agentContext.current.host===contextAtStart.host;
     setLocalAgentRevoking(id);
     try{
       const revoked=await revokeLocalAgentConnection(id);
       await refreshLocalAgentConnections();
-      setAgentStatus(revoked?"SSH tools revoked. Local CLI console stays open; future MCP requests will be rejected.":"SSH grant has already expired or been revoked.");
-    }catch(error){setAgentStatus("Could not revoke local CLI SSH tools: "+String(error))}
-    finally{setLocalAgentRevoking("")}
+      if(stillCurrent())setAgentStatus(revoked
+        ?"SSH tools revoked for "+grant.agent+" on "+grant.host+". The local CLI remains open."
+        :"SSH grant has already expired or been revoked.");
+    }catch(error){
+      if(stillCurrent())setAgentStatus("Could not revoke local CLI SSH tools: "+String(error));
+    }finally{setLocalAgentRevoking("")}
   };
   const checkLocalAgents=async()=>{
     if(!desktopAvailable()||localAgentBusy)return;
