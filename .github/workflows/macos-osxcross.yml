@@ -1,0 +1,86 @@
+name: PaSSH7 macOS osxcross experimental
+on:
+  push:
+    branches: [feat/macos-osxcross-build]
+    paths:
+      - '.github/workflows/macos-osxcross.yml'
+      - 'apps/passh7-desktop/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: passh7-osxcross-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  macos-arm64-cross:
+    runs-on: [self-hosted, passh7, passh7-linux]
+    timeout-minutes: 120
+    env:
+      CARGO_INCREMENTAL: '0'
+      PASSH7_MACOS_TARGET: aarch64-apple-darwin
+      PASSH7_MACOS_SDK_URL: https://github.com/joseluisq/macosx-sdks/releases/download/15.5/MacOSX15.5.sdk.tar.xz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install verified portable LLVM/Clang (no sudo)
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/passh7-llvm"
+          mkdir -p "$root" "$HOME/.cache/passh7"
+          archive="$HOME/.cache/passh7/clang-apple-cross-22.1.4.tar.xz"
+          if ! test -s "$archive"; then
+            curl -fL --retry 3 --retry-delay 4 \
+              -o "$archive" \
+              'https://github.com/awakecoding/llvm-prebuilt/releases/download/v2026.2.0/clang-apple-cross-22.1.4-x86_64-ubuntu-24.04.tar.xz'
+          fi
+          echo '92bcfa51e06758ba07126540940bdc4fc756703bbf6881217e9928519c0239b6  '"$archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$root"
+          echo 'Available cross tools:'
+          find "$root" -maxdepth 5 -name 'clang*' -print | head -25 || true
+          compiler=""
+          while IFS= read -r candidate; do
+            if test -x "$candidate" && ! test -d "$candidate"; then compiler="$candidate"; break; fi
+          done < <(find "$root" -maxdepth 5 \( -name clang -o -name clang-22 -o -name clang-apple \) -print)
+          if test -z "$compiler"; then
+            echo "::error::No runnable clang found in cross archive"
+            find "$root" -maxdepth 3 -type f | head -40 || true
+            exit 2
+          fi
+          bin_dir="$(dirname "$compiler")"
+          echo "$bin_dir" >> "$GITHUB_PATH"
+          "$compiler" --version | head -1
+          if test -d "$(dirname "$bin_dir")/lib"; then
+            echo "LD_LIBRARY_PATH=$(dirname "$bin_dir")/lib" >> "$GITHUB_ENV"
+          fi
+          echo "Portable toolchain: $bin_dir"
+          command -v make
+          command -v tar
+          command -v git
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify SDK archive fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          checksum="$(curl -fsSL https://github.com/joseluisq/macosx-sdks/releases/download/15.5/sha256sum.txt)"
+          echo "$checksum" | grep -F 'MacOSX15.5.sdk.tar.xz'
+          digest="$(echo "$checksum" | grep -F 'MacOSX15.5.sdk.tar.xz' | awk '{print $1}')"
+          echo "$digest" | grep -Eq '^[a-fA-F0-9]{64}$'
+          echo "PASSH7_MACOS_SDK_SHA256=$digest" >> "$GITHUB_ENV"
+      - name: Build PaSSH7 Darwin arm64 with osxcross
+        shell: bash
+        run: bash apps/passh7-desktop/scripts/build-macos-osxcross.sh
+      - name: Upload unsigned experimental macOS app
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaSSH7-macOS-arm64-osxcross-EXPERIMENTAL
+          path: apps/passh7-desktop/macos-experimental/PaSSH7-macOS-arm64-unsigned-experimental.zip
+          if-no-files-found: error
+          retention-days: 14
