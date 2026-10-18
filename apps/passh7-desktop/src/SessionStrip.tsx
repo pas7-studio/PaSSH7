@@ -1,3 +1,4 @@
+import {useEffect,useRef} from "react";
 import {Activity,ArrowRight,Command,LockKeyhole,Plus,TerminalSquare} from "lucide-react";
 
 type Session={id:string;alias:string};
@@ -12,6 +13,13 @@ type Props={
  * A click only changes the active native PTY; it never creates an SSH session,
  * grants a CLI capability or sends a command to a remote machine. */
 export default function SessionStrip(p:Props){
+  const itemsRef=useRef<HTMLDivElement>(null);
+  // When the active PTY changes through Ctrl+K or another workspace, bring
+  // its session chip into view even with dozens of horizontally scrollable tabs.
+  useEffect(()=>{
+    itemsRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]')
+      ?.scrollIntoView({inline:"nearest",block:"nearest"});
+  },[p.activeSession,p.selectedHost]);
   const selected=p.hosts.find(host=>host.id===p.selectedHost);
   if(!p.sessions.length){
     return <div className="sessionStrip sessionStripEmpty" aria-label="SSH session status">
@@ -29,7 +37,7 @@ export default function SessionStrip(p:Props){
     <div className="sessionStripCaption"><Activity size={15}/>
       <span>SSH SESSIONS</span><small>{p.sessions.length} connected</small>
     </div>
-    <div className="sessionStripItems" role="group" aria-label="Choose native SSH session">
+    <div ref={itemsRef} className="sessionStripItems" role="group" aria-label="Choose native SSH session">
       {p.sessions.map(session=>{
         const host=p.hosts.find(item=>item.id===session.alias);
         const number=p.sessions.filter(item=>item.alias===session.alias)
