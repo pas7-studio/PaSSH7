@@ -307,7 +307,10 @@ export default function DockerWorkspace(p:Props){
     <section className={"dockerLogViewer dockerLogsWorkspace "+(logsFullscreen?"dockerLogsFullscreen":"")} style={{height:logsFullscreen?undefined:Math.max(logsHeight,560)}}>
       <div className="dockerLogToolbar"><strong><TerminalSquare size={17}/> Container Logs</strong>
       <select aria-label="Container for log viewer" value={displayedTarget?.id||""} onChange={e=>{const row=p.items?.find(item=>item.ID===e.target.value);if(row?.ID)selectLogContainer(row.ID,row.Names||row.ID)}} disabled={!p.connected||p.logsBusy}>
-        <option value="">Select container…</option>{(p.items||[]).map(item=>item.ID?<option key={item.ID} value={item.ID}>{item.Names||item.ID.slice(0,12)}</option>:null)}
+        <option value="">Select container…</option>
+        {displayedTarget&&!p.items?.some(item=>item.ID===displayedTarget.id)&&
+          <option value={displayedTarget.id}>{displayedTarget.name} · last selected</option>}
+        {(p.items||[]).map(item=>item.ID?<option key={item.ID} value={item.ID}>{item.Names||item.ID.slice(0,12)}</option>:null)}
       </select>
       <label className="filesSearch"><Search size={14}/><input value={logsSearch} onChange={e=>setLogsSearch(e.target.value)} placeholder="Find in logs" aria-label="Search Docker logs"/></label>
       <select value={level} onChange={e=>setLevel(e.target.value as typeof level)} aria-label="Log severity"><option value="all">All levels</option><option value="warn">Warnings</option><option value="error">Errors</option></select>
@@ -318,7 +321,7 @@ export default function DockerWorkspace(p:Props){
         onClick={()=>{if(displayedTarget)selectLogContainer(displayedTarget.id,displayedTarget.name)}}><RefreshCw size={15}/></button>
       <button title="Copy visible logs" disabled={!logLines.length} onClick={()=>navigator.clipboard.writeText(logLines.join("\n"))}><Clipboard size={15}/></button>
       <button title={paused?"Resume displaying new log lines":"Freeze visible lines while the SSH log stream keeps running"}
-        aria-pressed={paused} disabled={!activeLog||activeLog.containerId!==displayedTarget?.id}
+        aria-pressed={paused} disabled={!paused&&(!activeLog||activeLog.containerId!==displayedTarget?.id)}
         onClick={togglePause}>{paused?"Resume view":"Pause view"}</button>
       <button title="Jump to latest logs" aria-label="Jump to latest logs" aria-pressed={autoScroll&&!paused}
         onClick={()=>{setPausedSnapshot(null);setAutoScroll(true);
@@ -344,7 +347,7 @@ export default function DockerWorkspace(p:Props){
         ?"Reading recent container logs over your SSH session…"
         :p.logsError?"Log retrieval failed. Check the actionable error above and retry."
         :"Select a container above to view stdout/stderr logs through SSH."}</div>}
-    </div><div className="dockerLogFooter"><span>{paused?"Ⅱ View paused · live SSH stream continues":activeLog?.containerId===displayedTarget?.id?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines · {new Blob([logLines.join("\n")]).size.toLocaleString()} UTF-8 bytes</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
+    </div><div className="dockerLogFooter"><span>{paused?"Ⅱ Display paused"+(p.follow?" · Follow stays enabled":""):activeLog?.containerId===displayedTarget?.id?"● Recent logs loaded":"○ No log stream"}</span><span>{logLines.length.toLocaleString()} visible lines · {new Blob([logLines.join("\n")]).size.toLocaleString()} UTF-8 bytes</span><span>{p.follow?p.liveStatus==="streaming"?"● Live SSH stream":p.liveStatus==="connecting"?"Connecting live stream…":p.liveStatus==="error"?"Live stream failed":p.liveStatus==="closed"?"Stream ended":"Follow enabled":"Manual refresh"}</span></div>
     </section></>}
     {tab!=="containers"&&tab!=="logs"&&<section className="dockerCatalogWorkspace">
       <div className="dockerToolbar">
