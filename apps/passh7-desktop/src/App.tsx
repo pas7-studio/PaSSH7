@@ -720,7 +720,12 @@ export default function App(){
       setPortError(session,"Could not stop local forward: "+String(error));
     }finally{finishPortOperation(session)}
   };
-  const [agentMode,setAgentMode]=useState<"auto"|"remote"|"local">("auto");
+  const [agentMode,setAgentMode]=useState<"auto"|"remote"|"local">(()=>{
+    try{
+      const stored=localStorage.getItem("passh7.agent.mode");
+      return stored==="remote"||stored==="local"?stored:"auto";
+    }catch{return "auto"}
+  });
   const [localAgentAvailability,setLocalAgentAvailability]=useState<Partial<Record<AgentKind,LocalAgentAvailability>>>({});
   const [localAgentBusy,setLocalAgentBusy]=useState(false);
   const [localAgentConnections,setLocalAgentConnections]=useState<LocalAgentConnection[]>([]);
@@ -760,7 +765,20 @@ export default function App(){
       setLocalAgentAvailability(previous=>({...previous,...discovered}));
     }finally{setLocalAgentBusy(false)}
   };
-  const [agent,setAgent]=useState<AgentKind>("codex");
+  const [agent,setAgent]=useState<AgentKind>(()=>{
+    try{
+      const stored=localStorage.getItem("passh7.agent.provider");
+      return stored==="claude"||stored==="opencode"?stored:"codex";
+    }catch{return "codex"}
+  });
+  // Store only non-secret UI choices. Never persist the signed-in account,
+  // SSH grant or local provider token.
+  useEffect(()=>{
+    try{
+      localStorage.setItem("passh7.agent.mode",agentMode);
+      localStorage.setItem("passh7.agent.provider",agent);
+    }catch{/* best-effort local UI preference */}
+  },[agentMode,agent]);
   const [agentStatus,setAgentStatus]=useState("");
   const [agentLaunching,setAgentLaunching]=useState(false);
   const agentLaunchRef=useRef(false);
@@ -812,7 +830,7 @@ export default function App(){
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentStatus("Connect to the selected SSH host before starting any agent.");return}
     if(agentMode==="local"){
-      if(!window.confirm("Start your already-signed-in LOCAL "+agent+" CLI with SSH command and file access to "+session.alias+"? It will run on this computer and can modify the remote server with your SSH account's permissions."))return;
+      if(!window.confirm("Start the LOCAL "+agent+" CLI with SSH command and file access to "+session.alias+"? It will open a separate console on this computer, and may require CLI sign-in. Remote changes run with your SSH account permissions."))return;
       try{
         const notice=await launchLocalAgent(agent,session.id);
         await refreshLocalAgentConnections();
@@ -836,7 +854,7 @@ export default function App(){
             setAgentStatus("Neither the remote nor local "+agent+" CLI is ready. Install and sign in using the normal CLI on either machine; no API key is required.");
             return;
           }
-          if(!window.confirm("Remote "+agent+" CLI is not available. Start the already-signed-in LOCAL CLI and grant it command/file access to "+session.alias+" via this PaSSH7 SSH session?"))return;
+          if(!window.confirm("Remote "+agent+" CLI is unavailable. Start the installed LOCAL CLI with SSH command/file access to "+session.alias+"? A separate console will open and may ask you to sign in."))return;
           try{
             const notice=await launchLocalAgent(agent,session.id);
             await refreshLocalAgentConnections();
