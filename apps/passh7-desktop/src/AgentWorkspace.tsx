@@ -93,7 +93,7 @@ export default function AgentWorkspace(p:Props){
           {p.mode==="local"&&<p className="agentHint">The CLI runs on this computer in a separate console. Its normal built-in shell/files remain local; use passh7 remote_exec, remote_list, remote_read, remote_write for server operations. Each SSH grant is specific to the selected session.</p>}
         </section>
         <section className="agentSection">
-          <div className="agentSectionHead"><div><h2>Choose your assistant</h2><p>PaSSH7 checks both the remote SSH account and your local signed-in CLI installation.</p></div>
+          <div className="agentSectionHead"><div><h2>Choose your assistant</h2><p>PaSSH7 checks whether terminal CLIs are installed and runnable on either machine. Sign-in is verified by the CLI when launched.</p></div>
             <button type="button" onClick={p.onCheck} disabled={!connected||p.checking||p.localChecking}><RefreshCw size={15}/>{p.checking||p.localChecking?"Checking…":"Check both machines"}</button>
           </div>
           <div className="agentCards">
@@ -118,7 +118,7 @@ export default function AgentWorkspace(p:Props){
         </section>
         <section className="agentSection agentLaunch">
           <div className="agentSectionHead"><div><h2>Launch {selected.name}</h2>
-              <p>{p.mode==="local"?"Use your local signed-in CLI in a separate console, connected to the selected server through PaSSH7 SSH tools.":p.mode==="auto"?"Prefer remote CLI; automatically fall back to a local signed-in CLI through SSH.":"Run the signed-in remote CLI in the SSH console below."}</p>
+              <p>{p.mode==="local"?"Launch your installed local CLI in a separate console, connected to the selected SSH session. Your CLI may ask you to sign in.":p.mode==="auto"?"Prefer remote CLI; automatically fall back to a local signed-in CLI through SSH.":"Run the signed-in remote CLI in the SSH console below."}</p>
             </div></div>
           <div className="agentLaunchRow"><div className="agentLaunchCommand">
               <span>{p.mode==="local"?"LOCAL CLI · PaSSH7 SSH tools":p.mode==="auto"?"AUTO · REMOTE THEN LOCAL":probe?.platform==="windows"?"WINDOWS REMOTE CLI":"REMOTE SHELL"}</span>
