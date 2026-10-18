@@ -479,6 +479,25 @@ export default function App(){
     });
   },sshTabs.map(tab=>tab.id));
   const sftpTransferBusy=transferQueue.active;
+  const transferActivity=useMemo(()=>{
+    const jobs=transferQueue.jobs;
+    const active=jobs.filter(job=>["selecting","running","cancelling"].includes(job.status));
+    const queued=jobs.filter(job=>job.status==="queued").length;
+    const failed=jobs.filter(job=>job.status==="failed").length;
+    const running=active.find(job=>job.status==="running"&&
+      job.totalBytes!==null&&job.totalBytes>0);
+    const progress=running&&running.totalBytes
+      ?Math.max(0,Math.min(100,Math.round(running.bytes/running.totalBytes*100))):null;
+    return {active:active.length,queued,failed,paused:transferQueue.paused,progress};
+  },[transferQueue.jobs,transferQueue.paused]);
+  const openTransferQueue=()=>{
+    const job=transferQueue.jobs.find(item=>["running","selecting","cancelling","queued"].includes(item.status)
+      &&sshTabs.some(tab=>tab.id===item.session))
+      ||transferQueue.jobs.find(item=>item.status==="failed"&&sshTabs.some(tab=>tab.id===item.session));
+    const owner=job?sshTabs.find(tab=>tab.id===job.session):null;
+    if(owner){setSelected(owner.alias);setActiveSsh(owner.id)}
+    setPanel("files");
+  };
   const [vaultSnapshotHistory,setVaultSnapshotHistory]=useState<{
     session:string;directory:string;entries:SftpEntry[]
   }|null>(null);
@@ -1569,6 +1588,7 @@ export default function App(){
       </div>
     </div>}
     {<SessionStrip sessions={sshTabs} hosts={hosts} closingSessions={closingSessions}
+      transfers={transferActivity} onTransfers={openTransferQueue}
       activeSession={activeSsh} selectedHost={selected} vaultUnlocked={vaultUnlocked}
       onSelect={id=>{const target=sshTabs.find(session=>session.id===id);
         if(target){setSelected(target.alias);setActiveSsh(id)}}}
