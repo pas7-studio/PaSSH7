@@ -215,7 +215,7 @@ export default function App(){
   const [authBusy,setAuthBusy]=useState(false);
   const [authResult,setAuthResult]=useState("");
   const [deleteTarget,setDeleteTarget]=useState<{kind:"host"|"identity";alias:string}|null>(null);
-  const [editTarget,setEditTarget]=useState<{alias:string;hostname:string;port:number;username:string;
+  const [editTarget,setEditTarget]=useState<{alias:string;displayName:string;hostname:string;port:number;username:string;
     identityAlias:string;resetHostKey:boolean;forgetCredentials:boolean}|null>(null);
   const [editBusy,setEditBusy]=useState(false);
   const [editError,setEditError]=useState("");
@@ -223,18 +223,19 @@ export default function App(){
     const host=hosts.find(item=>item.id===alias);
     if(!host||!vaultUnlocked||!desktopAvailable())return;
     setEditError("");
-    setEditTarget({alias,hostname:host.address,port:host.port,username:host.user,
+    setEditTarget({alias,displayName:host.label,hostname:host.address,port:host.port,username:host.user,
       identityAlias:host.identityAlias||"",resetHostKey:false,forgetCredentials:false});
   };
   const saveEditedHost=async()=>{
     if(!editTarget||editBusy||!vaultUnlocked||!desktopAvailable())return;
-    const draft={...editTarget,hostname:editTarget.hostname.trim(),username:editTarget.username.trim()};
+    const draft={...editTarget,displayName:editTarget.displayName.trim(),hostname:editTarget.hostname.trim(),username:editTarget.username.trim()};
     const changed=hosts.find(h=>h.id===draft.alias);
     if(!changed){setEditError("This host is no longer in the Vault.");return}
     if(sshTabs.some(session=>session.alias===draft.alias)){
       setEditError("Disconnect this host's SSH sessions before editing its profile.");return
     }
-    if(!draft.hostname||draft.hostname.length>253||/[\s\x00-\x1f]/.test(draft.hostname)||
+    if(!draft.displayName||draft.displayName.length>80||/[\x00-\x1f]/.test(draft.displayName)||
+      !draft.hostname||draft.hostname.length>253||/[\s\x00-\x1f]/.test(draft.hostname)||
       !draft.username||draft.username.length>128||/[\s\x00-\x1f]/.test(draft.username)||
       !Number.isInteger(draft.port)||draft.port<1||draft.port>65535){
       setEditError("Enter a valid hostname, username and SSH port (1–65535).");return
@@ -251,7 +252,7 @@ export default function App(){
     try{
       await updateHost(draft);
       const saved=await getHosts();
-      setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
+      setHosts(saved.map(h=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,
         group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,
         hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,
         backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));
@@ -308,7 +309,7 @@ export default function App(){
   },[vaultUnlocked]);
   useEffect(()=>{if(desktopAvailable()){void vaultExists().then(setVaultPresent).catch(()=>setVaultPresent(false))}},[]);
   const lockVault=async()=>{await lockNativeVault();setVaultPassword("");setVaultUnlocked(false);setHosts([]);setIdentities([])};
-  const unlockVault=async()=>{try{if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}await unlockNativeVault(vaultPassword);setVaultPassword("");const saved=await getHosts();setIdentities(await getIdentities());setHosts(saved.map((h,i)=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));setSelected(saved[0]?.alias||"");setVaultUnlocked(true);setVaultDialog(false);setError("")}catch(e){setError(String(e))}};
+  const unlockVault=async()=>{try{if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}await unlockNativeVault(vaultPassword);setVaultPassword("");const saved=await getHosts();setIdentities(await getIdentities());setHosts(saved.map((h,i)=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));setSelected(saved[0]?.alias||"");setVaultUnlocked(true);setVaultDialog(false);setError("")}catch(e){setError(String(e))}};
   // A WebView refresh can remount React without terminating the Rust process.
   // Recover ONLY an already-unlocked native vault and already-open sessions;
   // never auto-unlock persisted vault data or request secret material.
@@ -325,7 +326,7 @@ export default function App(){
         const allowed=new Set(saved.map(h=>h.alias));
         const sessions=live.filter(t=>allowed.has(t.alias));
         setHosts(saved.map(h=>({
-          id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
+          id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,
           group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,
           hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias
         })));
@@ -384,7 +385,7 @@ export default function App(){
     try{
       const saved=await getHosts();
       setHosts(saved.map(h=>({
-        id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
+        id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,
         group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,
         hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias
       })));
@@ -629,7 +630,7 @@ export default function App(){
       setSftpEntries(null);setSftpPreview(null);setDockerInventory(null);setAgentAvailability({});
       const [saved,keys]=await Promise.all([getHosts(),getIdentities()]);
       setHosts(saved.map(h=>({
-        id:h.alias,label:h.alias,address:h.hostname,user:h.username,
+        id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,
         port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,
         identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,
         savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias
@@ -1256,7 +1257,7 @@ export default function App(){
         setSshTabs(t=>t.filter(session=>session.alias!==deleteTarget.alias));
         setTunnels(t=>t.filter(tunnel=>!sshTabs.some(session=>session.alias===deleteTarget.alias&&session.id===tunnel.session)));
         const saved=await getHosts();
-        setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));
+        setHosts(saved.map(h=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));
         setSelected(current=>current===deleteTarget.alias?(saved[0]?.alias||""):current);
       } else {
         await removeIdentity(deleteTarget.alias);
@@ -1341,7 +1342,7 @@ export default function App(){
         try{
           await saveHostCredentials(selected,loginMode,accountPassword||"",loginKeyPassphrase,useSavedCredentials);
           const saved=await getHosts();
-          setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));
+          setHosts(saved.map(h=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));
         }catch(e){setCredentialWarning("Connected, but could not save credentials: "+String(e))}
       }
     }catch(e){setProbeError(String(e))}
@@ -1797,9 +1798,11 @@ export default function App(){
           Your active shells will not be closed automatically.
         </div>}
         <div className="wizardFields">
-          <label>Host name (Vault ID)<input value={editTarget.alias} disabled
+          <label>Host ID (used by SSH gateway routing)<input value={editTarget.alias} disabled
             title="Host IDs remain stable. Create a new host if you need a different alias."/></label>
-          <label>Server address / hostname<input autoFocus value={editTarget.hostname} spellCheck={false}
+          <label>Display name<input autoFocus value={editTarget.displayName} maxLength={80}
+            disabled={editBusy} onChange={event=>setEditTarget(value=>value&&({...value,displayName:event.target.value}))}/></label>
+          <label>Server address / hostname<input value={editTarget.hostname} spellCheck={false}
             disabled={editBusy} onChange={event=>setEditTarget(value=>value&&({...value,hostname:event.target.value}))}
             placeholder="192.168.1.10 or server.example.com"/></label>
           <div className="twoFields">
@@ -1840,7 +1843,7 @@ export default function App(){
     {deleteTarget&&<div className="overlay" onMouseDown={()=>{setDeleteTarget(null);setError("")}}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm vault removal" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}<button aria-label="Close" onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button></div><p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted vault? This cannot be undone. Removing a host keeps its SSH key; removing a key used by a host is blocked.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<div className="wizardActions"><button onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button><button className="primary" onClick={()=>void confirmRemove()}>Confirm removal</button></div></div></div>}
     {vaultDialog&&<div className="overlay" onMouseDown={()=>setVaultDialog(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Unlock encrypted vault" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><LockKeyhole size={18}/> {vaultPresent?"Unlock vault":"Create vault"}<button aria-label="Close" onClick={()=>setVaultDialog(false)}><X size={17}/></button></div><p>Master password stays in this application session only. Lock the vault when finished.</p><form onSubmit={async e=>{e.preventDefault();await unlockVault()}} className="wizardFields"><label>Master password<input autoFocus type="password" autoComplete="off" value={vaultPassword} onChange={e=>setVaultPassword(e.target.value)} minLength={12} required/></label>{error&&<p role="alert" className="wizardError">{error}</p>}<button className="primary" type="submit">{vaultPresent?"Unlock":"Create encrypted vault"}</button></form></div></div>}
     {accessOpen&&<div className="overlay" onMouseDown={()=>setAccessOpen(false)}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Windows SSH Access Manager" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Windows Access Manager<button aria-label="Close" onClick={()=>setAccessOpen(false)}><X size={17}/></button></div><div className="wizardFields"><p className="note">Commands run under the connected Windows account. Administrator operations require the appropriate Windows permissions. Output appears in the SSH terminal.</p><button onClick={()=>void runWindowsAccessAction("users")}>List Windows local users</button><button onClick={()=>void runWindowsAccessAction("keys")}>Show administrator authorized SSH keys</button><label>Public SSH key (for add / revoke)<textarea rows={4} value={accessPublicKey} onChange={e=>setAccessPublicKey(e.target.value)} placeholder="ssh-ed25519 AAAA… colleague-device"/></label><button onClick={()=>void runWindowsAccessAction("add")}>Add public key to administrator access</button><button onClick={()=>void runWindowsAccessAction("remove")}>Revoke exact public key (with backup)</button><p className="note">Before removing a key, verify an alternative login. This tool never changes sshd_config or grants Windows administrator membership.</p>{error&&<p className="wizardError" role="alert">{error}</p>}</div></div></div>}
-    {tofuCandidate&&<div className="overlay" onMouseDown={()=>{if(!tofuBusy)setTofuCandidate(null)}}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Trust SSH server key" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Verify first SSH connection<button type="button" aria-label="Cancel" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}><X size={17}/></button></div><p>The server at <strong>{active.address}:{active.port}</strong> presented this host-key fingerprint. Verify it independently with the server administrator before trusting it.</p><pre className="preview" style={{userSelect:"text",overflowWrap:"anywhere"}}>{tofuCandidate.fingerprint}</pre><p className="note">No password or private key has been sent. If the key differs from the trusted fingerprint, cancel. Once saved, a changed fingerprint blocks future connections.</p>{tofuError&&<p role="alert" className="wizardError">{tofuError}</p>}<div className="wizardActions"><button type="button" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}>Cancel</button><button type="button" className="primary" disabled={tofuBusy} onClick={async()=>{setTofuBusy(true);setTofuError("");try{await pinSshHostKey(tofuCandidate.alias,tofuCandidate.fingerprint);const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));setTofuCandidate(null);setLoginPassword("");setLoginKeyPassphrase("");setLoginMode(active.identityAlias?"key-password":"password");setHostIdentityChoice("");setUseSavedCredentials(false);setRememberCredentials(false);setLoginOpen(true)}catch(e){setTofuError(String(e))}finally{setTofuBusy(false)}}}>Trust &amp; Continue</button></div></div></div>}
+    {tofuCandidate&&<div className="overlay" onMouseDown={()=>{if(!tofuBusy)setTofuCandidate(null)}}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Trust SSH server key" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Verify first SSH connection<button type="button" aria-label="Cancel" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}><X size={17}/></button></div><p>The server at <strong>{active.address}:{active.port}</strong> presented this host-key fingerprint. Verify it independently with the server administrator before trusting it.</p><pre className="preview" style={{userSelect:"text",overflowWrap:"anywhere"}}>{tofuCandidate.fingerprint}</pre><p className="note">No password or private key has been sent. If the key differs from the trusted fingerprint, cancel. Once saved, a changed fingerprint blocks future connections.</p>{tofuError&&<p role="alert" className="wizardError">{tofuError}</p>}<div className="wizardActions"><button type="button" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}>Cancel</button><button type="button" className="primary" disabled={tofuBusy} onClick={async()=>{setTofuBusy(true);setTofuError("");try{await pinSshHostKey(tofuCandidate.alias,tofuCandidate.fingerprint);const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));setTofuCandidate(null);setLoginPassword("");setLoginKeyPassphrase("");setLoginMode(active.identityAlias?"key-password":"password");setHostIdentityChoice("");setUseSavedCredentials(false);setRememberCredentials(false);setLoginOpen(true)}catch(e){setTofuError(String(e))}finally{setTofuBusy(false)}}}>Trust &amp; Continue</button></div></div></div>}
     {loginOpen&&<div className="overlay" onMouseDown={closeLogin}><form className="modal wizard" role="dialog" aria-modal="true" aria-label="Connect via SSH" onMouseDown={e=>e.stopPropagation()} onSubmit={e=>{e.preventDefault();void connectInteractive(loginPassword)}}><div className="modalTitle"><KeyRound size={18}/> Connect to {active.label}<button type="button" aria-label="Close" disabled={sshBusy} onClick={closeLogin}><X size={17}/></button></div><div className="wizardFields"><p className="note">PaSSH7 verifies the pinned host key before authentication. Your SSH private key remains in the encrypted vault.</p>{!active.identityAlias&&identities.length>0&&<div className="permission" style={{display:"grid",gap:8}}>
 <strong>Optional: link a saved SSH key to this host</strong>
 <small>You can sign in with a password now. Later, after installing the matching public key on the server, link an existing vault identity to use SSH key authentication.</small>
@@ -1897,7 +1900,7 @@ export default function App(){
       {step===2&&<div className="wizardFields"><label>Verified server fingerprint<input value={draft.fingerprint} onChange={e=>setDraft({...draft,fingerprint:e.target.value})} placeholder="SHA256:..."/></label><p className="note">Obtain this fingerprint independently from a trusted administrator. You may leave this empty. On first connection PaSSH7 will show the discovered SHA256 fingerprint and require your explicit approval before any authentication.</p></div>}
       {step===3&&<div className="wizardFields"><div className="permission"><ShieldCheck size={16}/><div><strong>{draft.label || "Unnamed host"}</strong><small>{draft.username}@{draft.hostname}:{draft.port}</small></div></div><p className="note">{desktopAvailable()?"The host will be saved in your encrypted local vault. If no fingerprint is supplied, you will verify it when you first connect.":"Web preview only: this host is temporary and disappears after refresh."}</p></div>}
       {error&&<p role="alert" className="wizardError">{error}</p>}
-      <div className="wizardActions"><button onClick={()=>step===0?setAddOpen(false):setStep(step-1)}>{step===0?"Cancel":"Back"}</button><button className="primary" onClick={async()=>{const issue=validateHostDraft({...draft,fingerprint:step<2?"":draft.fingerprint,identity:step===0?"placeholder":draft.identity});if(step===0&&(!draft.label.trim()||!draft.hostname.trim()||!draft.username.trim()||draft.port<1||draft.port>65535)){setError("Complete the connection details");return}if(step>=1&&issue){setError(issue);return}setError("");if(step<3){setStep(step+1);return}if(desktopAvailable()){try{await addHost({alias:draft.label,hostname:draft.hostname,port:draft.port,username:draft.username,identityAlias:draft.auth==="password"?"":draft.identity,pinnedHostKey:draft.fingerprint||null});const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias})));setSelected(draft.label);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false)}catch(err){setError(String(err))}return}const id="preview-"+Date.now();setHosts(v=>[...v,{id,label:draft.label,address:draft.hostname,user:draft.username,port:draft.port,group:"My hosts",fingerprint:!!draft.fingerprint,identityAlias:draft.auth==="password"?"":draft.identity}]);setSelected(id);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false);}}> {step===3?(desktopAvailable()?"Save host":"Add to preview"):"Continue"} </button></div>
+      <div className="wizardActions"><button onClick={()=>step===0?setAddOpen(false):setStep(step-1)}>{step===0?"Cancel":"Back"}</button><button className="primary" onClick={async()=>{const issue=validateHostDraft({...draft,fingerprint:step<2?"":draft.fingerprint,identity:step===0?"placeholder":draft.identity});if(step===0&&(!draft.label.trim()||!draft.hostname.trim()||!draft.username.trim()||draft.port<1||draft.port>65535)){setError("Complete the connection details");return}if(step>=1&&issue){setError(issue);return}setError("");if(step<3){setStep(step+1);return}if(desktopAvailable()){try{await addHost({alias:draft.label,hostname:draft.hostname,port:draft.port,username:draft.username,identityAlias:draft.auth==="password"?"":draft.identity,pinnedHostKey:draft.fingerprint||null});const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias})));setSelected(draft.label);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false)}catch(err){setError(String(err))}return}const id="preview-"+Date.now();setHosts(v=>[...v,{id,label:draft.label,address:draft.hostname,user:draft.username,port:draft.port,group:"My hosts",fingerprint:!!draft.fingerprint,identityAlias:draft.auth==="password"?"":draft.identity}]);setSelected(id);setDraft({label:"",hostname:"",port:22,username:"",auth:"password",identity:"",fingerprint:""});setAddOpen(false);}}> {step===3?(desktopAvailable()?"Save host":"Add to preview"):"Continue"} </button></div>
     </div></div>}
     {commandOpen&&<div className="overlay quickSwitchOverlay" onMouseDown={()=>setCommandOpen(false)}>
       <div className="modal quickSwitchModal" role="dialog" aria-modal="true" aria-label="Command palette"
