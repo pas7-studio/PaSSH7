@@ -215,6 +215,7 @@ export default function App(){
   const [authBusy,setAuthBusy]=useState(false);
   const [authResult,setAuthResult]=useState("");
   const [deleteTarget,setDeleteTarget]=useState<{kind:"host"|"identity";alias:string}|null>(null);
+  const [deleteBusy,setDeleteBusy]=useState(false);
   const [editTarget,setEditTarget]=useState<{alias:string;displayName:string;hostname:string;port:number;username:string;
     identityAlias:string;resetHostKey:boolean;forgetCredentials:boolean}|null>(null);
   const [editBusy,setEditBusy]=useState(false);
@@ -1250,7 +1251,8 @@ export default function App(){
     if(panel==="files"&&sftpEntries?.session!==session.id){void browseSftp(lastSftpDirectory.current.get(session.id)||".")}
   },[panel,activeSsh,selected]);
   const confirmRemove=async()=>{
-    if(!deleteTarget || !desktopAvailable() || !vaultUnlocked)return;
+    if(!deleteTarget || !desktopAvailable() || !vaultUnlocked||deleteBusy)return;
+    setDeleteBusy(true);setError("");
     try{
       if(deleteTarget.kind==="host"){
         await removeHost(deleteTarget.alias);
@@ -1265,6 +1267,7 @@ export default function App(){
       }
       setDeleteTarget(null);setError("");
     }catch(e){setError(String(e))}
+    finally{setDeleteBusy(false)}
   };
   const [terminalDetailsOpen,setTerminalDetailsOpen]=useState(false);
   const sidebar=preferences.sidebarExpanded;
@@ -1840,7 +1843,36 @@ export default function App(){
         </div>
       </form>
     </div>}
-    {deleteTarget&&<div className="overlay" onMouseDown={()=>{setDeleteTarget(null);setError("")}}><div className="modal" role="dialog" aria-modal="true" aria-label="Confirm vault removal" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}<button aria-label="Close" onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button></div><p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted vault? This cannot be undone. Removing a host keeps its SSH key; removing a key used by a host is blocked.</p>{error&&<p role="alert" className="wizardError">{error}</p>}<div className="wizardActions"><button onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button><button className="primary" onClick={()=>void confirmRemove()}>Confirm removal</button></div></div></div>}
+    {deleteTarget&&<div className="overlay" onMouseDown={()=>{if(!deleteBusy){setDeleteTarget(null);setError("")}}}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Confirm Vault deletion"
+        onMouseDown={event=>event.stopPropagation()}>
+        <div className="modalTitle"><Trash2 size={18}/> Remove {deleteTarget.kind}
+          <button type="button" aria-label="Close" disabled={deleteBusy} onClick={()=>{setDeleteTarget(null);setError("")}}><X size={17}/></button>
+        </div>
+        <p>Remove <strong>{deleteTarget.alias}</strong> from the encrypted Vault? This action cannot be undone.</p>
+        {deleteTarget.kind==="host"&&<>
+          <p className="note">The SSH profile, its saved login and pinned host fingerprint will be removed.
+            Its imported SSH private key remains available in Vault.</p>
+          {sshTabs.some(tab=>tab.alias===deleteTarget.alias)&&<div className="workspaceError" role="alert">
+            {sshTabs.filter(tab=>tab.alias===deleteTarget.alias).length} authenticated SSH session(s) will be closed.
+            Their running commands, SFTP operations, tunnels and local MCP access may be interrupted.
+          </div>}
+          {hosts.some(host=>host.jumpAlias===deleteTarget.alias)&&<div className="workspaceError" role="alert">
+            This host is configured as a jump gateway for other saved hosts.
+            Remove their jump routes before deleting this gateway.
+          </div>}
+        </>}
+        {deleteTarget.kind==="identity"&&<p className="note">
+          Deleting a key that is still used by an SSH host is blocked. Removing an identity does not delete the host.</p>}
+        {error&&<p role="alert" className="wizardError">{error}</p>}
+        <div className="wizardActions">
+          <button disabled={deleteBusy} onClick={()=>{setDeleteTarget(null);setError("")}}>Cancel</button>
+          <button className="primary" disabled={deleteBusy||
+            (deleteTarget.kind==="host"&&hosts.some(host=>host.jumpAlias===deleteTarget.alias))}
+            onClick={()=>void confirmRemove()}>{deleteBusy?"Removing…":"Remove from Vault"}</button>
+        </div>
+      </div>
+    </div>}
     {vaultDialog&&<div className="overlay" onMouseDown={()=>setVaultDialog(false)}><div className="modal" role="dialog" aria-modal="true" aria-label="Unlock encrypted vault" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><LockKeyhole size={18}/> {vaultPresent?"Unlock vault":"Create vault"}<button aria-label="Close" onClick={()=>setVaultDialog(false)}><X size={17}/></button></div><p>Master password stays in this application session only. Lock the vault when finished.</p><form onSubmit={async e=>{e.preventDefault();await unlockVault()}} className="wizardFields"><label>Master password<input autoFocus type="password" autoComplete="off" value={vaultPassword} onChange={e=>setVaultPassword(e.target.value)} minLength={12} required/></label>{error&&<p role="alert" className="wizardError">{error}</p>}<button className="primary" type="submit">{vaultPresent?"Unlock":"Create encrypted vault"}</button></form></div></div>}
     {accessOpen&&<div className="overlay" onMouseDown={()=>setAccessOpen(false)}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Windows SSH Access Manager" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Windows Access Manager<button aria-label="Close" onClick={()=>setAccessOpen(false)}><X size={17}/></button></div><div className="wizardFields"><p className="note">Commands run under the connected Windows account. Administrator operations require the appropriate Windows permissions. Output appears in the SSH terminal.</p><button onClick={()=>void runWindowsAccessAction("users")}>List Windows local users</button><button onClick={()=>void runWindowsAccessAction("keys")}>Show administrator authorized SSH keys</button><label>Public SSH key (for add / revoke)<textarea rows={4} value={accessPublicKey} onChange={e=>setAccessPublicKey(e.target.value)} placeholder="ssh-ed25519 AAAA… colleague-device"/></label><button onClick={()=>void runWindowsAccessAction("add")}>Add public key to administrator access</button><button onClick={()=>void runWindowsAccessAction("remove")}>Revoke exact public key (with backup)</button><p className="note">Before removing a key, verify an alternative login. This tool never changes sshd_config or grants Windows administrator membership.</p>{error&&<p className="wizardError" role="alert">{error}</p>}</div></div></div>}
     {tofuCandidate&&<div className="overlay" onMouseDown={()=>{if(!tofuBusy)setTofuCandidate(null)}}><div className="modal wizard" role="dialog" aria-modal="true" aria-label="Trust SSH server key" onMouseDown={e=>e.stopPropagation()}><div className="modalTitle"><ShieldCheck size={18}/> Verify first SSH connection<button type="button" aria-label="Cancel" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}><X size={17}/></button></div><p>The server at <strong>{active.address}:{active.port}</strong> presented this host-key fingerprint. Verify it independently with the server administrator before trusting it.</p><pre className="preview" style={{userSelect:"text",overflowWrap:"anywhere"}}>{tofuCandidate.fingerprint}</pre><p className="note">No password or private key has been sent. If the key differs from the trusted fingerprint, cancel. Once saved, a changed fingerprint blocks future connections.</p>{tofuError&&<p role="alert" className="wizardError">{tofuError}</p>}<div className="wizardActions"><button type="button" disabled={tofuBusy} onClick={()=>setTofuCandidate(null)}>Cancel</button><button type="button" className="primary" disabled={tofuBusy} onClick={async()=>{setTofuBusy(true);setTofuError("");try{await pinSshHostKey(tofuCandidate.alias,tofuCandidate.fingerprint);const saved=await getHosts();setHosts(saved.map(h=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));setTofuCandidate(null);setLoginPassword("");setLoginKeyPassphrase("");setLoginMode(active.identityAlias?"key-password":"password");setHostIdentityChoice("");setUseSavedCredentials(false);setRememberCredentials(false);setLoginOpen(true)}catch(e){setTofuError(String(e))}finally{setTofuBusy(false)}}}>Trust &amp; Continue</button></div></div></div>}
