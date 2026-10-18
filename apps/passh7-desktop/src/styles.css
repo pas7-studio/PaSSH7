@@ -281,6 +281,10 @@
 .agentLaunchCommand{min-width:170px;flex:1;display:flex;flex-direction:column;gap:8px;border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg)}
 .agentLaunchCommand code{font-size:15px;color:var(--fg);font-family:"Cascadia Code",Consolas,monospace}
 .agentPage .agentLaunchRow>button{min-height:49px}
+.agentGrantRows{display:grid;gap:10px;margin-top:12px}
+.agentGrantRows .agentLaunchCommand{min-width:0}
+.agentGrantRows .agentLaunchCommand small{font-size:10px;min-height:auto;color:var(--muted)}
+.agentGrantRows .agentLaunchRow>button{white-space:nowrap}
 .agentPage .agentHint{font-size:11px;color:var(--muted);line-height:1.65;margin:11px 0 0}
 .agentContextPreview{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--muted);font:11px/1.8 "Cascadia Code",Consolas,monospace;padding:14px;margin:0}
 .agentWorkspaceSide .agentSection>p{margin-top:12px}
