@@ -1215,6 +1215,11 @@ export default function App(){
   const sidebar=preferences.sidebarExpanded;
   const toggleSidebar=()=>updatePreferences({...preferences,sidebarExpanded:!sidebar});
   const [commandOpen,setCommandOpen]=useState(false);
+  const [commandInitialQuery,setCommandInitialQuery]=useState("");
+  const openCommandPalette=(initialQuery="")=>{
+    setCommandInitialQuery(initialQuery);
+    setCommandOpen(true);
+  };
   const topDialog=commandOpen?"quick-switch":configImportOpen?"ssh-import":keyDialog?"identity":
     loginOpen?"ssh-login":tofuCandidate?"host-trust":accessOpen?"windows-access":
     vaultDialog?"vault":deleteTarget?"confirm-delete":addOpen?"host-wizard":null;
@@ -1225,7 +1230,7 @@ export default function App(){
       if(topDialog)return; // Never open a new palette over SSH auth or Vault dialogs.
       event.preventDefault();
       event.stopPropagation();
-      setCommandOpen(true);
+      openCommandPalette();
     };
     document.addEventListener("keydown",globalShortcut,true);
     return()=>document.removeEventListener("keydown",globalShortcut,true);
@@ -1461,14 +1466,19 @@ export default function App(){
       <div className="topHost">
         <button type="button" className="hostSelectIcon" title={sidebar?"Collapse host sidebar":"Expand host sidebar"} aria-label={sidebar?"Collapse host sidebar":"Expand host sidebar"} onClick={()=>toggleSidebar()}><ChevronDown size={17}/></button>
         <span className={"hostDot "+(connected?"connected":active.fingerprint?"trusted":"untrusted")} title={connected?"SSH connected":active.fingerprint?"Host-key pinned, disconnected":"Not connected"}/>
-        <div className="topHostIdentity"><strong>{active.label}</strong><small>{active.id?active.user+" · "+active.address+" · SSH (port "+active.port+")"+(active.jumpAlias?" · via "+active.jumpAlias:""):"Choose a saved SSH host"}</small></div>
+        <button type="button" className="topHostIdentity topHostSwitch"
+          title="Switch SSH host or individual terminal session" aria-label={"Switch SSH host · current: "+active.label}
+          onClick={()=>openCommandPalette("@")}>
+          <strong>{active.label}</strong><small>{active.id?active.user+" · "+active.address+" · SSH (port "+active.port+")"+(active.jumpAlias?" · via "+active.jumpAlias:""):"Choose a saved SSH host"}</small>
+          <ChevronDown size={15} aria-hidden="true"/>
+        </button>
         <span className="hostStatusLabel">{connected?activeConnections+" live session"+(activeConnections===1?"":"s"):active.fingerprint?"Key pinned · No SSH session":"No SSH session"}</span>
       </div>
       <div className="topactions">
         <button type="button" className="topQuickButton" disabled={!active.id} onClick={()=>setPanel("terminal")}><TerminalSquare size={15}/><span>Open in Terminal</span></button>
         <button type="button" className="topQuickButton topDisconnect" disabled={!connected||sshBusy} title="Disconnect the selected host's active SSH session" onClick={()=>{const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===active.id)||sshTabs.find(t=>t.alias===active.id);if(session)requestDisconnect(session.id)}}><X size={15}/><span>Disconnect</span></button>
         <button type="button" className="lock" onClick={()=>{if(!desktopAvailable())return;if(vaultUnlocked){void lockVault()}else setVaultDialog(true)}}><LockKeyhole size={14}/><span>{vaultUnlocked?"Lock Vault":"Unlock Vault"}</span></button>
-        <button type="button" className="topCommandPalette" title="Search SSH sessions, hosts, workspaces and commands (Ctrl+K)" aria-label="Open command palette" onClick={()=>setCommandOpen(true)}><Search size={15}/><span>Search</span><kbd>Ctrl K</kbd></button>
+        <button type="button" className="topCommandPalette" title="Search SSH sessions, hosts, workspaces and commands (Ctrl+K)" aria-label="Open command palette" onClick={()=>openCommandPalette()}><Search size={15}/><span>Search</span><kbd>Ctrl K</kbd></button>
       </div>
     </header>
     {sessionNotice&&<div className="globalSessionNotice" role="alert" aria-live="polite">
@@ -1488,7 +1498,7 @@ export default function App(){
       onDisconnect={requestDisconnect}
       onConnect={()=>{if(selected)void connectFromConnections(selected)}}
       onUnlock={()=>setVaultDialog(true)}
-      onCommandPalette={()=>setCommandOpen(true)}/>}
+      onCommandPalette={()=>openCommandPalette()}/>}
     <div className={"workspace "+(["connections","snippets","ports","files","docker","agent","settings"].includes(panel)?"workspaceFull":"")}>
       {sidebar&&<aside className="sidebar"><nav className="workspaceNav" aria-label="Workspaces">
 {([["connections","Connections",Server],["terminal","Terminal",TerminalSquare],["files","Remote Files",FolderClosed],["docker","Docker",Container],["ports","Port Forwarding",Activity],["snippets","Snippets",FileText],["agent","AI Agents",Bot],["settings","Settings",Settings2]] as const).map(([id,label,Icon])=>
@@ -1784,7 +1794,7 @@ export default function App(){
         <div className="quickSwitchTitle"><Command size={17}/><strong>Quick actions</strong>
           <button type="button" aria-label="Close" onClick={()=>setCommandOpen(false)}><X size={17}/></button>
         </div>
-        <QuickSwitch hosts={hosts} sessions={sshTabs} connectedAliases={sshTabs.map(t=>t.alias)}
+        <QuickSwitch hosts={hosts} sessions={sshTabs} connectedAliases={sshTabs.map(t=>t.alias)} initialQuery={commandInitialQuery}
           selected={selected} selectedSession={activeSsh} vaultUnlocked={vaultUnlocked}
           onChooseHost={alias=>{selectHost(alias);setPanel("terminal")}}
           onChooseSession={id=>{const session=sshTabs.find(t=>t.id===id);
