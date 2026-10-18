@@ -50,7 +50,9 @@ export default function useModalFocus(activeDialog:string|null){
     const onKeyDown=(event:KeyboardEvent)=>{
       if(!document.contains(dialog))return;
       // Never allow shortcuts beneath the active modal (including xterm).
-      if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="k"){
+      if((event.ctrlKey||event.metaKey)&&!event.altKey&&(
+        (event.key.toLowerCase()==="k"&&!event.shiftKey)||
+        (event.key.toLowerCase()==="p"&&event.shiftKey))){
         event.preventDefault();event.stopPropagation();return;
       }
       if(event.key==="Escape"){
