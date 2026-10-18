@@ -602,22 +602,26 @@ fn vault_update_host(host:UpdateHostInput,sessions:State<'_,SessionStore>,
         host.username.chars().any(|c|c.is_whitespace()||c.is_control())||host.port==0{
         return Err("Invalid SSH hostname, port or username".into());
     }
-    // Updating a live host would mislabel an already authenticated PTY and
-    // let future SFTP/Docker operations appear to target the edited address.
-    // Reject rather than secretly disconnect sessions or modify their route.
+    // Friendly display names are UI metadata, not SSH transport identity.
+    // They may be changed while PTYs are live; endpoint/account/key/trust
+    // changes remain blocked until the affected transports disconnect.
     let live=ssh.active_sessions()?;
-    if live.iter().any(|session|session.alias==host.alias){
-        return Err("Disconnect all SSH sessions for this host before editing its connection".into());
-    }
     sessions.use_password(|password|{
         passh7_core::transaction(&vault_path()?,password,|vault|{
-            // A gateway with live downstream PTYs must not be edited while
-            // those nested SSH transports are using its configured identity.
-            if vault.hosts.iter().any(|dependent|
+            let current=vault.hosts.iter().find(|saved|saved.alias==host.alias)
+                .ok_or(HubError::InvalidInput("Host was not found in Vault"))?;
+            let connection_changed=current.hostname!=host.hostname||current.port!=host.port||
+                current.username!=host.username||current.identity_alias!=host.identity_alias||
+                host.reset_host_key||host.forget_credentials;
+            if connection_changed&&live.iter().any(|session|session.alias==host.alias){
+                return Err(HubError::InvalidInput(
+                    "Disconnect this host's SSH sessions before changing its SSH connection"));
+            }
+            if connection_changed&&vault.hosts.iter().any(|dependent|
                 dependent.extensions.get("passh7_jump_alias").and_then(|v|v.as_str())==Some(host.alias.as_str())
                     &&live.iter().any(|session|session.alias==dependent.alias)){
                 return Err(HubError::InvalidInput(
-                    "Disconnect dependent private-host SSH sessions before editing this jump gateway"));
+                    "Disconnect dependent private-host SSH sessions before changing this jump gateway"));
             }
             if !host.identity_alias.is_empty()&&!vault.identities.iter().any(|identity|identity.alias==host.identity_alias){
                 return Err(HubError::InvalidInput("Choose a key that exists in the encrypted Vault"));
