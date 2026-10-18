@@ -1992,7 +1992,7 @@ export default function App(){
         </div>
         <QuickSwitch hosts={hosts} sessions={sshTabs} connectedAliases={sshTabs.map(t=>t.alias)} initialQuery={commandInitialQuery}
           selected={selected} selectedSession={activeSsh} vaultUnlocked={vaultUnlocked}
-          onChooseHost={alias=>{selectHost(alias);setPanel("terminal")}}
+          onChooseHost={alias=>selectHost(alias)}
           onChooseSession={id=>{const session=sshTabs.find(t=>t.id===id);
             if(session){setSelected(session.alias);setActiveSsh(session.id);setPanel("terminal")}}}
           onConnectHost={alias=>void connectFromConnections(alias)}
