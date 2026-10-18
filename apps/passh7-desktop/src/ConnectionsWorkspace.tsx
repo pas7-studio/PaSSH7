@@ -1,4 +1,4 @@
-import {useMemo,useRef,useState} from "react";
+import {useEffect,useMemo,useRef,useState} from "react";
 import {CheckCircle2,KeyRound,LockKeyhole,Plus,RefreshCw,Search,Server,ShieldAlert,ShieldCheck,TerminalSquare,Upload,WifiOff} from "lucide-react";
 import {WorkspaceHeader,WorkspaceEmpty,WorkspaceMetric,WorkspaceStatus} from "./WorkspaceChrome";
 import type {SshProbeResult} from "./backend";
@@ -40,6 +40,13 @@ export default function ConnectionsWorkspace(p:Props){
   }).sort((a,b)=>Number(connected.has(b.id))-Number(connected.has(a.id))||a.label.localeCompare(b.label)),
   [p.hosts,p.connectedAliases,search,view]);
   const selected=filtered.find(host=>host.id===p.selected)||filtered[0];
+  // A successful TCP banner is a point-in-time observation, never a lasting
+  // server health/identity claim. Clear it when the user switches hosts.
+  useEffect(()=>{
+    testGeneration.current++;
+    setTesting("");
+    setTestResult(null);
+  },[selected?.id]);
   return <div className="widePage connectionsPage">
     <WorkspaceHeader icon={Server} title="Connections" description="Your SSH hosts, fingerprints and live sessions in one place."
       trailing={<span className="workspaceHeaderCount">{p.hosts.length} saved hosts</span>}/>
