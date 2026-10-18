@@ -479,6 +479,7 @@ export default function App(){
     });
   },sshTabs.map(tab=>tab.id));
   const sftpTransferBusy=transferQueue.active;
+  const [transferFocusToken,setTransferFocusToken]=useState(0);
   const transferActivity=useMemo(()=>{
     const jobs=transferQueue.jobs;
     const active=jobs.filter(job=>["selecting","running","cancelling"].includes(job.status));
@@ -496,6 +497,7 @@ export default function App(){
       ||transferQueue.jobs.find(item=>item.status==="failed"&&sshTabs.some(tab=>tab.id===item.session));
     const owner=job?sshTabs.find(tab=>tab.id===job.session):null;
     if(owner){setSelected(owner.alias);setActiveSsh(owner.id)}
+    setTransferFocusToken(current=>current+1);
     setPanel("files");
   };
   const [vaultSnapshotHistory,setVaultSnapshotHistory]=useState<{
@@ -1692,6 +1694,7 @@ export default function App(){
  preview={sftpPreview} previewBusy={sftpPreviewBusy}
  previewError={sftpPreviewError?.session===activeSsh?sftpPreviewError:null}
  transferJobs={transferQueue.jobs} transferPaused={transferQueue.paused}
+ transferFocusToken={transferFocusToken}
  onPauseQueue={transferQueue.setQueuePaused}
  onCancelJob={id=>void transferQueue.cancel(id)}
  onRetryJob={transferQueue.retry} onClearFinished={transferQueue.clearFinished}
