@@ -9,7 +9,7 @@ use std::{
 };
 use serde::{Deserialize,Serialize};
 use serde_json::{json,Value};
-use tauri::State;
+use tauri::{Manager,State};
 use tokio::{io::{AsyncReadExt,AsyncWriteExt},net::TcpListener,sync::Mutex as AsyncMutex};
 use crate::{SessionStore,ssh_sessions::SshSessionManager};
 
@@ -99,7 +99,7 @@ pub async fn local_agent_probe(agent:String)->Result<LocalAgentStatus,String>{
 
 #[derive(Deserialize)]
 struct BrokerRequest{token:String,op:String,command:Option<String>,path:Option<String>,content:Option<String>}
-async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:SshSessionManager){
+async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:SshSessionManager,app:tauri::AppHandle){
     let result=async{
         let len=socket.read_u32().await.map_err(|_|"Invalid local bridge frame".to_owned())? as usize;
         if len==0||len>MAX_RPC{return Err("Local bridge frame too large".into());}
@@ -113,6 +113,13 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
             if grant.created.elapsed()>GRANT_MAX_AGE{return Err("Local agent grant expired".into());}
             grant.session.clone()
         };
+        // A CLI can stay open for hours. An existing grant must not bypass
+        // the Vault's idle lock just because UI polling has not noticed expiry.
+        // Crucially, this check never refreshes the local activity timer.
+        if !app.state::<SessionStore>().live_without_touch()?{
+            ssh.stop_all();
+            return Err("Vault locked or expired; unlock it and start a new local agent session".into());
+        }
         let result=match req.op.as_str(){
             "exec"=>{
                 let command=req.command.ok_or("Missing remote command")?;
@@ -144,7 +151,7 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
         let _=socket.write_all(&encoded).await;
     }
 }
-async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&str)->Result<(SocketAddr,String),String>{
+async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&str,app:tauri::AppHandle)->Result<(SocketAddr,String),String>{
     // Validate the session before generating a grant.
     if !ssh.active_sessions()?.iter().any(|live|live.id==session){
         return Err("Select a live authenticated SSH session".into());
@@ -158,10 +165,10 @@ async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&s
         tauri::async_runtime::spawn(async move{
             while let Ok((socket,peer))=listener.accept().await{
                 if !peer.ip().is_loopback(){continue;}
-                let grants=grants.clone();let ssh=ssh.clone();
+                let grants=grants.clone();let ssh=ssh.clone();let app=app.clone();
                 tauri::async_runtime::spawn(async move{
                     let _=tokio::time::timeout(Duration::from_secs(90),
-                        serve_connection(socket,grants,ssh)).await;
+                        serve_connection(socket,grants,ssh,app)).await;
                 });
             }
         });
@@ -313,7 +320,7 @@ fn shell_launch_command(agent:&str,cli:&Path,self_exe:&Path,config:Option<&Path>
     }else{format!("& {binary}")}
 }
 #[tauri::command]
-pub async fn local_agent_launch(agent:String,id:String,
+pub async fn local_agent_launch(agent:String,id:String,app:tauri::AppHandle,
     bridge:State<'_,LocalAgentBridge>,ssh:State<'_,SshSessionManager>,vault:State<'_,SessionStore>
 )->Result<String,String>{
     allowed_agent(&agent)?;
@@ -336,7 +343,7 @@ pub async fn local_agent_launch(agent:String,id:String,
         Ok(path)=>path,
         Err(error)=>{cleanup_temp_config(config.as_deref());return Err(error);}
     };
-    let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id).await{
+    let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id,app).await{
         Ok(grant)=>grant,
         Err(error)=>{
             cleanup_local_launch(config.as_deref(),&workspace);
