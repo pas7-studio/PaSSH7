@@ -76,7 +76,7 @@ The redundant four-icon navigation previously shown on the right has been remove
 
 ### Background SFTP transfer visibility
 
-An unobtrusive transfer badge in the global SSH session strip shows active transfers, queued/paused operations, known progress and unresolved failures even while working in Docker, AI Agents or Terminal. Clicking the badge switches to the owning active SSH session, opens Remote Files and scrolls to the native SFTP transfer queue, without restarting transfers or creating a new connection. Failed transfers remain available for explicit retry/clear actions; the app never automatically retries or overwrites a remote/local file.
+An unobtrusive transfer badge in the global SSH session strip shows active transfers, queued/paused operations, known progress and unresolved failures even while working in Docker, AI Agents or Terminal. Clicking the badge switches to the owning active SSH session, opens Remote Files and scrolls to the native SFTP transfer queue, without restarting transfers or creating a new connection. Failed transfers remain available for explicit retry/clear actions; the app never automatically retries or overwrites a remote/local file. A retry on a replacement authenticated SSH session requires explicit confirmation and must target the original saved host; a disconnected host must be reconnected first. SFTP queue history (which can include remote paths and filenames) is cleared when Vault locks, alongside the native cancellation of SSH-owned transfers.
 
 The host picker in the global command palette preserves the current workspace when selecting a host; choosing a specific SSH terminal is an explicit Terminal navigation action. The empty session strip offers Add SSH host (unlocked Vault) or Unlock Vault (locked).
 
