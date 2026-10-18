@@ -14,7 +14,7 @@ import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -720,6 +720,21 @@ export default function App(){
       setPortError(session,"Could not stop local forward: "+String(error));
     }finally{finishPortOperation(session)}
   };
+  const [agentMode,setAgentMode]=useState<"auto"|"remote"|"local">("auto");
+  const [localAgentAvailability,setLocalAgentAvailability]=useState<Partial<Record<AgentKind,LocalAgentAvailability>>>({});
+  const [localAgentBusy,setLocalAgentBusy]=useState(false);
+  const checkLocalAgents=async()=>{
+    if(!desktopAvailable()||localAgentBusy)return;
+    setLocalAgentBusy(true);
+    try{
+      const all=await Promise.allSettled(AGENTS.map(a=>probeLocalAgent(a.kind)));
+      const discovered:Partial<Record<AgentKind,LocalAgentAvailability>>={};
+      all.forEach((item,index)=>{
+        if(item.status==="fulfilled")discovered[AGENTS[index].kind]=item.value;
+      });
+      setLocalAgentAvailability(previous=>({...previous,...discovered}));
+    }finally{setLocalAgentBusy(false)}
+  };
   const [agent,setAgent]=useState<AgentKind>("codex");
   const [agentStatus,setAgentStatus]=useState("");
   const [agentProbeBusy,setAgentProbeBusy]=useState(false);
@@ -761,6 +776,41 @@ export default function App(){
     setAgentAvailability(prev=>({...prev,...discovered}));
     if(failures.length)setAgentProbeError(failures.join("; "));
     setAgentProbeBusy(false);
+  };
+  const launchAgent=async()=>{
+    const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
+    if(!session){setAgentStatus("Connect to the selected SSH host before starting any agent.");return}
+    if(agentMode==="local"){
+      if(!window.confirm("Start your already-signed-in LOCAL "+agent+" CLI with SSH command and file access to "+session.alias+"? It will run on this computer and can modify the remote server with your SSH account's permissions."))return;
+      try{
+        const notice=await launchLocalAgent(agent,session.id);
+        if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)setAgentStatus(notice);
+      }catch(error){setAgentStatus("Could not launch local CLI: "+String(error))}
+      return;
+    }
+    if(agentMode==="auto"){
+      try{
+        const remote=agentAvailability[agent]?.session===session.id?agentAvailability[agent]:await probeRemoteAgent(session.id,agent);
+        if(agentContext.current.session!==session.id||agentContext.current.host!==session.alias)return;
+        setAgentAvailability(previous=>({...previous,[agent]:{...remote,session:session.id}}));
+        if(!remote.installed){
+          const local=localAgentAvailability[agent]??await probeLocalAgent(agent);
+          if(agentContext.current.session!==session.id||agentContext.current.host!==session.alias)return;
+          setLocalAgentAvailability(previous=>({...previous,[agent]:local}));
+          if(!local.installed){
+            setAgentStatus("Neither the remote nor local "+agent+" CLI is ready. Install and sign in using the normal CLI on either machine; no API key is required.");
+            return;
+          }
+          if(!window.confirm("Remote "+agent+" CLI is not available. Start the already-signed-in LOCAL CLI and grant it command/file access to "+session.alias+" via this PaSSH7 SSH session?"))return;
+          try{
+            const notice=await launchLocalAgent(agent,session.id);
+            if(agentContext.current.session===session.id&&agentContext.current.host===session.alias)setAgentStatus(notice);
+          }catch(error){setAgentStatus("Local CLI launch failed: "+String(error))}
+          return;
+        }
+      }catch(error){setAgentStatus("Could not determine remote/local CLI availability: "+String(error));return}
+    }
+    await launchRemoteAgent();
   };
   const launchRemoteAgent=async()=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -1388,8 +1438,10 @@ export default function App(){
  availability={agentAvailability} checking={agentProbeBusy}
  error={agentProbeError} status={agentStatus} context={context}
  liveTerminal={true} onTerminalDock={agentTerminalDockRef}
- onCheck={()=>void checkRemoteAgents()}
- onLaunch={()=>void launchRemoteAgent()}
+ onCheck={()=>{void checkRemoteAgents();void checkLocalAgents()}}
+ mode={agentMode} onMode={setAgentMode}
+ localAvailability={localAgentAvailability} localChecking={localAgentBusy}
+ onLaunch={()=>void launchAgent()}
  onTerminal={()=>setPanel("terminal")}
  onPrepareRdp={()=>{
    setTunnelLocalPort(13389);
