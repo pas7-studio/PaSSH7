@@ -15,9 +15,9 @@ import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,updateHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
-import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
+import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Pencil, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
 type Panel = "connections" | "terminal" | "files" | "docker" | "agent" | "snippets" | "ports" | "settings";
 type Host = {id:string; label:string; address:string; user:string; port:number; group:string; fingerprint:boolean;identityAlias?:string;hasSavedCredentials?:boolean;savedAuthMode?:string|null;backupDirectory?:string|null;jumpAlias?:string|null};
@@ -40,10 +40,6 @@ function sftpBreadcrumbs(path:string):{label:string;path:string}[]{
     label:piece,path:(absolute?"/":"")+pieces.slice(0,index+1).join("/")
   }))];
 }
-const tabs: {id:Panel;label:string; Icon:typeof Bot}[]=[
-  {id:"files",label:"Files",Icon:FolderClosed},{id:"docker",label:"Docker",Icon:Container},
-  {id:"ports",label:"Ports",Icon:Activity},{id:"agent",label:"AI Agent",Icon:Bot}
-];
 export default function App(){
   const [selected,setSelected]=useState("dev");
   const [sshTabs,setSshTabs]=useState<{id:string;alias:string}[]>([]);
@@ -219,6 +215,50 @@ export default function App(){
   const [authBusy,setAuthBusy]=useState(false);
   const [authResult,setAuthResult]=useState("");
   const [deleteTarget,setDeleteTarget]=useState<{kind:"host"|"identity";alias:string}|null>(null);
+  const [editTarget,setEditTarget]=useState<{alias:string;hostname:string;port:number;username:string;
+    identityAlias:string;resetHostKey:boolean;forgetCredentials:boolean}|null>(null);
+  const [editBusy,setEditBusy]=useState(false);
+  const [editError,setEditError]=useState("");
+  const beginEditHost=(alias:string)=>{
+    const host=hosts.find(item=>item.id===alias);
+    if(!host||!vaultUnlocked||!desktopAvailable())return;
+    setEditError("");
+    setEditTarget({alias,hostname:host.address,port:host.port,username:host.user,
+      identityAlias:host.identityAlias||"",resetHostKey:false,forgetCredentials:false});
+  };
+  const saveEditedHost=async()=>{
+    if(!editTarget||editBusy||!vaultUnlocked||!desktopAvailable())return;
+    const draft={...editTarget,hostname:editTarget.hostname.trim(),username:editTarget.username.trim()};
+    const changed=hosts.find(h=>h.id===draft.alias);
+    if(!changed){setEditError("This host is no longer in the Vault.");return}
+    if(sshTabs.some(session=>session.alias===draft.alias)){
+      setEditError("Disconnect this host's SSH sessions before editing its profile.");return
+    }
+    if(!draft.hostname||draft.hostname.length>253||/[\s\x00-\x1f]/.test(draft.hostname)||
+      !draft.username||draft.username.length>128||/[\s\x00-\x1f]/.test(draft.username)||
+      !Number.isInteger(draft.port)||draft.port<1||draft.port>65535){
+      setEditError("Enter a valid hostname, username and SSH port (1–65535).");return
+    }
+    const endpointChanged=changed.address!==draft.hostname||changed.port!==draft.port;
+    const loginChanged=changed.user!==draft.username||(changed.identityAlias||"")!==draft.identityAlias;
+    if((endpointChanged||loginChanged||draft.resetHostKey||draft.forgetCredentials)&&
+      !window.confirm("Update SSH connection "+draft.alias+"?\n\n"+
+        (endpointChanged?"Server endpoint changed: the old host-key pin will be cleared and needs independent verification.\n":"")+
+        (endpointChanged||loginChanged||draft.forgetCredentials?"Saved SSH account credentials will be forgotten; you will sign in again.\n":"")+
+        (draft.resetHostKey&&!endpointChanged?"Server host-key pin will be cleared for re-verification.\n":"")+
+        "Existing encrypted SSH keys are retained in the Vault."))return;
+    setEditBusy(true);setEditError("");
+    try{
+      await updateHost(draft);
+      const saved=await getHosts();
+      setHosts(saved.map(h=>({id:h.alias,label:h.alias,address:h.hostname,user:h.username,port:h.port,
+        group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,
+        hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,
+        backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));
+      setEditTarget(null);setProbeError("");setProbeResult(null);setAuthResult("");
+    }catch(error){setEditError("Could not save SSH connection: "+String(error))}
+    finally{setEditBusy(false)}
+  };
   const [vaultPassword,setVaultPassword]=useState("");
   const [vaultDialog,setVaultDialog]=useState(false);
   const [vaultPresent,setVaultPresent]=useState(false);
@@ -1236,7 +1276,7 @@ export default function App(){
   };
   const topDialog=commandOpen?"quick-switch":configImportOpen?"ssh-import":keyDialog?"identity":
     loginOpen?"ssh-login":tofuCandidate?"host-trust":accessOpen?"windows-access":
-    vaultDialog?"vault":deleteTarget?"confirm-delete":addOpen?"host-wizard":null;
+    vaultDialog?"vault":deleteTarget?"confirm-delete":editTarget?"edit-host":addOpen?"host-wizard":null;
   useModalFocus(topDialog);
   useEffect(()=>{
     const globalShortcut=(event:KeyboardEvent)=>{
@@ -1544,7 +1584,7 @@ export default function App(){
 {active.jumpAlias&&!sshTabs.some(t=>t.alias===active.jumpAlias)&&<button type="button" className="contextAction" onClick={()=>{selectHost(active.jumpAlias!);setProbeError("")}}>Open {active.jumpAlias} gateway to connect first →</button>}
 {jumpError&&<small role="alert" className="wizardError">{jumpError}</small>}
 </div>
-<div className="identityActions">{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" title="Remove selected host" aria-label="Remove selected host" onClick={()=>{setError("");setDeleteTarget({kind:"host",alias:active.id})}}><Trash2 size={16}/></button>}<button className="primary" disabled={!desktopAvailable()||!vaultUnlocked||!active.id||sshBusy||tofuBusy} onClick={async()=>{
+<div className="identityActions">{desktopAvailable()&&vaultUnlocked&&active.id&&<button type="button" className="iconbtn" title="Edit SSH connection" aria-label="Edit SSH connection" onClick={()=>beginEditHost(active.id)}><Pencil size={16}/></button>}{desktopAvailable()&&vaultUnlocked&&active.id&&<button className="iconbtn" title="Remove selected host" aria-label="Remove selected host" onClick={()=>{setError("");setDeleteTarget({kind:"host",alias:active.id})}}><Trash2 size={16}/></button>}<button className="primary" disabled={!desktopAvailable()||!vaultUnlocked||!active.id||sshBusy||tofuBusy} onClick={async()=>{
   setProbeError("");setTofuError("");
   if(!active.fingerprint){
     setTofuBusy(true);
@@ -1575,7 +1615,8 @@ export default function App(){
         {panel==="connections"?<ConnectionsWorkspace
   hosts={hosts} selected={selected} connectedAliases={sshTabs.map(t=>t.alias)} vaultUnlocked={vaultUnlocked}
   onSelect={selectHost} onConnect={alias=>void connectFromConnections(alias)}
-  onProbe={probeSshHost}
+  onProbe={probeSshHost} onEdit={beginEditHost}
+  onDelete={alias=>{setDeleteTarget({kind:"host",alias});setError("")}}
   onTerminal={alias=>{selectHost(alias);setPanel("terminal")}}
   onAdd={()=>{if(desktopAvailable()&&!vaultUnlocked){setVaultDialog(true);return}setAddOpen(true);setStep(0);setError("")}}
   onImport={()=>void inspectLocalSshConfig()}
