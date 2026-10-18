@@ -300,7 +300,11 @@ fn shell_launch_command(agent:&str,cli:&Path,self_exe:&Path,config:Option<&Path>
     if agent=="codex"{
         let cmd=format!("mcp_servers.passh7.command={}",serde_json::to_string(&self_exe.to_string_lossy().to_string()).unwrap_or_default());
         let args="mcp_servers.passh7.args=[\"--passh7-mcp\"]";
-        format!("& {binary} -c {} -c {}",ps_quote(&cmd),ps_quote(args))
+        // Codex isolates MCP child environments and may scrub *TOKEN* names.
+        // Forward ONLY the ephemeral PaSSH7 bridge variables, not provider
+        // tokens or the entire local environment. Values stay in process env.
+        let inherited="mcp_servers.passh7.env_vars=[\"PASSH7_BRIDGE_ADDR\",\"PASSH7_BRIDGE_TOKEN\"]";
+        format!("& {binary} -c {} -c {} -c {}",ps_quote(&cmd),ps_quote(args),ps_quote(inherited))
     }else if agent=="claude"{
         format!("& {binary} --mcp-config {}",ps_quote(&config.unwrap().to_string_lossy()))
     }else if is_opencode_v2_config(config){
@@ -525,6 +529,17 @@ mod tests{
         assert_eq!(opencode_major_from_version("OpenCode v1.18.35"),Some(1));
         assert_eq!(opencode_major_from_version("opencode v2.0.26"),Some(2));
         assert_eq!(opencode_major_from_version("version unavailable"),None);
+    }
+    #[test]
+    fn codex_explicitly_forwards_ephemeral_bridge_vars_without_values(){
+        let exe=std::env::current_exe().unwrap();
+        let command=shell_launch_command("codex",&exe,&exe,None);
+        assert!(command.contains("mcp_servers.passh7.env_vars="));
+        assert!(command.contains("PASSH7_BRIDGE_ADDR"));
+        assert!(command.contains("PASSH7_BRIDGE_TOKEN"));
+        assert!(command.contains("mcp_servers.passh7.args="));
+        assert!(!command.contains("PASSH7_BRIDGE_TOKEN="));
+        assert!(!command.contains("OPENAI_API_KEY"));
     }
     #[test]
     fn only_three_cli_kinds_are_allowed(){
