@@ -41,6 +41,13 @@ type Props={
 export default function RemoteFilesWorkspace(p:Props){
   const [selected,setSelected]=useState<string>("");
   const [selectedNames,setSelectedNames]=useState<string[]>([]);
+  const [clipboardNotice,setClipboardNotice]=useState("");
+  const copyRemotePaths=async(paths:string[])=>{
+    try{
+      await navigator.clipboard.writeText(paths.join("\n"));
+      setClipboardNotice(paths.length+" remote path"+(paths.length===1?"":"s")+" copied.");
+    }catch(error){setClipboardNotice("Could not copy remote paths: "+String(error))}
+  };
   const selectionAnchor=useRef<string>("");
   const autoPreviewRequested=useRef("");
   const [fileMenu,setFileMenu]=useState<{name:string;x:number;y:number}|null>(null);
@@ -164,16 +171,18 @@ export default function RemoteFilesWorkspace(p:Props){
       <button title="Back" disabled={!p.connected||historyIndex<=0} onClick={()=>{const index=historyIndex-1;setHistoryIndex(index);p.navigate(history[index])}}><ArrowLeft size={16}/></button>
       <button title="Forward" disabled={!p.connected||historyIndex<0||historyIndex>=history.length-1} onClick={()=>{const index=historyIndex+1;setHistoryIndex(index);p.navigate(history[index])}}><ArrowRight size={16}/></button>
       <button title="Parent directory" disabled={!p.connected||p.busy} onClick={()=>open(crumbs(path).at(-2)?.path||".")}><ArrowUp size={16}/></button>
+      <button title="SSH home directory" aria-label="Open remote home directory" disabled={!p.connected||p.busy} onClick={()=>open(".")}><Home size={16}/></button>
       <div className="filesCrumbs" aria-label="Current remote path">{crumbs(path).map((c,i)=><button key={i} disabled={!p.connected||p.busy} onClick={()=>open(c.path)}>{c.label}</button>)}</div>
       <input aria-label="Remote path" title="Enter a remote directory" value={p.pathInput} onChange={e=>p.setPathInput(e.target.value)}
         onKeyDown={e=>{if(e.key==="Enter")open(p.pathInput)}} placeholder="/home/user"/>
-      <button onClick={()=>open(p.pathInput)} disabled={!p.connected||p.busy} title="Open directory"><Home size={16}/></button>
-      <button onClick={()=>navigator.clipboard.writeText(path)} title="Copy current path"><Clipboard size={16}/></button>
+      <button onClick={()=>open(p.pathInput)} disabled={!p.connected||p.busy} title="Go to directory"><ArrowRight size={16}/> Go</button>
+      <button onClick={()=>void copyRemotePaths([path])} title="Copy current remote path"><Clipboard size={16}/></button>
     </div>
     <div className="filesActions">
       <button className="workspacePrimary" disabled={!p.connected||p.busy} onClick={p.upload}><Upload size={16}/> Upload file</button>
       <button disabled={!p.connected||!selectedItem||selectedItem.isDir} onClick={()=>p.download(selectedPath)}><Download size={16}/> Download</button>
       <button disabled={!p.connected||queuedPaths.length===0} onClick={()=>p.queueDownloads(queuedPaths)}><Download size={16}/> Queue selected ({queuedPaths.length})</button>
+      <button disabled={!p.connected||!selectedNames.length} onClick={()=>void copyRemotePaths(items.filter(item=>selectedNames.includes(item.name)).map(item=>full(path,item.name)))}><Clipboard size={16}/> Copy paths ({selectedNames.length})</button>
       {selectedNames.length>1&&<button onClick={()=>{setSelectedNames([]);setSelected("")}}>Clear selection</button>}
       <button disabled={!p.connected||p.busy} onClick={()=>open(path)}><RefreshCw size={16}/> {p.busy?"Loading…":"Refresh"}</button>
       <button disabled={!p.connected||p.busy||p.mutationBusy} onClick={()=>{
@@ -189,6 +198,7 @@ export default function RemoteFilesWorkspace(p:Props){
     </div>
     {p.error&&<div className="workspaceError" role="alert">{p.error}</div>}
     {p.notice&&<div className="workspaceNotice" role="status">{p.notice}</div>}
+    {clipboardNotice&&<div className="workspaceNotice" role="status">{clipboardNotice}</div>}
     <div className="filesGrid resizableFilesGrid" style={{gridTemplateColumns:`minmax(150px,${treeWidth}px) 7px minmax(210px,1fr) 7px minmax(245px,${inspectorWidth}px)`}}>
       <div className="filesFolders"><RemoteDirectoryTree session={p.session} connected={p.connected} currentPath={path} onNavigate={open}/>
         <div className="remoteCurrentFolder"><strong>CURRENT DIRECTORY</strong>
@@ -241,7 +251,7 @@ export default function RemoteFilesWorkspace(p:Props){
       <aside className="filesInspector"><div className="paneTitle">FILE DETAILS</div>
         {selectedItem?<><div className="inspectorFile"><FileText size={28}/><strong>{selectedItem.name}</strong><small>{selectedItem.isDir?"Directory":"Remote file"}</small></div>
           <dl><dt>Size</dt><dd>{size(selectedItem.sizeBytes)}</dd><dt>Modified</dt><dd>{selectedItem.modifiedAt!==null?new Date(selectedItem.modifiedAt*1000).toLocaleString():"Unknown"}</dd><dt>Permissions</dt><dd><code>{octalPermissions(selectedItem.unixPermissions)}</code></dd><dt>Owner ID</dt><dd>{selectedItem.ownerId??"Unknown"}</dd><dt>Group ID</dt><dd>{selectedItem.groupId??"Unknown"}</dd><dt>Path</dt><dd className="filePath">{selectedPath}</dd></dl>
-          <div className="inspectorActions"><button onClick={()=>navigator.clipboard.writeText(selectedPath)}><Clipboard size={14}/> Copy path</button>
+          <div className="inspectorActions"><button onClick={()=>void copyRemotePaths([selectedPath])}><Clipboard size={14}/> Copy path</button>
           {selectedItem.isDir?<button onClick={()=>open(selectedPath)}>Open folder</button>:<><button onClick={()=>{autoPreviewRequested.current=selectedPath;p.readPreview(selectedPath)}} disabled={p.previewBusy}>Preview</button><button onClick={()=>p.download(selectedPath)}>Download</button></>}</div>
           {!selectedItem.isDir&&<div className="fileCodePreview"><strong>READ-ONLY PREVIEW</strong>
             {p.previewBusy?<p>Loading preview from the remote host…</p>:
@@ -261,7 +271,7 @@ export default function RemoteFilesWorkspace(p:Props){
           <div className="fileMenuTitle" title={item.name}>{item.name}</div>
           <button role="menuitem" onClick={()=>{setFileMenu(null);item.isDir?open(target):p.readPreview(target)}}><FileText size={15}/>{item.isDir?"Open folder":"Preview file"}</button>
           <button role="menuitem" disabled={item.isDir} onClick={()=>{setFileMenu(null);p.download(target)}}><Download size={15}/>Download</button>
-          <button role="menuitem" onClick={()=>{setFileMenu(null);void navigator.clipboard.writeText(target)}}><Clipboard size={15}/>Copy path</button>
+          <button role="menuitem" onClick={()=>{setFileMenu(null);void copyRemotePaths([target])}}><Clipboard size={15}/>Copy path</button>
           <div className="fileMenuDivider"/>
           <button role="menuitem" disabled={p.mutationBusy||p.busy} onClick={()=>renameFile(item)}><Pencil size={15}/>Rename <span>F2</span></button>
           <button role="menuitem" className="dangerItem" disabled={p.mutationBusy||p.busy} onClick={()=>deleteFile(item)}><Trash2 size={15}/>Delete <span>Del</span></button>
