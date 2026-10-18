@@ -33,7 +33,7 @@ type Props={
   onMkdir:(name:string)=>void;onDelete:(name:string,isDirectory:boolean)=>void;
   onRename:(name:string,newName:string,isDirectory:boolean)=>void;mutationBusy:boolean;
   preview:Preview;previewBusy:boolean;previewError:PreviewError;
-  transferJobs:TransferJob[];transferPaused:boolean;
+  transferJobs:TransferJob[];transferPaused:boolean;transferFocusToken:number;
   onPauseQueue:(value:boolean)=>void;onCancelJob:(id:string)=>void;
   onRetryJob:(id:string)=>void;onClearFinished:()=>void;backupPanel:ReactNode;
   paneSizes:PaneSizes;onPaneSize:(key:keyof PaneSizes,value:number)=>void;
@@ -52,6 +52,12 @@ export default function RemoteFilesWorkspace(p:Props){
   const autoPreviewRequested=useRef("");
   const [fileMenu,setFileMenu]=useState<{name:string;x:number;y:number}|null>(null);
   const fileMenuRef=useRef<HTMLDivElement>(null);
+  const transferQueueRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(p.transferFocusToken>0){
+      transferQueueRef.current?.scrollIntoView({block:"start",behavior:"smooth"});
+    }
+  },[p.transferFocusToken]);
   useEffect(()=>{
     if(!fileMenu)return;
     const dismiss=(event:PointerEvent)=>{
@@ -289,9 +295,11 @@ export default function RemoteFilesWorkspace(p:Props){
         </>;
       })()}
     </div>}
-    <TransferQueuePanel jobs={p.transferJobs} paused={p.transferPaused}
-      onPause={p.onPauseQueue} onCancel={p.onCancelJob}
-      onRetry={p.onRetryJob} onClear={p.onClearFinished}/>
+    <div ref={transferQueueRef} className="filesTransferQueueAnchor">
+      <TransferQueuePanel jobs={p.transferJobs} paused={p.transferPaused}
+        onPause={p.onPauseQueue} onCancel={p.onCancelJob}
+        onRetry={p.onRetryJob} onClear={p.onClearFinished}/>
+    </div>
     <div className="filesVaultSection">{p.backupPanel}</div>
   </div>;
 }
