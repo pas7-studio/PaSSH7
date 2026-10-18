@@ -28,15 +28,26 @@ jobs:
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/passh7-llvm"
-          mkdir -p "$root"
-          archive="$RUNNER_TEMP/clang-apple-cross.tar.xz"
-          curl -fL --retry 3 --retry-delay 4 \
-            -o "$archive" \
-            'https://github.com/awakecoding/llvm-prebuilt/releases/download/v2026.2.0/clang-apple-cross-22.1.4-x86_64-ubuntu-24.04.tar.xz'
+          mkdir -p "$root" "$HOME/.cache/passh7"
+          archive="$HOME/.cache/passh7/clang-apple-cross-22.1.4.tar.xz"
+          if ! test -s "$archive"; then
+            curl -fL --retry 3 --retry-delay 4 \
+              -o "$archive" \
+              'https://github.com/awakecoding/llvm-prebuilt/releases/download/v2026.2.0/clang-apple-cross-22.1.4-x86_64-ubuntu-24.04.tar.xz'
+          fi
           echo '92bcfa51e06758ba07126540940bdc4fc756703bbf6881217e9928519c0239b6  '"$archive" | sha256sum -c -
           tar -xJf "$archive" -C "$root"
-          compiler="$(find "$root" -type f -name clang -print -quit)"
-          test -n "$compiler" && test -x "$compiler"
+          echo 'Available cross tools:'
+          find "$root" -maxdepth 5 -name 'clang*' -print | head -25 || true
+          compiler=""
+          while IFS= read -r candidate; do
+            if test -x "$candidate" && ! test -d "$candidate"; then compiler="$candidate"; break; fi
+          done < <(find "$root" -maxdepth 5 \( -name clang -o -name clang-22 -o -name clang-apple \) -print)
+          if test -z "$compiler"; then
+            echo "::error::No runnable clang found in cross archive"
+            find "$root" -maxdepth 3 -type f | head -40 || true
+            exit 2
+          fi
           bin_dir="$(dirname "$compiler")"
           echo "$bin_dir" >> "$GITHUB_PATH"
           "$compiler" --version | head -1
