@@ -185,7 +185,7 @@ export default function ReferenceScreens(){
           onTerminal={()=>choose("terminal")}
         />:screen==="agent"?<AgentWorkspace host="dev-server" address="192.0.2.10"
           username="deploy" port={22} route="Direct SSH" sessionId="visual-fixture"
-          sessions={[{id:"visual-fixture",alias:"dev-server"}]} vaultUnlocked={true}
+          sessions={[{id:"visual-fixture",alias:"dev-server"}]} allSessions={[{id:"visual-fixture",alias:"dev-server"}]} vaultUnlocked={true}
           agent={agent} onAgent={setAgent}
           availability={{
             codex:{session:"visual-fixture",installed:false,platform:"windows",version:null,
@@ -198,7 +198,7 @@ export default function ReferenceScreens(){
             opencode:{session:"visual-fixture",installed:false,platform:"windows",version:null,
               source:null,location:null,desktopApp:null,launchCommand:null,
               diagnostic:"No CLI found for this Windows SSH account."}
-          }} checking={false} error="" status=""
+          }} checking={false} error="" status="" launching={false}
           mode="remote" onMode={()=>{}} localAvailability={{}} localChecking={false}
           localConnections={[]} localRevoking="" onRevokeLocal={()=>{}}
           context={"Host: dev-server\nTarget: deploy@192.0.2.10\nVisual fixture: no agent is launched"}
