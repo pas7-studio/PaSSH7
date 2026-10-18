@@ -1,7 +1,7 @@
 name: Windows cross-build on Linux self-hosted
 on:
   push:
-    branches: [main, feat/dedicated-ai-agent-workspace]
+    branches: [main]
     paths:
       - 'apps/passh7-desktop/**'
       - 'crates/passh7-core/**'
