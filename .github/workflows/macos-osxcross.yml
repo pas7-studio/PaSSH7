@@ -23,14 +23,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Install Linux osxcross dependencies
-        shell: bash
+      - name: Install rootless LLVM and osxcross dependencies
+        uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-name: osxcross
+          init-shell: bash
+          create-args: >-
+            -c conda-forge
+            clang
+            clangxx
+            llvm
+            lld
+            cmake
+            make
+            libxml2
+            openssl
+            zlib
+            xz
+            bzip2
+      - name: Check rootless build tools
+        shell: micromamba-shell {0}
         run: |
-          set -euo pipefail
-          sudo -n apt-get update -qq
-          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            clang llvm lld git make patch sed tar gzip xz-utils bzip2 cpio curl \
-            python3 cmake libxml2-dev libssl-dev zlib1g-dev liblzma-dev libbz2-dev file
+          clang --version
+          ld.lld --version
+          cmake --version
+          command -v clang
+          command -v llvm-ar
+          command -v git
+          command -v cpio || true
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
@@ -47,7 +67,7 @@ jobs:
           echo "$digest" | grep -Eq '^[a-fA-F0-9]{64}$'
           echo "PASSH7_MACOS_SDK_SHA256=$digest" >> "$GITHUB_ENV"
       - name: Build PaSSH7 Darwin arm64 with osxcross
-        shell: bash
+        shell: micromamba-shell {0}
         run: bash apps/passh7-desktop/scripts/build-macos-osxcross.sh
       - name: Upload unsigned experimental macOS app
         if: success()
