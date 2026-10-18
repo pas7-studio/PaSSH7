@@ -148,17 +148,17 @@ export default function RemoteFilesWorkspace(p:Props){
   const renameFile=(item:SftpEntry)=>{
     setFileMenu(null);
     if(!p.connected||p.mutationBusy||p.busy)return;
-    const requested=window.prompt("Rename "+item.name+" to:",item.name);
+    const requested=window.prompt("Rename remote item on "+p.host+"\n"+full(path,item.name)+"\n\nNew name:",item.name);
     const next=requested?.trim();
     if(!next||next===item.name)return;
-    if(window.confirm("Rename "+JSON.stringify(item.name)+" to "+JSON.stringify(next)+"?\n\nExisting destinations are checked, but concurrent server-side changes may race.")){
+    if(window.confirm("Rename on SSH host "+p.host+"?\n\nFROM: "+full(path,item.name)+"\nTO: "+full(path,next)+"\n\nExisting destinations are checked, but concurrent server-side changes may race.")){
       p.onRename(item.name,next,item.isDir);
     }
   };
   const deleteFile=(item:SftpEntry)=>{
     setFileMenu(null);
     if(!p.connected||p.mutationBusy||p.busy)return;
-    if(window.confirm("Delete "+(item.isDir?"the empty directory ":"the file ")+JSON.stringify(item.name)+" from "+path+"?\n\nThis cannot be undone. Nonempty directories will not be removed.")){
+    if(window.confirm("DELETE "+(item.isDir?"EMPTY DIRECTORY":"FILE")+" on SSH host "+p.host+"?\n\n"+full(path,item.name)+"\n\nThis cannot be undone. Nonempty directories will not be removed.")){
       p.onDelete(item.name,item.isDir);
     }
   };
@@ -186,7 +186,7 @@ export default function RemoteFilesWorkspace(p:Props){
       {selectedNames.length>1&&<button onClick={()=>{setSelectedNames([]);setSelected("")}}>Clear selection</button>}
       <button disabled={!p.connected||p.busy} onClick={()=>open(path)}><RefreshCw size={16}/> {p.busy?"Loading…":"Refresh"}</button>
       <button disabled={!p.connected||p.busy||p.mutationBusy} onClick={()=>{
-        const name=window.prompt("New folder name (created in "+path+"):");
+        const name=window.prompt("New folder on SSH host "+p.host+"\nParent directory: "+path+"\n\nFolder name:");
         if(!name)return;
         p.onMkdir(name);
       }}><FolderPlus size={16}/> New folder</button>
