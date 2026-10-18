@@ -235,7 +235,8 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
         </>}
         {section==="shortcuts"&&<>
           {sectionCard("Available keyboard shortcuts",<>
-            {infoRow("Command palette","Search live SSH sessions, saved hosts, workspaces and safe app actions.","Ctrl / Cmd + K")}
+            {infoRow("Command palette","Search live SSH sessions, saved hosts, workspaces and safe app actions. Available even while a remote terminal has focus.","Ctrl / Cmd + Shift + P")}
+            {infoRow("Ctrl+K outside SSH","Ctrl / Cmd + K also opens the palette outside an SSH terminal. Inside xterm it is passed to the remote shell or agent for normal command-line editing.","Ctrl / Cmd + K")}
             {infoRow("Target filter","In the command palette, type @ to show SSH hosts and live sessions.","@")}
             {infoRow("Action filter","In the command palette, type > to show workspaces and safe app actions.",">")}
             {infoRow("Connect selected host","With a host result focused in the command palette, use the normal SSH authentication and host-key checks.","Ctrl / Cmd + Enter")}
