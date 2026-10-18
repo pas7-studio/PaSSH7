@@ -64,6 +64,12 @@ The agent's own built-in shell and file tools still run on your **local machine*
 
 **Connections** shows distinct counts for connected hosts and native SSH sessions. A directly reachable saved host can be tested for a valid SSH identification banner and response time; that test does not authenticate or verify the host key. Jump-routed private targets intentionally cannot be misleadingly probed directly from the PC. **Settings** includes a searchable category navigation, with actual local MCP architecture, CLI sign-in limitations and permission scope documented in AI Agents settings.
 
+## Navigation without extra SSH sessions
+
+The global **Ctrl/Cmd+K command palette** searches individual live SSH PTYs, saved hosts, workspaces and safe app actions. Use `@` to filter hosts/sessions or `>` for workspaces/actions. Enter on a live terminal reuses that exact native SSH session. Enter on a saved host selects it and opens Terminal; **Ctrl/Cmd+Enter** on a host explicitly runs the normal Connect flow (pinned host-key verification and regular login still apply). Adding a host or unlocking Vault from the palette uses the existing dialogs. The palette never executes remote shell commands.
+
+A compact **SSH session strip** stays visible above Connections, Files, Docker, Port Forwarding, Snippets, AI Agents and Settings. Click a session to change the current host and PTY together while remaining in the current workspace. Sessions stay open on the other hosts; context changes do not migrate MCP grants or Docker/SFTP requests to another server. The strip offers a clear Connect or Unlock Vault action when no SSH session is active, and respects the same authenticated native SSH lifecycle.
+
 ## Remote host readiness diagnostics
 
 Open **Settings → About & Diagnostics → Live SSH host health** with an authenticated host selected, then choose **Run host checks**. PaSSH7 checks the selected SSH account's SFTP directory access, Docker inventory and Codex/Claude Code/OpenCode terminal CLI availability without modifying files, containers or services. It distinguishes a usable Windows CLI from a Start Menu desktop application that cannot run in an SSH PTY. Results and failures are specific to the currently selected SSH session; switching hosts clears them. **Copy safe health summary** omits host addresses, usernames, file and container names, credentials and raw remote command output.
