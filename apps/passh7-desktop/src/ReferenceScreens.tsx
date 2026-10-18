@@ -157,7 +157,7 @@ export default function ReferenceScreens(){
           readPreview={target=>setPreview({session:"visual-fixture",path:target,kind:"text",body:sampleFileText})}
           onMkdir={()=>{}} onDelete={()=>{}} onRename={()=>{}} mutationBusy={false}
           preview={preview} previewBusy={false} previewError={null}
-          transferJobs={transferJobs} transferPaused={false} onPauseQueue={()=>{}} onCancelJob={()=>{}} onRetryJob={()=>{}} onClearFinished={()=>{}}
+          transferJobs={transferJobs} transferPaused={false} transferFocusToken={0} onPauseQueue={()=>{}} onCancelJob={()=>{}} onRetryJob={()=>{}} onClearFinished={()=>{}}
           paneSizes={preferences.paneSizes} onPaneSize={pane}
           backupPanel={<section className="vaultBackupCard"><strong>Encrypted Vault backups</strong><p className="prefInfo">Reference layout only · No actual vault or files are accessed.</p></section>}
         />:screen==="docker"?<DockerWorkspace
