@@ -591,6 +591,43 @@ struct UpdateHostInput {
     alias:String, display_name:String, hostname:String, port:u16, username:String,
     identity_alias:String, reset_host_key:bool, forget_credentials:bool,
 }
+fn host_connection_changed(current:&passh7_core::HostProfile,edit:&UpdateHostInput)->bool{
+    current.hostname!=edit.hostname||current.port!=edit.port||
+        current.username!=edit.username||current.identity_alias!=edit.identity_alias||
+        edit.reset_host_key||edit.forget_credentials
+}
+#[cfg(test)]
+mod host_profile_edit_tests{
+    use super::*;
+    #[test]
+    fn live_display_name_change_is_not_an_ssh_connection_change(){
+        let original=passh7_core::HostProfile{
+            alias:"gateway".into(),hostname:"server.example".into(),port:22,
+            username:"ubuntu".into(),identity_alias:String::new(),
+            pinned_host_key:None,extensions:Default::default(),
+        };
+        let mut edit=UpdateHostInput{
+            alias:"gateway".into(),display_name:"Renamed server".into(),
+            hostname:"server.example".into(),port:22,username:"ubuntu".into(),
+            identity_alias:String::new(),reset_host_key:false,forget_credentials:false,
+        };
+        assert!(!host_connection_changed(&original,&edit));
+        edit.hostname="different.example".into();
+        assert!(host_connection_changed(&original,&edit));
+        edit.hostname=original.hostname.clone();
+        edit.username="newuser".into();
+        assert!(host_connection_changed(&original,&edit));
+        edit.username=original.username.clone();
+        edit.identity_alias="new-key".into();
+        assert!(host_connection_changed(&original,&edit));
+        edit.identity_alias=String::new();
+        edit.reset_host_key=true;
+        assert!(host_connection_changed(&original,&edit));
+        edit.reset_host_key=false;
+        edit.forget_credentials=true;
+        assert!(host_connection_changed(&original,&edit));
+    }
+}
 #[tauri::command]
 fn vault_update_host(host:UpdateHostInput,sessions:State<'_,SessionStore>,
     ssh:State<'_,SshSessionManager>)->Result<(),String>{
@@ -610,9 +647,7 @@ fn vault_update_host(host:UpdateHostInput,sessions:State<'_,SessionStore>,
         passh7_core::transaction(&vault_path()?,password,|vault|{
             let current=vault.hosts.iter().find(|saved|saved.alias==host.alias)
                 .ok_or(HubError::InvalidInput("Host was not found in Vault"))?;
-            let connection_changed=current.hostname!=host.hostname||current.port!=host.port||
-                current.username!=host.username||current.identity_alias!=host.identity_alias||
-                host.reset_host_key||host.forget_credentials;
+            let connection_changed=host_connection_changed(current,&host);
             if connection_changed&&live.iter().any(|session|session.alias==host.alias){
                 return Err(HubError::InvalidInput(
                     "Disconnect this host's SSH sessions before changing its SSH connection"));
