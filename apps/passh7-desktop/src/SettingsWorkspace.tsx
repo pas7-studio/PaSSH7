@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState,type ReactNode} from "react";
 import {WorkspaceHeader} from "./WorkspaceChrome";
 import ConnectionDiagnostics from "./ConnectionDiagnostics";
-import {Activity,Bell,Bot,ChevronDown,Clipboard,Container,Download,FolderClosed,Info,Keyboard,LockKeyhole,Monitor,Palette,RefreshCw,Settings2,ShieldCheck,TerminalSquare,Upload} from "lucide-react";
+import {Activity,Bell,Bot,ChevronDown,Clipboard,Container,Download,FolderClosed,Info,Keyboard,LockKeyhole,Monitor,Palette,RefreshCw,Search,Settings2,ShieldCheck,TerminalSquare,Upload} from "lucide-react";
 import {type AppPreferences,defaultPreferences,defaultPaneSizes,validatePreferences} from "./preferences";
 import type {BuildInfo} from "./backend";
 
@@ -31,6 +31,24 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
     }catch{return "general"}
   });
   const [collapsed,setCollapsed]=useState<Record<string,boolean>>({});
+  const [settingsQuery,setSettingsQuery]=useState("");
+  const settingsKeywords:Record<Section,string>={
+    general:"startup home session restore sidebar last workspace reconnection",
+    ssh:"ssh authentication keys fingerprint trust jump gateway network reachability",
+    security:"vault password encryption credentials lock idle backup export",
+    terminal:"font size cursor scrollback cascadia pty shell xterm",
+    files:"sftp uploads downloads transfer hidden sorting explorer",
+    docker:"containers images resources log viewer tail follow auto-refresh",
+    ports:"ssh tunnel proxy tcp forward localhost redis postgresql database rdp",
+    agents:"codex claude opencode ai mcp local remote cli assistant launch",
+    notifications:"alerts connection errors failure diagnostics",
+    appearance:"theme dark light density panel sizes resize color layout",
+    shortcuts:"hotkey command palette keyboard keys ctrl k esc",
+    diagnostics:"support build version commit status environment troubleshooting"
+  };
+  const matchingSections=sections.filter(item=>
+    (item.label+" "+item.hint+" "+settingsKeywords[item.id])
+      .toLocaleLowerCase().includes(settingsQuery.trim().toLocaleLowerCase()));
   useEffect(()=>{
     try{localStorage.setItem("passh7.settings.section.v1",section)}
     catch{/* UI-only layout persistence is optional */}
@@ -97,7 +115,14 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
     <WorkspaceHeader icon={Settings2} title="Settings"
       description="Configure the terminal, workspaces, SSH preferences and your local application."/>
     <div className="settingsLayout">
-      <nav className="settingsNav" aria-label="Settings categories">{sections.map(({id,label,hint,Icon})=>
+      <nav className="settingsNav" aria-label="Settings categories">
+        <label className="settingsNavSearch"><Search size={15}/><input type="search" value={settingsQuery}
+          onChange={event=>setSettingsQuery(event.target.value)} placeholder="Search settings…"
+          aria-label="Find settings categories"/></label>
+        {matchingSections.length===0&&<div className="settingsNoMatches">
+          No matching sections. <button type="button" onClick={()=>setSettingsQuery("")}>Clear search</button>
+        </div>}
+        {matchingSections.map(({id,label,hint,Icon})=>
         <button type="button" key={id} aria-current={section===id?"page":undefined} className={section===id?"selected":""} onClick={()=>{setSection(id);setNotice("")}}>
           <Icon size={18}/><span><strong>{label}</strong><small>{hint}</small></span></button>)}</nav>
       <div className="settingsContent">
@@ -171,7 +196,7 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
           </>)}
           {sectionCard("Container logs",<>
             <label className="prefRow"><span><strong>Default log tail</strong><small>Maximum number of recent log lines requested on load.</small></span><select value={preferences.dockerTail} onChange={e=>update("dockerTail",Number(e.target.value))}>{[50,100,200,500,1000].map(n=><option value={n} key={n}>{n} lines</option>)}</select></label>
-            {switchRow("Follow logs by default","Use a dedicated streaming SSH channel, cancelled on navigation.","dockerFollowLogs")}
+            {switchRow("Follow logs by default","Use a dedicated streaming SSH channel from the Logs tab; cancelled when Docker closes or the SSH session changes.","dockerFollowLogs")}
           </>)}
         </>}
         {section==="ports"&&<>
@@ -183,9 +208,11 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
         </>}
         {section==="agents"&&<>
           {sectionCard("Remote coding assistants",<>
-            {infoRow("Supported launchers","Codex, Claude Code and OpenCode can run in an existing SSH PTY.","Remote CLIs")}
-            {infoRow("Availability detection","Checks installed tools on the remote host; an unrecognized interactive PATH can cause a false negative.","Manual check")}
-            {infoRow("Permission model","Agents run with the remote SSH user's full privileges; no scoped MCP broker yet.","SSH account")}
+            {infoRow("Remote launchers","Codex, Claude Code and OpenCode run directly in the existing authenticated SSH PTY.","Remote CLIs")}
+            {infoRow("Local CLI + SSH","On Windows, an installed local CLI opens a separate console and receives four session-bound PaSSH7 MCP tools for remote exec and SFTP.","No API keys or remote daemon")}
+            {infoRow("Availability detection","Checks CLI executables separately on local and remote accounts; it does not verify provider sign-in.","CLI --version only")}
+            {infoRow("Scoped SSH access","Each local CLI launch gets a revocable SSH-session grant. Vault locking, session closure or expiry blocks new MCP calls. Built-in CLI tools remain local.","Temporary MCP grant")}
+            {infoRow("Safety","Remote CLI inherits the SSH user's permissions. Local CLI is not sandboxed; its remote MCP tools can modify files and run commands.","Explicit confirmation")}
           </>)}
         </>}
         {section==="notifications"&&<>
