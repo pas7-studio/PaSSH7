@@ -70,7 +70,7 @@ export default function SessionStrip(p:Props){
         <Plus size={14}/> Connect {selected.label}
       </button>}
     <button type="button" className="sessionStripSearch" aria-label="Search all SSH sessions"
-      title="Find sessions, hosts and commands (Ctrl+K)" onClick={p.onCommandPalette}>
+      title="Find sessions, hosts and commands (Ctrl+Shift+P; Ctrl+K outside terminal)" onClick={p.onCommandPalette}>
       <Command size={15}/><span>Switch</span><ArrowRight size={13}/>
     </button>
   </div>;
