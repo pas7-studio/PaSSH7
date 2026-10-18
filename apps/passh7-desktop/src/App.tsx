@@ -989,7 +989,8 @@ export default function App(){
   };
   const dockerStatsRequestRef=useRef(0);
   const [dockerLogsBusy,setDockerLogsBusy]=useState(false);
-  const [dockerActionBusy,setDockerActionBusy]=useState("");
+  const dockerActionInFlight=useRef(new Set<string>());
+  const [dockerActionBusyBySession,setDockerActionBusyBySession]=useState<Record<string,string>>({});
   const [dockerActionStatus,setDockerActionStatus]=useState<{session:string;text:string}|null>(null);
   const [dockerLogs,setDockerLogs]=useState<{session:string;containerId:string;containerName:string;text:string}|null>(null);
   const [dockerLogsError,setDockerLogsError]=useState<{session:string;message:string}|null>(null);
@@ -1007,9 +1008,15 @@ export default function App(){
   const runDockerAction=async(containerId:string,containerName:string,action:"start"|"stop"|"restart")=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setDockerError("Connect to this host before managing containers.");return}
+    if(dockerActionInFlight.current.has(session.id)){
+      setDockerError("Another Docker action is already running on this SSH terminal. Finish that operation first.");
+      return;
+    }
     const prompt=action==="stop"?"This will interrupt the container and its services.":"This changes the state of the remote container.";
     if(!window.confirm(action.toUpperCase()+" "+containerName+" on "+session.alias+"?\n"+prompt+"\nAction runs with your SSH user's Docker privileges."))return;
-    setDockerActionBusy(containerId);setDockerError("");setDockerActionStatus(null);
+    dockerActionInFlight.current.add(session.id);
+    setDockerActionBusyBySession(previous=>({...previous,[session.id]:containerId}));
+    setDockerError("");setDockerActionStatus(null);
     try{
       const result=await controlDockerContainer(session.id,containerId,action);
       if(dockerCurrent(session.id,session.alias))setDockerActionStatus({session:session.id,text:result});
@@ -1022,7 +1029,14 @@ export default function App(){
         if(dockerCurrent(session.id,session.alias))setDockerError("Docker "+action+" succeeded, but refreshing container state failed: "+String(refreshError));
       }
     }catch(error){if(dockerCurrent(session.id,session.alias))setDockerError("Docker "+action+" failed: "+String(error))}
-    finally{setDockerActionBusy("")}
+    finally{
+      dockerActionInFlight.current.delete(session.id);
+      setDockerActionBusyBySession(previous=>{
+        const next={...previous};
+        delete next[session.id];
+        return next;
+      });
+    }
   };
   const openDockerShell=async(containerId:string,containerName:string)=>{
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
@@ -1690,7 +1704,7 @@ export default function App(){
  onInspect={id=>void readDockerDetails(id)}
  loading={dockerBusy} error={dockerError}
  actionStatus={dockerActionStatus?.session===activeSsh?dockerActionStatus.text:null}
- actionBusy={dockerActionBusy} logs={dockerLogs} logsBusy={dockerLogsBusy}
+ actionBusy={dockerActionBusyBySession[activeSsh]||""} logs={dockerLogs} logsBusy={dockerLogsBusy}
  logsError={dockerLogsError?.session===activeSsh?dockerLogsError.message:""}
  liveStatus={dockerLiveStatus}
  tail={preferences.dockerTail} follow={preferences.dockerFollowLogs}
