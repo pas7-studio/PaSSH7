@@ -1244,3 +1244,63 @@
 .settingsPage .settingsNav .settingsNoMatches button{min-height:32px;height:auto;padding:6px 10px;
   justify-content:center;border-color:var(--border);background:var(--panel2)}
 .shell.light .settingsPage .settingsNavSearch{background:#f8fbff;border-color:#d1dfea}
+
+/* Command palette: sessions, saved hosts, workspaces and explicit safe actions. */
+.shell .quickCommandPalette{min-height:0}
+.shell .quickSwitchModal{width:min(680px,calc(100vw - 28px));max-height:min(82vh,820px)}
+.quickPaletteHelp{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;
+  padding:0 17px 10px;color:var(--muted);font-size:10px;border-bottom:1px solid var(--border)}
+.quickPaletteHelp span{display:inline-flex;gap:6px;align-items:center}
+.quickPaletteHelp span:last-child{margin-left:auto}
+.quickPaletteHelp kbd{display:inline-block;background:var(--panel2);padding:3px 6px;border:1px solid var(--border);
+  border-radius:4px;font:700 10px Consolas,monospace;color:var(--fg)}
+.quickPaletteSection{font-size:9px;font-weight:750;letter-spacing:1.1px;color:var(--muted);
+  padding:15px 12px 6px;text-transform:uppercase}
+.quickPaletteSection:first-child{padding-top:7px}
+.quickSwitchOption[aria-selected="true"]{border-color:color-mix(in srgb,var(--accent) 60%,transparent)}
+.quickSwitchSearch:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 15%,transparent)}
+.quickSwitchSearch .quickClearQuery{padding:5px 8px;border:1px solid var(--border);border-radius:5px;
+  color:var(--muted);background:var(--panel2);font-size:10px}
+.quickSwitchNoResults button{padding:8px 12px;border:1px solid var(--border);
+  border-radius:6px;color:var(--fg);background:var(--panel2);font-size:11px}
+.quickSwitchFooter svg{color:var(--accent)}
+.shell.light .quickPaletteSection{color:#617b94}
+.shell.light .quickPaletteHelp{border-color:#d2e0ef}
+.shell.light .quickPaletteHelp kbd{background:#f6faff}
+.shell.light .quickSwitchSearch .quickClearQuery{color:#405979;background:#fff}
+@media(max-width:620px){.quickPaletteHelp{gap:8px;padding-inline:12px}.quickPaletteHelp span:last-child{display:none}
+  .quickSwitchFooter span:nth-last-child(2){display:none}
+  .quickSwitchOptionText small{white-space:normal;line-height:1.35}
+}
+
+/* Session strip: one-click PTY context switching from every full-width workspace. */
+.sessionStrip{display:flex;align-items:center;gap:10px;min-height:45px;flex:none;padding:5px 13px;
+  border-bottom:1px solid var(--border);background:var(--panel);min-width:0}
+.sessionStripCaption{display:flex;align-items:center;gap:8px;flex:none;font-size:10px;
+  font-weight:750;letter-spacing:.7px;color:var(--muted);white-space:nowrap}
+.sessionStripCaption>svg{color:var(--positive)}
+.sessionStripCaption small{padding:3px 6px;border-radius:5px;border:1px solid var(--border);
+  font-size:10px;font-weight:500;letter-spacing:0}
+.sessionStripItems{display:flex;align-items:center;gap:6px;min-width:0;flex:1;overflow-x:auto;scrollbar-width:thin}
+.sessionStrip button{display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  flex:none;border:1px solid var(--border);background:var(--panel2);color:var(--fg);
+  border-radius:7px;font-size:11px;padding:7px 11px;min-height:32px;white-space:nowrap}
+.sessionStrip button:hover{border-color:var(--accent);background:var(--surface)}
+.sessionStripItem.active{background:var(--accentSoft);border-color:var(--accent);font-weight:700}
+.sessionStripItem small{color:var(--muted);font-size:10px}
+.sessionStripDot{display:block;width:7px;height:7px;border-radius:50%;background:var(--positive);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--positive) 13%,transparent)}
+.sessionStripSearch{margin-left:auto}
+.sessionStripConnect{max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.sessionStripEmpty .sessionStripCaption{flex:1;min-width:0;flex-wrap:wrap}
+.sessionStripEmpty .sessionStripCaption>svg{color:var(--muted)}
+.sessionStripEmpty .sessionStripCaption small{border:0;padding:0}
+.shell.light .sessionStrip{background:#f8fbff}
+@media(max-width:1120px){.sessionStripCaption small{display:none}.sessionStripSearch span{display:none}}
+@media(max-width:720px){.sessionStrip{padding:4px 8px;gap:7px;min-height:40px}
+ .sessionStripCaption>span{display:none}
+ .sessionStrip button{padding:7px 8px}
+ .sessionStripItem{max-width:155px}
+ .sessionStripItem>span:nth-child(2){overflow:hidden;text-overflow:ellipsis}
+ .sessionStripConnect{max-width:100px}
+}
