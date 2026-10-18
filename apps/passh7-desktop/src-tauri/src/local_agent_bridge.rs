@@ -54,10 +54,10 @@ fn local_cli_candidates(agent:&str)->Vec<PathBuf>{
         ["cmd","exe","ps1","bat"].iter().map(|x|format!("{agent}.{x}")).collect()
     }else{vec![agent.to_owned()]};
     dirs.into_iter().filter(|dir|!dir.to_string_lossy().to_ascii_lowercase().contains("windowsapps"))
-        .flat_map(|dir|names.iter().map(move |name|dir.join(name)))
+        .flat_map(|dir|names.iter().map(|name|dir.join(name)).collect::<Vec<_>>())
         .filter(|path|path.is_file()).collect()
 }
-fn ps_quote(text:&str)->String{format!("'{}'",text.replace('\\',"\\").replace('\'',"''"))}
+fn ps_quote(text:&str)->String{format!("'{}'",text.replace('\'',"''"))}
 fn verify_local_cli(path:&Path)->bool{
     // Do not launch an unknown shell command from the UI. Validate the absolute
     // candidate and execute --version with a bounded wait.
@@ -146,7 +146,7 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
 }
 async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&str)->Result<(SocketAddr,String),String>{
     // Validate the session before generating a grant.
-    if !ssh.active_sessions().iter().any(|live|live.id==session){
+    if !ssh.active_sessions()?.iter().any(|live|live.id==session){
         return Err("Select a live authenticated SSH session".into());
     }
     let mut address=bridge.address.lock().await;
