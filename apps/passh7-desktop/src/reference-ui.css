@@ -1348,3 +1348,17 @@
  .sessionStrip .sessionStripGroup .sessionStripItem{max-width:143px}
  .sessionStrip .sessionStripGroup .sessionStripClose{padding:6px 7px}
 }
+
+/* The current host identity is an obvious, keyboard-accessible switcher. */
+.topHost .topHostSwitch{position:relative;display:flex;flex-direction:column;align-items:flex-start;
+  justify-content:center;gap:4px;min-width:0;max-width:min(40vw,420px);
+  padding:7px 27px 7px 9px;text-align:left;background:transparent;
+  color:var(--fg);border:1px solid transparent;border-radius:7px}
+.topHost .topHostSwitch:hover,.topHost .topHostSwitch:focus-visible{
+  background:var(--accentSoft);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
+.topHostSwitch strong,.topHostSwitch small{display:block;max-width:100%;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis}
+.topHostSwitch svg{position:absolute;right:7px;top:50%;transform:translateY(-50%);color:var(--accent)}
+@media(max-width:860px){.topHost .topHostSwitch{max-width:190px}}
+@media(max-width:620px){.topHost .topHostSwitch{max-width:135px}
+ .topHostSwitch small{display:none}}
