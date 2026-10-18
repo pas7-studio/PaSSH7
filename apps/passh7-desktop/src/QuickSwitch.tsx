@@ -95,11 +95,14 @@ export default function QuickSwitch(p:Props){
       hint:"Access your saved SSH connections and credentials",
       keywords:"password vault security locked login",category:"actions",icon:LockKeyhole,action:"unlock-vault"});
 
-    const allowed=candidates.filter(hit=>targetOnly?hit.category==="hosts"||hit.category==="sessions":
-      commandOnly?hit.category==="actions"||hit.category==="workspaces":true);
+    const allowed=candidates.filter(hit=>targetOnly?(
+        hit.category==="hosts"||hit.category==="sessions"||
+        hit.action==="unlock-vault"||
+        (hit.action==="add-host"&&p.hosts.length===0)
+      ):commandOnly?hit.category==="actions"||hit.category==="workspaces":true);
     const ranked=allowed.map(hit=>({hit,score:matchScore(hit,terms)}))
       .filter(row=>row.score>=0);
-    const sections:Category[]=commandOnly?["actions","workspaces"]:targetOnly?["sessions","hosts"]:
+    const sections:Category[]=commandOnly?["actions","workspaces"]:targetOnly?["sessions","hosts","actions"]:
       ["sessions","hosts","workspaces","actions"];
     const hits:Hit[]=[];
     for(const section of sections){
