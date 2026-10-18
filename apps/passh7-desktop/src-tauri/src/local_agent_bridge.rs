@@ -278,9 +278,12 @@ pub async fn local_agent_launch(agent:String,id:String,
         let _=config.as_ref();
         return Err("Local interactive CLI launch currently requires Windows; Unix desktop terminal integration is not enabled.".into());
     }
+    // The local CLI is interactive. Do NOT redirect its standard handles to
+    // NUL: terminal coding assistants would start but could not accept input
+    // or render their UI in the newly created Windows console. CREATE_NEW_CONSOLE
+    // above provides an interactive terminal for this child process.
     cmd.env("PASSH7_BRIDGE_ADDR",address.to_string())
-        .env("PASSH7_BRIDGE_TOKEN",&token)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        .env("PASSH7_BRIDGE_TOKEN",&token);
     if let Some(path)=config.as_ref(){
         if agent=="opencode"{cmd.env("OPENCODE_CONFIG",path);}
     }
