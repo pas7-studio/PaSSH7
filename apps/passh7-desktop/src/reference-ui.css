@@ -1398,3 +1398,12 @@
   .editConnectionModal{max-height:calc(100dvh - 28px)}
   .connectionInspectorActions button{min-width:0}
 }
+
+.sidebarHostRow{display:flex;align-items:center;gap:1px;min-width:0}
+.sidebarHostRow>.host{min-width:0;flex:1}
+.sidebarHostRow>.sidebarEditHost{width:28px;min-width:28px;height:28px;padding:4px;
+  display:grid;place-items:center;border:1px solid transparent;
+  color:var(--muted);background:transparent;border-radius:6px}
+.sidebarHostRow:hover>.sidebarEditHost,.sidebarHostRow:focus-within>.sidebarEditHost{
+  color:var(--accent);background:var(--panel2);border-color:var(--border)}
+.sidebarHostRow>.sidebarEditHost:hover{border-color:var(--accent);background:var(--accentSoft)}
