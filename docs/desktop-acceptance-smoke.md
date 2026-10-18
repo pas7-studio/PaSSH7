@@ -327,3 +327,22 @@ https://github.com/pas7-studio/PaSSH7/actions/runs/39039408111
 
 Automated unit/UI/visual PASS:
 https://github.com/pas7-studio/PaSSH7/actions/runs/39040275865
+
+
+## Cross-workspace usability and reliability (2026-10-18)
+
+These scenarios require the real Windows WebView2 app and, except where noted,
+at least one authenticated SSH server. CI compilation and synthetic MCP
+loopback tests do not substitute for this manual validation.
+
+| ID | Action | Expected result |
+| --- | --- | --- |
+| APP-UX-01 | Open Docker on a connected host; select a container and click View logs | Dedicated Logs tab becomes visible immediately, with the selected container in the toolbar and a loading indicator until Docker answers. No need to scroll below the container table |
+| APP-UX-02 | Turn Follow live on, receive new Docker stdout/stderr, scroll upward, then click Latest | New lines auto-scroll while at the bottom, deliberate scroll-up pauses following the viewport, Latest returns to the bottom without affecting the native SSH stream |
+| APP-UX-03 | Read a container whose Docker stdout/stderr is empty; then use an error filter | Empty logs are distinguished from a filter returning no matches; auth/daemon errors produce a visible Retry action and contextual troubleshooting |
+| APP-UX-04 | Connect to two hosts (one with two sessions) and open Connections | Connected host count is unique hosts; each host shows its correct live SSH session count rather than calling an unconnected host Offline |
+| APP-UX-05 | Test SSH service on a directly reachable saved host, then on a host behind a gateway | Direct probe shows elapsed time and SSH banner but explicitly states key/auth are unverified. A jump-routed target does not expose a misleading direct probe |
+| APP-UX-06 | Apply PostgreSQL/RDP/Redis port-forwarding presets, then attempt a duplicate local port on another live SSH session | Presets only fill fields and do not start network listeners. PaSSH7 warns about loopback listener collision and disables the duplicate Start action |
+| APP-UX-07 | In Remote Files, use Home, typed Go, select three files and Copy paths | Home opens the remote SSH default directory via SFTP; Go opens the typed path. Copy paths places the three full remote names on separate lines and shows a visible status |
+| APP-UX-08 | Search Settings for "docker", "vault", "font", "rdp", "mcp"; clear search and reopen | Relevant settings categories are discoverable and their sections remain functional. Searching does not change encrypted Vault or active SSH sessions |
+| APP-UX-09 | Switch all workspaces and light/dark theme while Docker Logs and two SSH terminals are active | No cross-host data leaks, duplicate port listeners, stale Docker log selection or unintended SFTP mutation |
