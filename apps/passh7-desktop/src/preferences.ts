@@ -5,7 +5,7 @@ export type PaneSizes={
   dockerLogs:number;
 };
 export const defaultPaneSizes:PaneSizes={
-  filesTree:212,filesInspector:300,dockerInspector:310,dockerLogs:310
+  filesTree:212,filesInspector:300,dockerInspector:310,dockerLogs:560
 };
 const paneSize=(value:unknown,fallback:number,min:number,max:number)=>
   typeof value==="number"&&Number.isFinite(value)?Math.min(max,Math.max(min,Math.round(value))):fallback;
