@@ -507,7 +507,7 @@
 .transferQueueFilters{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 13px;background:rgba(4,17,33,.18);border-bottom:1px solid var(--border)}
 .transferQueueFilters button{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:6px;padding:5px 9px;min-height:29px;font-size:11px}
 .transferQueueFilters button span{font-variant-numeric:tabular-nums;font-weight:600}
-.transferQueueFilters button.selected{background:rgba(51,135,255,.16);color:var(--text);border-color:#477bad}
+.transferQueueFilters button.selected{background:rgba(51,135,255,.16);color:var(--fg);border-color:#477bad}
 .transferQueueFilters button:focus-visible{outline:2px solid #76b5ff;outline-offset:2px}
 .shell.light .transferQueueFilters{background:#f4f8fd}
 .shell.light .transferQueueFilters button.selected{background:#e5f0ff;border-color:#82a8d8;color:#154675}
