@@ -174,6 +174,7 @@ export default function ReferenceScreens(){
         />:screen==="connections"?<ConnectionsWorkspace hosts={exampleHosts} selected={selectedHost}
           connectedAliases={["dev-server"]} vaultUnlocked={true} onSelect={setSelectedHost}
           onConnect={()=>{}} onTerminal={()=>choose("terminal")} onAdd={()=>{}} onImport={()=>{}}
+          onProbe={async()=>({banner:"SSH-2.0-OpenSSH_fixture",elapsedMs:12})}
         />:screen==="snippets"?<SnippetsWorkspace host="dev-server" connected={true}
           onTerminal={()=>choose("terminal")} onExecute={()=>{}}
         />:screen==="ports"?<PortForwardingWorkspace host="dev-server" session="visual-fixture"
