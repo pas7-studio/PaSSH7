@@ -1,7 +1,7 @@
 import {useCallback,useRef,useState,type ReactNode} from "react";
 import {Activity, Bot, CheckCircle2, Clipboard, ExternalLink, LockKeyhole, Maximize2, Minimize2, Play, RefreshCw, Server, ShieldAlert, TerminalSquare} from "lucide-react";
 import {AGENTS,type AgentKind} from "./integrations";
-import type {RemoteAgentAvailability} from "./backend";
+import type {RemoteAgentAvailability,LocalAgentAvailability} from "./backend";
 import {WorkspaceHeader,WorkspaceStatus} from "./WorkspaceChrome";
 
 export type AgentProbeState=RemoteAgentAvailability&{session:string};
@@ -11,6 +11,8 @@ type Props={
   agent:AgentKind;onAgent:(kind:AgentKind)=>void;
   availability:Partial<Record<AgentKind,AgentProbeState>>;
   checking:boolean;error:string;status:string;context:string;
+  mode:"auto"|"remote"|"local";onMode:(mode:"auto"|"remote"|"local")=>void;
+  localAvailability:Partial<Record<AgentKind,LocalAgentAvailability>>;localChecking:boolean;
   onCheck:()=>void;onLaunch:()=>void;onTerminal:()=>void;onSession:(id:string)=>void;
   onPrepareRdp:()=>void;
   liveTerminal?:boolean;onTerminalDock?:(node:HTMLDivElement|null)=>void;
@@ -74,8 +76,25 @@ export default function AgentWorkspace(p:Props){
     <div className="agentWorkspaceGrid">
       <div className="agentWorkspaceMain">
         <section className="agentSection">
-          <div className="agentSectionHead"><div><h2>Choose your assistant</h2><p>Each assistant starts in the remote terminal using that server account.</p></div>
-            <button type="button" onClick={p.onCheck} disabled={!connected||p.checking}><RefreshCw size={15}/>{p.checking?"Checking…":"Check installed tools"}</button>
+          <div className="agentSectionHead"><div><h2>Execution location</h2>
+            <p>Use an existing signed-in CLI. No provider API keys and no remote service installation.</p>
+          </div></div>
+          <div className="agentModeGrid" role="group" aria-label="Agent execution mode">
+            {([
+              ["auto","Auto · remote first","Remote CLI if installed; otherwise local CLI with our SSH tools."],
+              ["remote","Remote CLI","Run directly in the authenticated SSH terminal."],
+              ["local","Local CLI + SSH","Run your local CLI and give it scoped remote command/file tools."]
+            ] as const).map(([value,label,description])=>
+              <button key={value} type="button" aria-pressed={p.mode===value}
+                className={"agentModeOption"+(p.mode===value?" active":"")}
+                onClick={()=>p.onMode(value)}><strong>{label}</strong><small>{description}</small></button>
+            )}
+          </div>
+          {p.mode==="local"&&<p className="agentHint">The CLI runs on this computer in a separate console. Its normal built-in shell/files remain local; use passh7 remote_exec, remote_list, remote_read, remote_write for server operations. Each SSH grant is specific to the selected session.</p>}
+        </section>
+        <section className="agentSection">
+          <div className="agentSectionHead"><div><h2>Choose your assistant</h2><p>PaSSH7 checks both the remote SSH account and your local signed-in CLI installation.</p></div>
+            <button type="button" onClick={p.onCheck} disabled={!connected||p.checking||p.localChecking}><RefreshCw size={15}/>{p.checking||p.localChecking?"Checking…":"Check both machines"}</button>
           </div>
           <div className="agentCards">
             {AGENTS.map(a=>{
@@ -86,7 +105,10 @@ export default function AgentWorkspace(p:Props){
                 <strong>{a.name}</strong>
                 <small>{a.description}</small>
                 <span className="agentDetection"><WorkspaceStatus kind={detected?.installed?"connected":detected?"warning":"offline"}>
-                  {cliStatus(detected)}
+                  Remote: {cliStatus(detected)}
+                </WorkspaceStatus></span>
+                <span className="agentDetection"><WorkspaceStatus kind={p.localAvailability[a.kind]?.installed?"connected":p.localAvailability[a.kind]?"warning":"offline"}>
+                  Local: {p.localAvailability[a.kind]?.installed?"CLI verified":p.localAvailability[a.kind]?"CLI unavailable":"Not checked"}
                 </WorkspaceStatus></span>
                 {detected?.installed&&detected.version&&<span className="agentVersion" title={detected.version}>{detected.version}</span>}
               </button>;
@@ -96,14 +118,16 @@ export default function AgentWorkspace(p:Props){
         </section>
         <section className="agentSection agentLaunch">
           <div className="agentSectionHead"><div><h2>Launch {selected.name}</h2>
-              <p>Run the remote CLI in the interactive SSH console below. Desktop apps cannot display through an SSH PTY.</p>
+              <p>{p.mode==="local"?"Use your local signed-in CLI in a separate console, connected to the selected server through PaSSH7 SSH tools.":p.mode==="auto"?"Prefer remote CLI; automatically fall back to a local signed-in CLI through SSH.":"Run the signed-in remote CLI in the SSH console below."}</p>
             </div></div>
-          <div className="agentLaunchRow"><div className="agentLaunchCommand"><span>{probe?.platform==="windows"?"WINDOWS REMOTE CLI":"REMOTE SHELL"}</span>
-              <code>{probe?.installed&&probe.platform==="windows"?"Detected CLI path":p.agent}</code></div>
+          <div className="agentLaunchRow"><div className="agentLaunchCommand">
+              <span>{p.mode==="local"?"LOCAL CLI · PaSSH7 SSH tools":p.mode==="auto"?"AUTO · REMOTE THEN LOCAL":probe?.platform==="windows"?"WINDOWS REMOTE CLI":"REMOTE SHELL"}</span>
+              <code>{p.agent}</code>
+            </div>
             <button type="button" className="workspacePrimary"
-              disabled={!connected||(probe?.platform==="windows"&&!probe.installed)}
-              onClick={p.onLaunch}><Play size={16}/> Launch CLI here</button></div>
-          <p className="agentHint">{probe?.installed?"PaSSH7 detected a CLI for this SSH account.":"CLI detection distinguishes shell commands from graphical Windows apps."} Ensure the terminal is at a shell prompt before launching an agent.</p>
+              disabled={!connected||(p.mode==="remote"&&probe?.platform==="windows"&&!probe.installed)}
+              onClick={p.onLaunch}><Play size={16}/> {p.mode==="local"?"Launch local CLI":p.mode==="auto"?"Launch automatically":"Launch remote CLI"}</button></div>
+          <p className="agentHint">{p.mode==="local"?"The local CLI retains its existing login. PaSSH7 does not pass Vault credentials or tokens to a remote agent.":probe?.installed?"A CLI was detected for this SSH account; actual login is handled by that CLI.":"Detection distinguishes real terminal commands from GUI apps. Auto can use a local CLI when the remote one is absent."} {p.mode!=="local"?"Ensure the SSH terminal is at a shell prompt before launching a remote CLI.":""}</p>
           {probe&&<div className="agentDiscovery" aria-label="Remote CLI discovery">
             <div><strong>Detected platform</strong><span>{probe.platform==="windows"?"Windows SSH":probe.platform==="unix"?"Unix SSH":"Unknown"}</span></div>
             <div><strong>CLI availability</strong><span>{cliStatus(probe)}</span></div>
@@ -112,7 +136,7 @@ export default function AgentWorkspace(p:Props){
             {probe.desktopApp&&<div><strong>GUI application</strong><span>{probe.desktopApp} · Windows desktop / RDP only</span></div>}
             {probe.diagnostic&&<p>{probe.diagnostic}</p>}
           </div>}
-          {probe?.platform==="windows"&&!probe.installed&&<div className="agentInstallHelp">
+          {p.mode==="remote"&&probe?.platform==="windows"&&!probe.installed&&<div className="agentInstallHelp">
             <strong>{probe.location?"CLI launcher needs repair":probe.desktopApp?"Desktop ≠ terminal CLI":"CLI not found in this SSH account"}</strong>
             <p>{probe.location?"The executable exists, but its version check failed. Verify Node.js and this SSH account's environment before reinstalling.":"Graphical apps run in the Windows desktop session. SSH provides a text terminal, not the app's window. Use Remote Desktop (RDP) for the GUI, or install the separate CLI below."}</p>
             <div><code>{installation[p.agent].command}</code><button type="button" onClick={()=>void copyInstall()}><Clipboard size={14}/> Copy install command</button></div>
@@ -153,13 +177,13 @@ export default function AgentWorkspace(p:Props){
       </div>
       <aside className="agentWorkspaceSide">
         <section className="agentSection agentSafetyPanel"><h2><ShieldAlert size={18}/> Permissions & safety</h2>
-          <p>Remote CLIs execute with the full permissions of <strong>{p.username||"your SSH account"}</strong> on the selected host. They are not sandboxed by PaSSH7.</p>
+          <p>Remote CLI runs as <strong>{p.username||"your SSH account"}</strong>. Local CLI retains its local login but gains remote command and SFTP access through the selected authenticated SSH session. Neither mode is a sandbox.</p>
           <div className="agentSafetyRows"><div><CheckCircle2 size={16}/><span>SSH uses the host's verified fingerprint and native session.</span></div>
             <div><CheckCircle2 size={16}/><span>Your private SSH keys remain in the local encrypted Vault.</span></div>
-            <div><ShieldAlert size={16}/><span>No scoped MCP broker, command approvals or resource grants are active yet.</span></div></div>
+            <div><ShieldAlert size={16}/><span>Local CLI SSH tools use an explicit session-bound temporary grant. The agent's built-in local tools remain local; review its actions and approvals.</span></div></div>
         </section>
         <section className="agentSection"><h2>How it works</h2>
-          <ol className="agentSteps"><li>Connect to the remote host in Terminal.</li><li>Choose an agent and optionally check installation.</li><li>Launch in this embedded SSH terminal; switch workspaces without interrupting the CLI.</li></ol>
+          <ol className="agentSteps"><li>Connect to a saved host in Terminal and choose Remote, Local or Auto.</li><li>Check CLI availability on both machines (normal CLI login is reused).</li><li>Launch the remote PTY or the local CLI with temporary SSH tools. No daemon is installed on the host.</li></ol>
           <button type="button" onClick={p.onTerminal}><TerminalSquare size={15}/> View SSH sessions</button>
         </section>
       </aside>
