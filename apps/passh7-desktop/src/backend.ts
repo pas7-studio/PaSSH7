@@ -1,7 +1,7 @@
 import {invoke} from "@tauri-apps/api/core";
 
 export type HostSummary = {
-  alias:string; hostname:string; port:number; username:string;
+  alias:string; displayName:string|null; hostname:string; port:number; username:string;
   identityAlias:string; hostKeyPinned:boolean; hasSavedCredentials:boolean; savedAuthMode:string|null; backupDirectory:string|null; jumpAlias:string|null;
 };
 export type AddHostInput = {
@@ -79,7 +79,7 @@ export async function addHost(host:AddHostInput):Promise<void>{
 }
 
 export type UpdateHostInput={
-  alias:string;hostname:string;port:number;username:string;identityAlias:string;
+  alias:string;displayName:string;hostname:string;port:number;username:string;identityAlias:string;
   resetHostKey:boolean;forgetCredentials:boolean;
 };
 export async function updateHost(host:UpdateHostInput):Promise<void>{
