@@ -1796,10 +1796,20 @@ export default function App(){
         </div>
         <p className="note">Update connection settings stored in your encrypted Vault. The saved host name
           <strong> {editTarget.alias}</strong> remains unchanged so gateway references stay valid.</p>
-        {sshTabs.some(t=>t.alias===editTarget.alias)&&<div className="workspaceError" role="alert">
-          Disconnect {sshTabs.filter(t=>t.alias===editTarget.alias).length} SSH session(s) for this host before saving changes.
-          Your active shells will not be closed automatically.
+        {sshTabs.some(t=>t.alias===editTarget.alias)&&<div className="workspaceError editConnectionSessions" role="alert">
+          <strong>Disconnect active SSH sessions to edit this host</strong>
+          <small>Running shells and session-bound tunnels must be closed first. Each disconnect requires confirmation.</small>
+          <div>{sshTabs.filter(t=>t.alias===editTarget.alias).map((session,index)=>
+            <button type="button" key={session.id} disabled={closingSessions.includes(session.id)}
+              onClick={()=>requestDisconnect(session.id)}>
+              {closingSessions.includes(session.id)?"Disconnecting…":"Disconnect SSH #"+(index+1)}
+            </button>)}</div>
         </div>}
+        {hosts.some(host=>host.jumpAlias===editTarget.alias&&sshTabs.some(tab=>tab.alias===host.id))&&
+          <div className="workspaceError editConnectionSessions" role="alert">
+            This host is serving as a gateway for connected private SSH targets.
+            Disconnect downstream SSH sessions before saving gateway changes.
+          </div>}
         <div className="wizardFields">
           <label>Host ID (used by SSH gateway routing)<input value={editTarget.alias} disabled
             title="Host IDs remain stable. Create a new host if you need a different alias."/></label>
@@ -1837,7 +1847,8 @@ export default function App(){
         </div>
         <div className="wizardActions">
           <button type="button" disabled={editBusy} onClick={()=>{setEditTarget(null);setEditError("")}}>Cancel</button>
-          <button type="submit" className="primary" disabled={editBusy||sshTabs.some(t=>t.alias===editTarget.alias)}>
+          <button type="submit" className="primary" disabled={editBusy||sshTabs.some(t=>t.alias===editTarget.alias)||
+            hosts.some(host=>host.jumpAlias===editTarget.alias&&sshTabs.some(tab=>tab.alias===host.id))}>
             {editBusy?"Saving securely…":"Save SSH connection"}
           </button>
         </div>
