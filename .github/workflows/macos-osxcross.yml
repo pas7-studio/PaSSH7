@@ -12,29 +12,48 @@ concurrency:
   group: passh7-osxcross-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  macos-cross:
+  macos-arm64-cross:
     runs-on: [self-hosted, passh7, passh7-linux]
     timeout-minutes: 120
+    env:
+      CARGO_INCREMENTAL: '0'
+      PASSH7_MACOS_TARGET: aarch64-apple-darwin
+      PASSH7_MACOS_SDK_URL: https://github.com/joseluisq/macosx-sdks/releases/download/15.5/MacOSX15.5.sdk.tar.xz
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Probe Ubuntu osxcross prerequisites
+      - name: Install Linux osxcross dependencies
         shell: bash
         run: |
           set -euo pipefail
-          uname -a
-          command -v cargo || true
-          command -v rustup || true
-          command -v clang || true
-          command -v docker || true
-          command -v file || true
-          docker info --format '{{.ServerVersion}}' 2>&1 || true
-          for path in /opt/osxcross/target/bin /opt/osxcross/bin /usr/local/osxcross/target/bin /usr/local/osxcross/bin; do
-            if test -d "$path"; then echo "Installed osxcross: $path"; ls "$path" | head -15; fi
-          done
-          for base in /opt /usr/local /home/runner /home/oai; do
-            if test -d "$base"; then
-              find "$base" -maxdepth 4 \( -type f -name 'MacOSX*.sdk.tar.*' -o -type d -name 'MacOSX*.sdk' \) -print 2>/dev/null | head -12 || true
-            fi
-          done
+          sudo -n apt-get update -qq
+          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            clang llvm lld git make patch sed tar gzip xz-utils bzip2 cpio curl \
+            python3 cmake libxml2-dev libssl-dev zlib1g-dev liblzma-dev libbz2-dev file
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify SDK archive fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          checksum="$(curl -fsSL https://github.com/joseluisq/macosx-sdks/releases/download/15.5/sha256sum.txt)"
+          echo "$checksum" | grep -F 'MacOSX15.5.sdk.tar.xz'
+          digest="$(echo "$checksum" | grep -F 'MacOSX15.5.sdk.tar.xz' | awk '{print $1}')"
+          echo "$digest" | grep -Eq '^[a-fA-F0-9]{64}$'
+          echo "PASSH7_MACOS_SDK_SHA256=$digest" >> "$GITHUB_ENV"
+      - name: Build PaSSH7 Darwin arm64 with osxcross
+        shell: bash
+        run: bash apps/passh7-desktop/scripts/build-macos-osxcross.sh
+      - name: Upload unsigned experimental macOS app
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PaSSH7-macOS-arm64-osxcross-EXPERIMENTAL
+          path: apps/passh7-desktop/macos-experimental/PaSSH7-macOS-arm64-unsigned-experimental.zip
+          if-no-files-found: error
+          retention-days: 14
