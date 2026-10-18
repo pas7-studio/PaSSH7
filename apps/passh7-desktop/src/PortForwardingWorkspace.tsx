@@ -16,6 +16,19 @@ export default function PortForwardingWorkspace(p:Props){
   const valid=p.localPort>=1&&p.localPort<=65535&&p.remotePort>=1&&p.remotePort<=65535
     &&p.remoteHost.trim().length>0&&p.remoteHost.length<=253&&!/[\r\n\s"';&|$<>]/.test(p.remoteHost);
   const current=p.forwards.filter(t=>p.sessions.includes(t.session));
+  const portConflict=p.forwards.find(t=>t.localPort===p.localPort);
+  const presets=[
+    {name:"Web app",local:18080,remote:8080,description:"HTTP service"},
+    {name:"PostgreSQL",local:15432,remote:5432,description:"Database client"},
+    {name:"Redis",local:16379,remote:6379,description:"Cache client"},
+    {name:"Windows RDP",local:13389,remote:3389,description:"Remote Desktop"}
+  ] as const;
+  const applyPreset=(preset:typeof presets[number])=>{
+    p.onLocalPort(preset.local);
+    p.onRemoteHost("127.0.0.1");
+    p.onRemotePort(preset.remote);
+    setNotice(preset.name+" preset applied. Review the target, then start forwarding.");
+  };
   const chosen=current.find(t=>t.session+":"+t.localPort===selected)||current[0];
   const copy=async(text:string)=>{
     try{await navigator.clipboard.writeText(text);setNotice("Local address copied.")}
@@ -33,6 +46,13 @@ export default function PortForwardingWorkspace(p:Props){
       <section className="forwardForm">
         <h2><Plus size={17}/> New local forward</h2>
         <p>PaSSH7 listens on your computer and sends connections through the selected authenticated SSH session.</p>
+        <div className="forwardPresets" aria-label="Common SSH tunnel configurations">
+          <span>QUICK PRESETS</span>
+          <div>{presets.map(preset=><button type="button" key={preset.name}
+            title={preset.description+" · 127.0.0.1:"+preset.local+" → "+preset.remote}
+            onClick={()=>applyPreset(preset)}>{preset.name}</button>)}</div>
+          <small>Presets only fill the form; nothing starts until you confirm. Remote 127.0.0.1 is the SSH server's own loopback, not your computer.</small>
+        </div>
         <div className="forwardBindAddress"><ShieldCheck size={15}/><span>Local interface</span><strong>127.0.0.1</strong><small>Fixed · loopback only</small></div>
         <label>Local TCP port<input type="number" min={1} max={65535} value={p.localPort} onChange={e=>p.onLocalPort(Number(e.target.value))}/></label>
         <label>Remote destination host<input value={p.remoteHost} maxLength={253} onChange={e=>p.onRemoteHost(e.target.value)}
@@ -40,7 +60,10 @@ export default function PortForwardingWorkspace(p:Props){
         <label>Remote destination port<input type="number" min={1} max={65535} value={p.remotePort} onChange={e=>p.onRemotePort(Number(e.target.value))}/></label>
         <div className="forwardRoutePreview"><span>FORWARD ROUTE</span><code>127.0.0.1:{p.localPort||"—"}</code>
           <span aria-hidden="true">→ SSH →</span><code>{p.remoteHost.trim()||"remote host"}:{p.remotePort||"—"}</code></div>
-        <button className="workspacePrimary" disabled={!p.connected||p.busy||!valid} onClick={p.onStart}>
+        {portConflict&&<div className="forwardConflict" role="alert">
+          <ShieldCheck size={15}/> Local port {p.localPort} already has a forward on {portConflict.session===p.session?"this SSH session":"another SSH session"}. Choose another local port to avoid a listener conflict.
+        </div>}
+        <button className="workspacePrimary" disabled={!p.connected||p.busy||!valid||!!portConflict} onClick={p.onStart}>
           <Plus size={15}/>{p.busy?"Working…":"Start forwarding"}
         </button>
         {!p.connected&&<div className="forwardNotice"><LockKeyhole size={17}/>
