@@ -158,7 +158,7 @@ export default function AgentWorkspace(p:Props){
           <div className="agentSectionHead"><div><h2>Active local CLI access</h2>
             <p>These are live SSH tool grants, not provider logins. Each grant is bound to one SSH session. Revoking access leaves the local CLI window open.</p></div></div>
           {!p.localConnections.length?<p className="agentHint">No local CLI has active SSH access. Launch a local assistant above to issue a temporary grant.</p>:
-            p.localConnections.map(item=><div className="agentLaunchRow" key={item.id}>
+            <div className="agentGrantRows">{p.localConnections.map(item=><div className="agentLaunchRow" key={item.id}>
               <div className="agentLaunchCommand">
                 <span>{item.host} · {item.sessionId===p.sessionId?"CURRENT SSH SESSION":"OTHER SSH SESSION"}</span>
                 <code>{AGENTS.find(a=>a.kind===item.agent)?.name??item.agent}</code>
@@ -167,7 +167,7 @@ export default function AgentWorkspace(p:Props){
               <button type="button" disabled={p.localRevoking===item.id} onClick={()=>p.onRevokeLocal(item.id)}>
                 <LockKeyhole size={15}/>{p.localRevoking===item.id?"Revoking…":"Revoke SSH access"}
               </button>
-            </div>)}
+            </div>)}</div>}
           {p.localConnections.length>0&&<p className="agentHint">Revocation rejects new remote commands and file operations. It cannot undo or guarantee cancellation of work already running on the SSH host.</p>}
         </section>
         {(p.liveTerminal||p.terminalPreview)&&connected&&<section className="agentSection agentEmbeddedTerminal" aria-label="Live agent SSH terminal">
