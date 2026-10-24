@@ -2,7 +2,7 @@ import {useEffect,useRef} from "react";
 import {Terminal} from "@xterm/xterm";
 import {FitAddon} from "@xterm/addon-fit";
 import {subscribeSshSession} from "./sshEventBus";
-import {closeSshSession,readySshSession,resizeSshSession,writeSshSession} from "./backend";
+import {closeSshSession,readySshSession,resizeSshSession,writeSshSession,readTerminalClipboard,desktopAvailable} from "./backend";
 import "@xterm/xterm/css/xterm.css";
 import {loadPreferences,type AppPreferences} from "./preferences";
 
@@ -125,6 +125,45 @@ export default function TerminalView({id,active,layoutKey,onClosed}:Props){
     // on blur before that action is enqueued in the shared session FIFO.
     const keyboardInput=node.querySelector(".xterm-helper-textarea");
     keyboardInput?.addEventListener("blur",input.flush);
+    // WebView2/xterm can turn Ctrl+V into the literal PTY control byte ^V.
+    // Capture BEFORE xterm's own key handler, then use xterm.paste() so
+    // multiline pastes respect its bracketed-paste mode and ordered input FIFO.
+    // Shift+Insert, Ctrl+Shift+V and Cmd+V use exactly the same path.
+    let pasteInFlight=false;
+    const pasteFromClipboard=async()=>{
+      if(pasteInFlight||!live)return;
+      pasteInFlight=true;
+      try{
+        let text:string;
+        if(desktopAvailable()){
+          try{text=await readTerminalClipboard();}
+          catch{ text=await navigator.clipboard.readText(); }
+        }else{text=await navigator.clipboard.readText();}
+        if(live&&text)terminal.paste(text);
+      }catch{
+        if(live)terminal.writeln("\r\n[PaSSH7: Cannot read clipboard. Allow paste permission or use the system Paste menu.]");
+      }finally{pasteInFlight=false;}
+    };
+    const onTerminalKeyDown=(event:KeyboardEvent)=>{
+      const key=event.key.toLowerCase();
+      const ctrlPaste=(event.ctrlKey||event.metaKey)&&!event.altKey&&key==="v";
+      const insertPaste=event.shiftKey&&!event.ctrlKey&&!event.altKey&&key==="insert";
+      if(!ctrlPaste&&!insertPaste)return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      void pasteFromClipboard();
+    };
+    const onTerminalPaste=(event:ClipboardEvent)=>{
+      const text=event.clipboardData?.getData("text/plain");
+      if(!text)return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      terminal.paste(text);
+    };
+    node.addEventListener("keydown",onTerminalKeyDown,true);
+    node.addEventListener("paste",onTerminalPaste,true);
 
     // The SSH event stream is base64 because it contains arbitrary PTY bytes,
     // including non-UTF-8 data and ANSI controls. xterm parses Uint8Array
@@ -202,6 +241,8 @@ export default function TerminalView({id,active,layoutKey,onClosed}:Props){
     return ()=>{
       window.removeEventListener("passh7:preferences",onPreferences);
       keyboardInput?.removeEventListener("blur",input.flush);
+      node.removeEventListener("keydown",onTerminalKeyDown,true);
+      node.removeEventListener("paste",onTerminalPaste,true);
       input.dispose();
       live=false;
       flushOutput();
