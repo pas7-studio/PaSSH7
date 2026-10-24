@@ -202,7 +202,7 @@ export default function ReferenceScreens(){
               diagnostic:"No CLI found for this Windows SSH account."}
           }} checking={false} error="" status="" launching={false}
           mode="remote" onMode={()=>{}} localAvailability={{}} localChecking={false}
-          localConnections={[]} localRevoking="" onRevokeLocal={()=>{}}
+          localConnections={[]} localRevoking="" onRevokeLocal={()=>{}} onRestoreLocal={()=>{}}
           context={"Host: dev-server\nTarget: deploy@192.0.2.10\nVisual fixture: no agent is launched"}
           terminalPreview={<div className="agentDevTerminalPreview" aria-label="Development-only illustrative agent terminal">
             <small>DEV UI FIXTURE · Not a live SSH connection</small>
