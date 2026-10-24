@@ -1,7 +1,7 @@
 name: Windows cross-build on Linux self-hosted
 on:
   push:
-    branches: [main, fix/local-agent-grant-recovery]
+    branches: [main, fix/local-agent-grant-recovery, fix/vault-resume-and-terminal-paste]
     paths:
       - 'apps/passh7-desktop/**'
       - 'crates/passh7-core/**'
