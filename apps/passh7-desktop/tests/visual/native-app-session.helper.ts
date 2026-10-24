@@ -89,7 +89,7 @@ export async function runNativeAppSession(page:Page){
         case "local_agent_launch":
           localAgentLaunches.push({id:String(args.id),agent:String(args.agent)});
           return "Launched local "+String(args.agent)+" with SSH tool access";
-        case "local_agent_connections":return mockGrants;
+        case "local_agent_connections":return mockGrants.map(grant=>({...grant}));
         case "local_agent_reauthorize":{
           const grant=mockGrants.find(g=>g.id===args.id);
           const target=sessions.find(s=>s.id===args.sessionId);
