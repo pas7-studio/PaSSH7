@@ -254,6 +254,11 @@ export async function controlDockerContainer(sessionId:string,containerId:string
   return invoke<string>("ssh_session_docker_action",{id:sessionId,containerId,action});
 }
 
+/** Configures the bounded native Vault idle lock. This is a local UI policy,
+ * never extended by remote CLI or SSH background activity. */
+export async function setVaultIdleTimeout(minutes:15|30|60|240|480):Promise<number>{
+  return invoke<number>("vault_set_idle_timeout",{minutes});
+}
 export type LocalAgentAvailability={installed:boolean;path:string|null;diagnostic:string};
 export async function probeLocalAgent(agent:"codex"|"claude"|"opencode"):Promise<LocalAgentAvailability>{
   return invoke<LocalAgentAvailability>("local_agent_probe",{agent});
@@ -265,9 +270,15 @@ export async function launchLocalAgent(agent:"codex"|"claude"|"opencode",session
 export type LocalAgentConnection={
   id:string;agent:"codex"|"claude"|"opencode";
   sessionId:string;host:string;ageSeconds:number;
+  status:"active"|"expired"|"disconnected";
 };
 export async function listLocalAgentConnections():Promise<LocalAgentConnection[]>{
   return invoke<LocalAgentConnection[]>("local_agent_connections");
+}
+/** Only the desktop user can restore the original process token to an SSH
+ * session on the same saved host. Never returns secret grant material. */
+export async function reauthorizeLocalAgentConnection(id:string,sessionId:string):Promise<boolean>{
+  return invoke<boolean>("local_agent_reauthorize",{id,sessionId});
 }
 /** Revokes SSH tool access only. Does not close or kill the local CLI console. */
 export async function revokeLocalAgentConnection(id:string):Promise<boolean>{

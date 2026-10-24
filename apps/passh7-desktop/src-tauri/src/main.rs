@@ -3,14 +3,19 @@ mod ssh_sessions;
 mod local_agent_bridge;
 
 mod openssh_config;
-use std::{io::{BufReader, Read}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
+use std::{io::{BufReader, Read}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::{Mutex,atomic::{AtomicU32,Ordering}}, time::{Duration, Instant}};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 use tauri::State;
 use ssh_sessions::SshSessionManager;
 use passh7_core::{HostProfile, HubError, Identity};
 
+#[cfg(test)]
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+static VAULT_IDLE_MINUTES:AtomicU32=AtomicU32::new(15);
+fn current_idle_timeout()->Duration{
+    Duration::from_secs(VAULT_IDLE_MINUTES.load(Ordering::Relaxed) as u64*60)
+}
 
 #[derive(Default)]
 struct PendingVaultRestore(Mutex<Option<BackupCandidate>>);
@@ -106,7 +111,7 @@ impl SessionStore {
     fn use_password<T>(&self, operation: impl FnOnce(&str) -> Result<T, String>) -> Result<T, String> {
         let mut guard = self.0.lock().map_err(|_| "Vault session unavailable")?;
         let session = guard.as_mut().ok_or("Vault is locked")?;
-        if session.last_used.elapsed() >= IDLE_TIMEOUT {
+        if session.last_used.elapsed() >= current_idle_timeout() {
             *guard = None;
             return Err("Vault session expired".into());
         }
@@ -124,7 +129,7 @@ impl SessionStore {
     fn touch_if_live(&self)->Result<bool,String>{
         let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
         let Some(session)=guard.as_mut() else{return Ok(false)};
-        if session.last_used.elapsed()>=IDLE_TIMEOUT{
+        if session.last_used.elapsed()>=current_idle_timeout(){
             *guard=None;
             return Ok(false);
         }
@@ -137,7 +142,7 @@ impl SessionStore {
     pub(crate) fn live_without_touch(&self)->Result<bool,String>{
         let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
         match guard.as_ref(){
-            Some(session) if session.last_used.elapsed()<IDLE_TIMEOUT=>Ok(true),
+            Some(session) if session.last_used.elapsed()<current_idle_timeout()=>Ok(true),
             _=>{
                 *guard=None;
                 Ok(false)
@@ -543,10 +548,21 @@ fn vault_touch(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManag
     Ok(active)
 }
 
+/// Only explicit user-selected idle policies are accepted; a local coding CLI
+/// cannot extend this timer through its MCP calls or SSH keepalives.
+#[tauri::command]
+fn vault_set_idle_timeout(minutes:u32)->Result<u32,String>{
+    if ![15,30,60,240,480].contains(&minutes){
+        return Err("Vault auto-lock must be 15, 30, 60, 240 or 480 minutes".into());
+    }
+    VAULT_IDLE_MINUTES.store(minutes,Ordering::Relaxed);
+    Ok(minutes)
+}
+
 #[tauri::command]
 fn vault_status(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool, String> {
     let mut guard = sessions.0.lock().map_err(|_| "Vault session unavailable")?;
-    if guard.as_ref().is_some_and(|s| s.last_used.elapsed() >= IDLE_TIMEOUT) { *guard = None; ssh.stop_all(); }
+    if guard.as_ref().is_some_and(|s| s.last_used.elapsed() >= current_idle_timeout()) { *guard = None; ssh.stop_all(); }
     Ok(guard.is_some())
 }
 #[tauri::command]
@@ -1309,11 +1325,11 @@ fn main() {
         .manage(SshSessionManager::default())
         .manage(local_agent_bridge::LocalAgentBridge::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_set_idle_timeout,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_update_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
-            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_inspect,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_exec,local_agent_bridge::local_agent_probe,local_agent_bridge::local_agent_launch,local_agent_bridge::local_agent_connections,local_agent_bridge::local_agent_revoke,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_read_image,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
+            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_inspect,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_exec,local_agent_bridge::local_agent_probe,local_agent_bridge::local_agent_launch,local_agent_bridge::local_agent_connections,local_agent_bridge::local_agent_reauthorize,local_agent_bridge::local_agent_revoke,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_read_image,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");

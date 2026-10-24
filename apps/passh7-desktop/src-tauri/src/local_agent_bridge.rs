@@ -15,13 +15,35 @@ use crate::{SessionStore,ssh_sessions::SshSessionManager};
 
 const MAX_RPC:usize=2*1024*1024;
 const GRANT_MAX_AGE:Duration=Duration::from_secs(12*3600);
+// A suspended CLI can be manually re-authorized within two days. Beyond that
+// a fresh launch is required; never extend grants implicitly from MCP calls.
+const GRANT_RECOVERY_WINDOW:Duration=Duration::from_secs(48*3600);
 type Grants=Arc<Mutex<HashMap<String,Grant>>>;
-struct Grant{id:String,agent:String,session:String,created:Instant}
+struct Grant{id:String,agent:String,session:String,host:String,created:Instant}
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct LocalAgentConnection{
     id:String,agent:String,session_id:String,host:String,age_seconds:u64,
+    /// active | expired | disconnected; never contains the secret bridge token.
+    status:String,
 }
+/// Renew a previously issued token only through explicit desktop approval,
+/// and never for a different saved SSH host.
+fn reauthorize_grant_by_id(grants:&Grants,id:&str,session:&str,host:&str)->Result<bool,String>{
+    let mut guard=grants.lock().map_err(|_|"Local CLI grants unavailable")?;
+    let grant=guard.values_mut().find(|grant|grant.id==id)
+        .ok_or("This CLI grant was revoked or PaSSH7 restarted. Launch a new local CLI session.")?;
+    if grant.created.elapsed()>GRANT_RECOVERY_WINDOW{
+        return Err("The recovery window ended. Launch a new local CLI session.".into());
+    }
+    if grant.host!=host{
+        return Err("Cannot move local agent access to another host. Select an SSH session for the original host.".into());
+    }
+    grant.session=session.to_owned();
+    grant.created=Instant::now();
+    Ok(true)
+}
+
 fn revoke_grant_by_id(grants:&Grants,id:&str)->Result<bool,String>{
     let mut guard=grants.lock().map_err(|_|"Local CLI grants unavailable")?;
     let Some(token)=guard.iter().find_map(|(token,grant)|
@@ -121,8 +143,11 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
             .map_err(|_|"Invalid local bridge request".to_owned())?;
         let session={
             let guard=grants.lock().map_err(|_|"Local bridge unavailable".to_owned())?;
-            let grant=guard.get(&req.token).ok_or("Local agent grant is revoked")?;
-            if grant.created.elapsed()>GRANT_MAX_AGE{return Err("Local agent grant expired".into());}
+            let grant=guard.get(&req.token).ok_or(
+                "Local agent SSH access was revoked or PaSSH7 was restarted. Open AI Agents in PaSSH7 and launch a new local CLI session.")?;
+            if grant.created.elapsed()>GRANT_MAX_AGE{
+                return Err("Local agent SSH access expired. In PaSSH7 > AI Agents, select the original SSH host and choose Restore SSH access.".into());
+            }
             grant.session.clone()
         };
         // A CLI can stay open for hours. An existing grant must not bypass
@@ -130,7 +155,7 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
         // Crucially, this check never refreshes the local activity timer.
         if !app.state::<SessionStore>().live_without_touch()?{
             ssh.stop_all();
-            return Err("Vault locked or expired; unlock it and start a new local agent session".into());
+            return Err("Vault locked or expired. Unlock Vault, reconnect the same SSH host, then choose Restore SSH access in AI Agents.".into());
         }
         let result=match req.op.as_str(){
             "exec"=>{
@@ -165,9 +190,9 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
 }
 async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&str,agent:&str,app:tauri::AppHandle)->Result<(SocketAddr,String),String>{
     // Validate the session before generating a grant.
-    if !ssh.active_sessions()?.iter().any(|live|live.id==session){
-        return Err("Select a live authenticated SSH session".into());
-    }
+    let live=ssh.active_sessions()?;
+    let owner=live.iter().find(|live|live.id==session)
+        .ok_or("Select a live authenticated SSH session")?;
     let mut address=bridge.address.lock().await;
     let addr=if let Some(addr)=*address{addr}else{
         let listener=TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST,0)).await
@@ -192,33 +217,58 @@ async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&s
     let launch_id=format!("{:032x}",rand::random::<u128>());
     bridge.grants.lock().map_err(|_|"Cannot issue local CLI grant")?
         .insert(token.clone(),Grant{id:launch_id,agent:agent.to_owned(),
-            session:session.to_owned(),created:Instant::now()});
+            session:session.to_owned(),host:owner.alias.clone(),created:Instant::now()});
     Ok((addr,token))
 }
 
-/// List only current, unexpired SSH capabilities, never raw bridge tokens.
-/// A native SSH disconnect or Vault lock makes the corresponding grants unusable.
+/// List non-secret grant status. SSH disconnect, Vault lock, and the twelve-hour
+/// lease all DENY remote operations, but keep a bounded recovery record so that
+/// the *same* local CLI can be explicitly re-authorized without losing context.
+/// Explicit Revoke still deletes the token permanently.
 #[tauri::command]
 pub fn local_agent_connections(bridge:State<'_,LocalAgentBridge>,
     ssh:State<'_,SshSessionManager>,vault:State<'_,SessionStore>
 )->Result<Vec<LocalAgentConnection>,String>{
     if !vault.live_without_touch()?{
         ssh.stop_all();
-        bridge.grants.lock().map_err(|_|"Local CLI grants unavailable")?.clear();
-        return Ok(Vec::new());
+        return Ok(Vec::new()); // No host details while locked; grants remain unusable.
     }
     let active=ssh.active_sessions()?;
     let mut guard=bridge.grants.lock().map_err(|_|"Local CLI grants unavailable")?;
-    guard.retain(|_,grant|grant.created.elapsed()<=GRANT_MAX_AGE
-        &&active.iter().any(|session|session.id==grant.session));
-    let mut items=guard.values().filter_map(|grant|{
-        let host=active.iter().find(|session|session.id==grant.session)?.alias.clone();
-        Some(LocalAgentConnection{id:grant.id.clone(),agent:grant.agent.clone(),
-            session_id:grant.session.clone(),host,
-            age_seconds:grant.created.elapsed().as_secs()})
+    guard.retain(|_,grant|grant.created.elapsed()<=GRANT_RECOVERY_WINDOW);
+    let mut items=guard.values().map(|grant|{
+        let connected=active.iter().any(|s|s.id==grant.session && s.alias==grant.host);
+        let status=if grant.created.elapsed()>GRANT_MAX_AGE{
+            "expired"
+        }else if !connected{
+            "disconnected"
+        }else{"active"};
+        LocalAgentConnection{id:grant.id.clone(),agent:grant.agent.clone(),
+            session_id:grant.session.clone(),host:grant.host.clone(),
+            age_seconds:grant.created.elapsed().as_secs(),status:status.to_owned()}
     }).collect::<Vec<_>>();
     items.sort_by(|a,b|a.host.cmp(&b.host).then(a.agent.cmp(&b.agent)));
     Ok(items)
+}
+
+/// Explicit desktop-user action. Rebind only to a new/live session of the SAME
+/// host. The original token stays in its existing local CLI process; it is
+/// never returned over IPC, persisted or re-enabled after explicit Revoke.
+#[tauri::command]
+pub fn local_agent_reauthorize(id:String,session_id:String,
+    bridge:State<'_,LocalAgentBridge>,ssh:State<'_,SshSessionManager>,
+    vault:State<'_,SessionStore>
+)->Result<bool,String>{
+    if id.len()!=32||!id.as_bytes().iter().all(u8::is_ascii_hexdigit){
+        return Err("Invalid local agent grant identifier".into());
+    }
+    if !vault.touch_if_live()?{
+        return Err("Unlock Vault before restoring local agent SSH access".into());
+    }
+    let active=ssh.active_sessions()?;
+    let target=active.iter().find(|session|session.id==session_id)
+        .ok_or("Select a connected SSH session before restoring access")?;
+    reauthorize_grant_by_id(&bridge.grants,&id,&target.id,&target.alias)
 }
 /// Removing a grant blocks all subsequent MCP calls from that local console.
 /// It intentionally leaves the user's independently signed-in CLI running.
@@ -432,10 +482,12 @@ pub async fn local_agent_launch(agent:String,id:String,app:tauri::AppHandle,
     let child=cmd.spawn().map_err(|e|format!("Cannot open local CLI terminal: {e}"));
     match child{
         Ok(mut child)=>{
-            let grants=bridge.grants.clone();
             std::thread::spawn(move||{
                 let _=child.wait();
-                if let Ok(mut active)=grants.lock(){active.remove(&token);}
+                // PowerShell/cmd launchers may exit before the interactive CLI
+                // or its MCP child. Do NOT revoke the grant on wrapper exit:
+                // it stays bound to the verified SSH host and live Vault,
+                // expires after GRANT_MAX_AGE and remains explicitly revocable.
                 cleanup_local_launch(config.as_deref(),&workspace);
             });
             Ok(format!("Launched local {agent} CLI in a separate console with SSH tool access to the selected authenticated session. Local CLI login remains unchanged."))
@@ -598,11 +650,13 @@ mod tests{
         let item=LocalAgentConnection{
             id:"a".repeat(32),agent:"opencode".into(),
             session_id:"ssh-123".into(),host:"development".into(),age_seconds:5,
+            status:"active".into(),
         };
         let text=serde_json::to_string(&item).unwrap();
         let value:Value=serde_json::from_str(&text).unwrap();
         assert_eq!(value["sessionId"],"ssh-123");
         assert_eq!(value["ageSeconds"],5);
+        assert_eq!(value["status"],"active");
         assert!(value.get("token").is_none());
         assert!(!text.contains("PASSH7_BRIDGE_TOKEN"));
     }
@@ -614,9 +668,9 @@ mod tests{
         {
             let mut guard=grants.lock().unwrap();
             guard.insert("private-secret-1".into(),Grant{id:first.clone(),
-                agent:"codex".into(),session:"ssh-a".into(),created:Instant::now()});
+                agent:"codex".into(),session:"ssh-a".into(),host:"alpha".into(),created:Instant::now()});
             guard.insert("private-secret-2".into(),Grant{id:second.clone(),
-                agent:"claude".into(),session:"ssh-b".into(),created:Instant::now()});
+                agent:"claude".into(),session:"ssh-b".into(),host:"beta".into(),created:Instant::now()});
         }
         assert!(revoke_grant_by_id(&grants,&first).unwrap());
         assert!(!revoke_grant_by_id(&grants,&first).unwrap());
@@ -624,6 +678,34 @@ mod tests{
         assert_eq!(current.len(),1);
         assert!(current.contains_key("private-secret-2"));
         assert!(!current.contains_key("private-secret-1"));
+    }
+    #[test]
+    fn expired_grant_is_recoverable_only_on_its_original_host(){
+        let grants:Grants=Arc::new(Mutex::new(HashMap::new()));
+        let id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned();
+        grants.lock().unwrap().insert("secret-in-cli-process".into(),Grant{
+            id:id.clone(),agent:"codex".into(),session:"old-ssh".into(),
+            host:"production".into(),created:Instant::now()-Duration::from_secs(13*3600)
+        });
+        assert!(reauthorize_grant_by_id(&grants,&id,"new-ssh","other-host").is_err());
+        assert!(reauthorize_grant_by_id(&grants,&id,"new-ssh","production").unwrap());
+        let locked=grants.lock().unwrap();
+        let grant=locked.get("secret-in-cli-process").unwrap();
+        assert_eq!(grant.session,"new-ssh");
+        assert!(grant.created.elapsed()<Duration::from_secs(2));
+        assert_eq!(grant.host,"production");
+    }
+    #[test]
+    fn explicitly_revoked_or_stale_grants_cannot_be_restored(){
+        let grants:Grants=Arc::new(Mutex::new(HashMap::new()));
+        let id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned();
+        grants.lock().unwrap().insert("old".into(),Grant{
+            id:id.clone(),agent:"claude".into(),session:"ssh-a".into(),
+            host:"alpha".into(),created:Instant::now()-Duration::from_secs(50*3600)
+        });
+        assert!(reauthorize_grant_by_id(&grants,&id,"ssh-b","alpha").is_err());
+        assert!(revoke_grant_by_id(&grants,&id).unwrap());
+        assert!(reauthorize_grant_by_id(&grants,&id,"ssh-b","alpha").is_err());
     }
     #[test]
     fn codex_explicitly_forwards_ephemeral_bridge_vars_without_values(){

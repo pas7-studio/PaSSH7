@@ -24,6 +24,8 @@ export async function runNativeAppSession(page:Page){
     const delayedSftp:Array<()=>void>=[];
     const agentProbes:Array<{id:string;agent:string}>=[];
     const localAgentLaunches:Array<{id:string;agent:string}>=[];
+    const mockGrants:Array<{id:string;agent:"codex"|"claude"|"opencode";sessionId:string;host:string;ageSeconds:number;status:"active"|"expired"|"disconnected"}>=[];
+    const restoredGrants:Array<{id:string;sessionId:string}>=[];
     const localAgentProbes:string[]=[];
     const delayedForwards:Array<()=>void>=[];
     const forwards=new Map<string,Array<{localPort:number;targetHost:string;remotePort:number}>>();
@@ -87,6 +89,20 @@ export async function runNativeAppSession(page:Page){
         case "local_agent_launch":
           localAgentLaunches.push({id:String(args.id),agent:String(args.agent)});
           return "Launched local "+String(args.agent)+" with SSH tool access";
+        case "local_agent_connections":return mockGrants.map(grant=>({...grant}));
+        case "local_agent_reauthorize":{
+          const grant=mockGrants.find(g=>g.id===args.id);
+          const target=sessions.find(s=>s.id===args.sessionId);
+          if(!grant||!target||grant.host!==target.alias)throw Error("Same-host grant only");
+          grant.sessionId=target.id;grant.status="active";grant.ageSeconds=0;
+          restoredGrants.push({id:grant.id,sessionId:target.id});
+          return true;
+        }
+        case "local_agent_revoke":{
+          const i=mockGrants.findIndex(g=>g.id===args.id);
+          if(i<0)return false;
+          mockGrants.splice(i,1);return true;
+        }
         case "ssh_session_agent_probe":
           agentProbes.push({id:String(args.id),agent:String(args.agent)});
           if(args.agent==="codex")return {installed:true,version:"codex test v1",
@@ -133,7 +149,10 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_INTERNALS__=mock;
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
-      writes,resized,ready,exports,agentProbes,localAgentProbes,localAgentLaunches,
+      writes,resized,ready,exports,agentProbes,localAgentProbes,localAgentLaunches,restoredGrants,
+      addGrant(){mockGrants.push({id:"cccccccccccccccccccccccccccccccc",
+        agent:"codex",sessionId:"session-a",host:"linux-test",
+        ageSeconds:13*3600,status:"expired"});},
       localTouches(){return localTouches;},
       failDockerList(message:string){dockerListFailure=message;},
       pendingForwards(){return delayedForwards.length;},
@@ -452,5 +471,31 @@ export async function runNativeAppSession(page:Page){
   await page.getByRole("dialog",{name:"Edit SSH connection"})
     .getByRole("button",{name:"Close",exact:true}).click();
   await expect(editor).not.toBeVisible();
+  // Recovery is an explicit user action; wrong-host SSH never inherits it.
+  await page.evaluate(()=>{
+    (window as unknown as {__mockSshBridge:{addGrant:()=>void}}).__mockSshBridge.addGrant();
+  });
+  await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
+  await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
+  const grants=page.getByRole("region",{name:"Local CLI SSH grants"});
+  await expect(grants).toContainText("GRANT EXPIRED");
+  await expect(grants.getByRole("button",{name:"Restore SSH access"})).toBeVisible();
+  await page.evaluate(()=>{window.confirm=()=>false;});
+  await grants.getByRole("button",{name:"Restore SSH access"}).click();
+  await expect(grants).toContainText("GRANT EXPIRED");
+  await page.evaluate(()=>{window.confirm=()=>true;});
+  await grants.getByRole("button",{name:"Restore SSH access"}).click();
+  await expect(grants).toContainText("SSH TOOLS ACTIVE");
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{restoredGrants:Array<{id:string;sessionId:string}>}})
+      .__mockSshBridge.restoredGrants.length
+  )).toBe(1);
+  await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
+  await expect(grants.getByRole("button",{name:"Extend access"})).toHaveCount(0);
+  await expect(grants.getByRole("button",{name:/Select linux-test SSH/})).toBeVisible();
+  await page.locator(".sidebar .host").filter({hasText:"linux-test"}).click();
+  await grants.getByRole("button",{name:"Revoke SSH access"}).click();
+  await expect(grants).toContainText("No recoverable local CLI grant");
+  await expect(grants.getByRole("button",{name:"Restore SSH access"})).toHaveCount(0);
   expect(browserErrors).toEqual([]);
 }

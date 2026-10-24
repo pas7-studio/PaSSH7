@@ -15,7 +15,7 @@ import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,updateHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,updateHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,setVaultIdleTimeout,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,reauthorizeLocalAgentConnection,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Pencil, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -854,6 +854,37 @@ export default function App(){
       if(stillCurrent())setAgentStatus("Could not revoke local CLI SSH tools: "+String(error));
     }finally{setLocalAgentRevoking("")}
   };
+  const restoreAgentSshAccess=async(id:string)=>{
+    const grant=localAgentConnections.find(item=>item.id===id);
+    if(!grant||localAgentRevoking)return;
+    const owner=sshTabs.find(session=>session.id===activeSsh&&session.alias===grant.host);
+    if(!owner){
+      setAgentStatus("Select a connected SSH terminal on "+grant.host+
+        " first, then choose Restore SSH access. Access cannot move to a different host.");
+      return;
+    }
+    if(!window.confirm(
+      (grant.status==="active"?"Extend":"Restore")+" "+grant.agent+
+      " local CLI SSH access to "+grant.host+"?\n\n"+
+      "Only this existing local CLI grant will be authorized for the currently selected SSH session. "+
+      "It can execute remote commands and change files with your SSH account privileges. "+
+      "An explicitly revoked grant cannot be restored."
+    ))return;
+    const sourceSession=owner.id,sourceHost=owner.alias;
+    setLocalAgentRevoking(id);
+    try{
+      const allowed=await reauthorizeLocalAgentConnection(id,sourceSession);
+      await refreshLocalAgentConnections();
+      if(agentContext.current.session===sourceSession&&agentContext.current.host===sourceHost){
+        setAgentStatus(allowed?"SSH tools restored for "+grant.agent+" on "+grant.host+
+          ". Continue in the EXISTING local CLI window; no CLI restart is needed.":
+          "The grant is no longer available. Launch a new local CLI.");
+      }
+    }catch(error){
+      if(agentContext.current.session===sourceSession&&agentContext.current.host===sourceHost)
+        setAgentStatus("Could not restore local CLI SSH access: "+String(error));
+    }finally{setLocalAgentRevoking("")}
+  };
   const checkLocalAgents=async()=>{
     if(!desktopAvailable()||localAgentBusy)return;
     setLocalAgentBusy(true);
@@ -1049,6 +1080,11 @@ export default function App(){
     }
   },[panel,activeSsh,sshTabs,vaultUnlocked]);
   const [preferences,setPreferences]=useState<AppPreferences>(loadPreferences);
+  useEffect(()=>{
+    if(!desktopAvailable())return;
+    void setVaultIdleTimeout(preferences.vaultIdleMinutes).catch(error=>
+      setError("Could not set native Vault auto-lock timeout: "+String(error)));
+  },[preferences.vaultIdleMinutes]);
   const updatePreferences=(value:AppPreferences)=>{
     setPreferences(value);savePreferences(value);setSftpOrder(value.sftpSort);setTheme(value.theme);
   };
@@ -1698,7 +1734,7 @@ export default function App(){
  mode={agentMode} onMode={setAgentMode}
  localAvailability={localAgentAvailability} localChecking={localAgentBusy}
  localConnections={localAgentConnections} localRevoking={localAgentRevoking}
- onRevokeLocal={id=>void revokeAgentSshAccess(id)}
+ onRevokeLocal={id=>void revokeAgentSshAccess(id)} onRestoreLocal={id=>void restoreAgentSshAccess(id)}
  onLaunch={()=>void launchAgent()}
  onTerminal={()=>setPanel("terminal")}
  onPrepareRdp={()=>{

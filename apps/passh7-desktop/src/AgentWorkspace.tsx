@@ -14,6 +14,7 @@ type Props={
   mode:"auto"|"remote"|"local";onMode:(mode:"auto"|"remote"|"local")=>void;
   localAvailability:Partial<Record<AgentKind,LocalAgentAvailability>>;localChecking:boolean;
   localConnections:LocalAgentConnection[];localRevoking:string;onRevokeLocal:(id:string)=>void;
+  onRestoreLocal:(id:string)=>void;
   onCheck:()=>void;onLaunch:()=>void;onTerminal:()=>void;onSession:(id:string)=>void;
   onPrepareRdp:()=>void;
   liveTerminal?:boolean;onTerminalDock?:(node:HTMLDivElement|null)=>void;
@@ -215,20 +216,32 @@ export default function AgentWorkspace(p:Props){
       </div>
       <aside className="agentWorkspaceSide">
         <section className="agentSection" aria-label="Local CLI SSH grants">
-          <div className="agentSectionHead"><div><h2>Active local CLI access</h2>
-            <p>These are live SSH tool grants, not provider logins. Each grant is bound to one SSH session. Revoking access leaves the local CLI window open.</p></div></div>
-          {!p.localConnections.length?<p className="agentHint">No local CLI has active SSH access. Launch a local assistant above to issue a temporary grant.</p>:
+          <div className="agentSectionHead"><div><h2>Local CLI SSH access</h2>
+            <p>Grants belong to a saved SSH host, not a provider login. Expired or disconnected grants can be explicitly restored in the same running CLI window.</p></div></div>
+          {!p.localConnections.length?<p className="agentHint">No recoverable local CLI grant. Launch a local assistant above to issue a temporary SSH grant. If access was explicitly revoked or PaSSH7 restarted, a new CLI launch is required.</p>:
             <div className="agentGrantRows">{p.localConnections.map(item=><div className="agentLaunchRow" key={item.id}>
               <div className="agentLaunchCommand">
-                <span>{item.host} · {item.sessionId===p.sessionId?"CURRENT SSH SESSION":"OTHER SSH SESSION"}</span>
+                <span>{item.host} · {item.status==="active"?"SSH TOOLS ACTIVE":item.status==="expired"?"GRANT EXPIRED":"SSH DISCONNECTED"}</span>
                 <code>{AGENTS.find(a=>a.kind===item.agent)?.name??item.agent}</code>
-                <small>Access granted {item.ageSeconds<60?"less than a minute":Math.floor(item.ageSeconds/60)+" min"} ago</small>
+                <small>Authorized {item.ageSeconds<60?"less than a minute":Math.floor(item.ageSeconds/60)+" min"} ago.
+                  {item.status==="active"?" Original SSH host only.":" Remote operations are blocked."}
+                </small>
               </div>
-              <button type="button" disabled={p.localRevoking===item.id} onClick={()=>p.onRevokeLocal(item.id)}>
-                <LockKeyhole size={15}/>{p.localRevoking===item.id?"Revoking…":"Revoke SSH access"}
+              {p.sessionId&&p.allSessions.some(session=>session.id===p.sessionId&&session.alias===item.host)?
+                <button type="button" disabled={Boolean(p.localRevoking)} onClick={()=>p.onRestoreLocal(item.id)}>
+                  <RefreshCw size={15}/>{p.localRevoking===item.id?"Updating…":item.status==="active"?"Extend access":"Restore SSH access"}
+                </button>:
+                p.allSessions.some(session=>session.alias===item.host)?
+                  <button type="button" disabled={Boolean(p.localRevoking)} onClick={()=>{
+                    const target=p.allSessions.find(session=>session.alias===item.host);
+                    if(target)p.onSession(target.id);
+                  }}><Server size={15}/> Select {item.host} SSH</button>:
+                  <small className="agentGrantNoSession">Reconnect {item.host} in Terminal to restore access.</small>}
+              <button type="button" disabled={Boolean(p.localRevoking)} onClick={()=>p.onRevokeLocal(item.id)}>
+                <LockKeyhole size={15}/>{p.localRevoking===item.id?"Updating…":"Revoke SSH access"}
               </button>
             </div>)}</div>}
-          {p.localConnections.length>0&&<p className="agentHint">Revocation rejects new remote commands and file operations. It cannot undo or guarantee cancellation of work already running on the SSH host.</p>}
+          {p.localConnections.length>0&&<p className="agentHint">Restore requires confirmation and a live SSH session on the original host; explicit Revoke permanently invalidates the token. Closing a launcher does not revoke a grant. Remote commands already running cannot be undone.</p>}
         </section>
         <section className="agentSection agentSafetyPanel"><h2><ShieldAlert size={18}/> Permissions & safety</h2>
           <p>Remote CLI runs as <strong>{p.username||"your SSH account"}</strong>. Local CLI retains its local login but gains remote command and SFTP access through the selected authenticated SSH session. Neither mode is a sandbox.</p>

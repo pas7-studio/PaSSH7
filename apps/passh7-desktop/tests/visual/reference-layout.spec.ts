@@ -37,7 +37,10 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
           await expect(page.locator(".dockerMetrics>div")).toHaveCount(6);
           await expect(page.locator(".dockerTableScroll .workspaceTable tbody tr")).toHaveCount(5);
           await expect(page.locator(".dockerInspector")).toBeVisible();
+          await page.getByRole("tab",{name:"Logs"}).click();
           await expect(page.locator(".dockerLogViewer")).toBeVisible();
+          await page.getByRole("tab",{name:"Containers"}).click();
+          await expect(page.locator(".dockerInspector")).toBeVisible();
         }else if(screen.name==="files"){
           await expect(page.locator(".filesTablePane .workspaceTable tbody tr")).toHaveCount(8);
           await page.locator(".filesTablePane .workspaceTable tbody tr").filter({hasText:"README.md"}).click();
