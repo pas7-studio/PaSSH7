@@ -15,7 +15,7 @@ import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,updateHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,reauthorizeLocalAgentConnection,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,updateHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,setVaultIdleTimeout,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,reauthorizeLocalAgentConnection,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Pencil, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -1080,6 +1080,11 @@ export default function App(){
     }
   },[panel,activeSsh,sshTabs,vaultUnlocked]);
   const [preferences,setPreferences]=useState<AppPreferences>(loadPreferences);
+  useEffect(()=>{
+    if(!desktopAvailable())return;
+    void setVaultIdleTimeout(preferences.vaultIdleMinutes).catch(error=>
+      setError("Could not set native Vault auto-lock timeout: "+String(error)));
+  },[preferences.vaultIdleMinutes]);
   const updatePreferences=(value:AppPreferences)=>{
     setPreferences(value);savePreferences(value);setSftpOrder(value.sftpSort);setTheme(value.theme);
   };
