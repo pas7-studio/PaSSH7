@@ -27,6 +27,23 @@ pub struct LocalAgentConnection{
     /// active | expired | disconnected; never contains the secret bridge token.
     status:String,
 }
+/// Renew a previously issued token only through explicit desktop approval,
+/// and never for a different saved SSH host.
+fn reauthorize_grant_by_id(grants:&Grants,id:&str,session:&str,host:&str)->Result<bool,String>{
+    let mut guard=grants.lock().map_err(|_|"Local CLI grants unavailable")?;
+    let grant=guard.values_mut().find(|grant|grant.id==id)
+        .ok_or("This CLI grant was revoked or PaSSH7 restarted. Launch a new local CLI session.")?;
+    if grant.created.elapsed()>GRANT_RECOVERY_WINDOW{
+        return Err("The recovery window ended. Launch a new local CLI session.".into());
+    }
+    if grant.host!=host{
+        return Err("Cannot move local agent access to another host. Select an SSH session for the original host.".into());
+    }
+    grant.session=session.to_owned();
+    grant.created=Instant::now();
+    Ok(true)
+}
+
 fn revoke_grant_by_id(grants:&Grants,id:&str)->Result<bool,String>{
     let mut guard=grants.lock().map_err(|_|"Local CLI grants unavailable")?;
     let Some(token)=guard.iter().find_map(|(token,grant)|
@@ -251,18 +268,7 @@ pub fn local_agent_reauthorize(id:String,session_id:String,
     let active=ssh.active_sessions()?;
     let target=active.iter().find(|session|session.id==session_id)
         .ok_or("Select a connected SSH session before restoring access")?;
-    let mut guard=bridge.grants.lock().map_err(|_|"Local CLI grants unavailable")?;
-    let grant=guard.values_mut().find(|grant|grant.id==id)
-        .ok_or("This CLI grant was revoked or PaSSH7 restarted. Launch a new local CLI session.")?;
-    if grant.created.elapsed()>GRANT_RECOVERY_WINDOW{
-        return Err("The recovery window ended. Launch a new local CLI session.".into());
-    }
-    if grant.host!=target.alias{
-        return Err("Cannot move local agent access to another host. Select an SSH session for the original host.".into());
-    }
-    grant.session=target.id.clone();
-    grant.created=Instant::now();
-    Ok(true)
+    reauthorize_grant_by_id(&bridge.grants,&id,&target.id,&target.alias)
 }
 /// Removing a grant blocks all subsequent MCP calls from that local console.
 /// It intentionally leaves the user's independently signed-in CLI running.
@@ -672,6 +678,34 @@ mod tests{
         assert_eq!(current.len(),1);
         assert!(current.contains_key("private-secret-2"));
         assert!(!current.contains_key("private-secret-1"));
+    }
+    #[test]
+    fn expired_grant_is_recoverable_only_on_its_original_host(){
+        let grants:Grants=Arc::new(Mutex::new(HashMap::new()));
+        let id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned();
+        grants.lock().unwrap().insert("secret-in-cli-process".into(),Grant{
+            id:id.clone(),agent:"codex".into(),session:"old-ssh".into(),
+            host:"production".into(),created:Instant::now()-Duration::from_secs(13*3600)
+        });
+        assert!(reauthorize_grant_by_id(&grants,&id,"new-ssh","other-host").is_err());
+        assert!(reauthorize_grant_by_id(&grants,&id,"new-ssh","production").unwrap());
+        let locked=grants.lock().unwrap();
+        let grant=locked.get("secret-in-cli-process").unwrap();
+        assert_eq!(grant.session,"new-ssh");
+        assert!(grant.created.elapsed()<Duration::from_secs(2));
+        assert_eq!(grant.host,"production");
+    }
+    #[test]
+    fn explicitly_revoked_or_stale_grants_cannot_be_restored(){
+        let grants:Grants=Arc::new(Mutex::new(HashMap::new()));
+        let id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_owned();
+        grants.lock().unwrap().insert("old".into(),Grant{
+            id:id.clone(),agent:"claude".into(),session:"ssh-a".into(),
+            host:"alpha".into(),created:Instant::now()-Duration::from_secs(50*3600)
+        });
+        assert!(reauthorize_grant_by_id(&grants,&id,"ssh-b","alpha").is_err());
+        assert!(revoke_grant_by_id(&grants,&id).unwrap());
+        assert!(reauthorize_grant_by_id(&grants,&id,"ssh-b","alpha").is_err());
     }
     #[test]
     fn codex_explicitly_forwards_ephemeral_bridge_vars_without_values(){
