@@ -44,11 +44,15 @@ export default function App(){
   const [selected,setSelected]=useState("dev");
   const [sshTabs,setSshTabs]=useState<{id:string;alias:string}[]>([]);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
+  const [vaultIdleRemaining,setVaultIdleRemaining]=useState<number|null>(null);
+  const vaultEpoch=useRef(0);
   // Keep only non-secret host aliases for a human-controlled recovery flow.
   // Neither decrypted Vault data nor CLI grant tokens are persisted.
   const lastConnectedHostsRef=useRef<{aliases:string[];preferred:string}|null>(null);
   const [vaultRecovery,setVaultRecovery]=useState<{aliases:string[];preferred:string;reason:"idle"|"manual"}|null>(null);
   const noteVaultLocked=(reason:"idle"|"manual")=>{
+    vaultEpoch.current++;
+    setVaultIdleRemaining(null);
     const previous=lastConnectedHostsRef.current;
     if(previous?.aliases.length)setVaultRecovery({...previous,reason});
     if(reason==="idle")setVaultDialog(true);
@@ -63,8 +67,9 @@ export default function App(){
     // recurring polls, is permitted to refresh unlocked credentials.
     if(now-lastLocalVaultActivity.current<60_000)return;
     lastLocalVaultActivity.current=now;
+    const epoch=vaultEpoch.current;
     void touchVaultActivity().then(active=>{
-      if(!active)noteVaultLocked("idle");
+      if(!active&&vaultEpoch.current===epoch)noteVaultLocked("idle");
     }).catch(()=>{/* Existing vault_status poll independently enforces expiry. */});
   };
   // Native session events use a stable callback; its owner map stays fresh.
@@ -362,6 +367,7 @@ export default function App(){
   const unlockVault=async()=>{try{
     if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}
     await unlockNativeVault(vaultPassword);
+    vaultEpoch.current++;
     setVaultPassword("");
     const saved=await getHosts();
     setIdentities(await getIdentities());
@@ -408,7 +414,20 @@ export default function App(){
     void restore();
     return()=>{mounted=false};
   },[]);
-  useEffect(()=>{if(!desktopAvailable()||!vaultUnlocked)return;const id=window.setInterval(()=>{void vaultStatus().then(ok=>{if(!ok)noteVaultLocked("idle");}).catch(()=>{})},30000);return ()=>window.clearInterval(id)},[vaultUnlocked]);
+  useEffect(()=>{
+    if(!desktopAvailable()||!vaultUnlocked)return;
+    const epoch=vaultEpoch.current;
+    const refresh=()=>{
+      void Promise.all([vaultStatus(),getVaultIdleRemaining()]).then(([alive,seconds])=>{
+        if(vaultEpoch.current!==epoch)return;
+        if(!alive){noteVaultLocked("idle");return}
+        setVaultIdleRemaining(seconds);
+      }).catch(()=>{});
+    };
+    refresh();
+    const id=window.setInterval(refresh,15000);
+    return ()=>window.clearInterval(id);
+  },[vaultUnlocked]);
   const [configImportOpen,setConfigImportOpen]=useState(false);
   const [configImportBusy,setConfigImportBusy]=useState(false);
   const [configImportError,setConfigImportError]=useState("");
@@ -1690,6 +1709,19 @@ export default function App(){
         <button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button>
       </div>
     </div>}
+    {vaultUnlocked&&vaultIdleRemaining!==null&&vaultIdleRemaining>0&&vaultIdleRemaining<=120&&
+      <div className="globalSessionNotice vaultIdleWarning" role="status" aria-live="polite">
+        <div className="globalSessionNoticeText"><LockKeyhole size={17}/>
+          <span><strong>Vault will auto-lock soon</strong> · Approximately {Math.max(1,Math.ceil(vaultIdleRemaining/60))} minute(s) remaining. SSH terminals and agent tools will disconnect at lock.</span>
+        </div>
+        <div className="globalSessionNoticeActions">
+          <button type="button" onClick={()=>void touchVaultActivity().then(ok=>{
+            if(ok)setVaultIdleRemaining(preferences.vaultIdleMinutes===0?null:preferences.vaultIdleMinutes*60);
+            else noteVaultLocked("idle");
+          }).catch(()=>{})}>Keep unlocked</button>
+          <button type="button" onClick={()=>setPanel("settings")}>Change auto-lock</button>
+        </div>
+      </div>}
     {vaultRecovery&&<div className="globalSessionNotice vaultResumeNotice" role="status" aria-live="polite">
       <div className="globalSessionNoticeText"><LockKeyhole size={17}/>
         <span><strong>{vaultUnlocked?"Resume your SSH workspace":vaultRecovery.reason==="idle"?"Vault automatically locked":"Vault locked"}</strong> ·
