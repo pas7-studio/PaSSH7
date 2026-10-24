@@ -13,8 +13,16 @@ use passh7_core::{HostProfile, HubError, Identity};
 #[cfg(test)]
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 static VAULT_IDLE_MINUTES:AtomicU32=AtomicU32::new(15);
-fn current_idle_timeout()->Duration{
-    Duration::from_secs(VAULT_IDLE_MINUTES.load(Ordering::Relaxed) as u64*60)
+/// None means the user explicitly disabled idle locking for this running
+/// desktop. The explicit Lock button and application exit remain effective.
+fn current_idle_timeout()->Option<Duration>{
+    match VAULT_IDLE_MINUTES.load(Ordering::Relaxed){
+        0=>None,
+        minutes=>Some(Duration::from_secs(minutes as u64*60))
+    }
+}
+fn vault_idle_expired(last_used:Instant)->bool{
+    current_idle_timeout().is_some_and(|timeout|last_used.elapsed()>=timeout)
 }
 
 #[derive(Default)]
@@ -111,7 +119,7 @@ impl SessionStore {
     fn use_password<T>(&self, operation: impl FnOnce(&str) -> Result<T, String>) -> Result<T, String> {
         let mut guard = self.0.lock().map_err(|_| "Vault session unavailable")?;
         let session = guard.as_mut().ok_or("Vault is locked")?;
-        if session.last_used.elapsed() >= current_idle_timeout() {
+        if vault_idle_expired(session.last_used) {
             *guard = None;
             return Err("Vault session expired".into());
         }
@@ -129,7 +137,7 @@ impl SessionStore {
     fn touch_if_live(&self)->Result<bool,String>{
         let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
         let Some(session)=guard.as_mut() else{return Ok(false)};
-        if session.last_used.elapsed()>=current_idle_timeout(){
+        if vault_idle_expired(session.last_used){
             *guard=None;
             return Ok(false);
         }
@@ -142,7 +150,7 @@ impl SessionStore {
     pub(crate) fn live_without_touch(&self)->Result<bool,String>{
         let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
         match guard.as_ref(){
-            Some(session) if session.last_used.elapsed()<current_idle_timeout()=>Ok(true),
+            Some(session) if !vault_idle_expired(session.last_used)=>Ok(true),
             _=>{
                 *guard=None;
                 Ok(false)
@@ -154,6 +162,14 @@ impl SessionStore {
 #[cfg(test)]
 mod vault_local_activity_tests{
     use super::*;
+    #[test]
+    fn configurable_idle_timeout_supports_explicit_never_and_rejects_invalid_values(){
+        let old=VAULT_IDLE_MINUTES.swap(0,Ordering::SeqCst);
+        assert!(!vault_idle_expired(Instant::now()-Duration::from_secs(60*60*24)));
+        VAULT_IDLE_MINUTES.store(old,Ordering::SeqCst);
+        assert_eq!(current_idle_timeout(),Some(Duration::from_secs(old as u64*60)));
+        assert!(![0,15,30,60,240,480,720].contains(&42));
+    }
     #[test]
     fn local_bridge_liveness_check_does_not_extend_vault_timeout(){
         let prior=Instant::now()-Duration::from_secs(120);
@@ -552,8 +568,8 @@ fn vault_touch(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManag
 /// cannot extend this timer through its MCP calls or SSH keepalives.
 #[tauri::command]
 fn vault_set_idle_timeout(minutes:u32)->Result<u32,String>{
-    if ![15,30,60,240,480].contains(&minutes){
-        return Err("Vault auto-lock must be 15, 30, 60, 240 or 480 minutes".into());
+    if ![0,15,30,60,240,480,720].contains(&minutes){
+        return Err("Vault auto-lock must be Never (0), 15, 30, 60, 240, 480 or 720 minutes".into());
     }
     VAULT_IDLE_MINUTES.store(minutes,Ordering::Relaxed);
     Ok(minutes)
@@ -562,7 +578,7 @@ fn vault_set_idle_timeout(minutes:u32)->Result<u32,String>{
 #[tauri::command]
 fn vault_status(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool, String> {
     let mut guard = sessions.0.lock().map_err(|_| "Vault session unavailable")?;
-    if guard.as_ref().is_some_and(|s| s.last_used.elapsed() >= current_idle_timeout()) { *guard = None; ssh.stop_all(); }
+    if guard.as_ref().is_some_and(|s| vault_idle_expired(s.last_used)) { *guard = None; ssh.stop_all(); }
     Ok(guard.is_some())
 }
 #[tauri::command]
