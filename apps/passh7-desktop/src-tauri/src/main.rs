@@ -630,6 +630,20 @@ fn vault_set_idle_timeout(minutes:u32)->Result<u32,String>{
     Ok(minutes)
 }
 
+/// Observe an approaching idle lock without extending the Vault session.
+/// "Never" and locked Vault return None; only an explicit local gesture can
+/// call vault_touch and reset the timer.
+#[tauri::command]
+fn vault_idle_remaining(sessions:State<'_,SessionStore>)->Result<Option<u64>,String>{
+    let guard=sessions.0.lock().map_err(|_|"Vault session unavailable")?;
+    Ok(guard.as_ref().and_then(|session|
+        current_idle_timeout().map(|timeout|{
+            let remaining=timeout.saturating_sub(session.last_used.elapsed());
+            ((remaining.as_millis()+999)/1000) as u64
+        })
+    ))
+}
+
 #[tauri::command]
 fn vault_status(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool, String> {
     let mut guard = sessions.0.lock().map_err(|_| "Vault session unavailable")?;
@@ -1396,7 +1410,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .manage(local_agent_bridge::LocalAgentBridge::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_set_idle_timeout,terminal_clipboard_read,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_set_idle_timeout,vault_idle_remaining,terminal_clipboard_read,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_update_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
