@@ -35,7 +35,7 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
   const settingsKeywords:Record<Section,string>={
     general:"startup home session restore sidebar last workspace reconnection",
     ssh:"ssh authentication keys fingerprint trust jump gateway network reachability",
-    security:"vault password encryption credentials lock idle backup export",
+    security:"vault password encryption credentials lock idle timeout agent session backup export",
     terminal:"font size cursor scrollback cascadia pty shell xterm",
     files:"sftp uploads downloads transfer hidden sorting explorer",
     docker:"containers images resources log viewer tail follow auto-refresh",
@@ -163,7 +163,17 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
             <div className="settingsActions"><button disabled={!vaultUnlocked} onClick={onExport}><Download size={14}/> Export encrypted backup</button>
               <button disabled={!vaultUnlocked} onClick={onRestore}><Upload size={14}/> Review or restore backup</button>
               <button disabled={!vaultUnlocked} className="settingsDanger" onClick={onLock}><LockKeyhole size={14}/> Lock Vault now</button></div>
-            {infoRow("Automatic locking","After 15 minutes without local keyboard or pointer activity, PaSSH7 locks the decrypted Vault and disconnects SSH. Typing or clicking while unlocked refreshes the idle timer; remote agent output and SSH keepalives do not.","15-minute idle limit")}
+            <label className="prefRow"><span><strong>Auto-lock after local inactivity</strong>
+              <small>Choose longer sessions when administering through an agent. The Vault and SSH stay unlocked for the selected idle period. Agent MCP calls, SSH output and keepalives never extend it; manual Lock still works immediately.</small></span>
+              <select aria-label="Vault auto-lock duration" value={preferences.vaultIdleMinutes}
+                onChange={e=>onChange({...preferences,vaultIdleMinutes:Number(e.target.value) as AppPreferences["vaultIdleMinutes"]})}>
+                <option value={15}>15 minutes (default, most secure)</option>
+                <option value={30}>30 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={240}>4 hours</option>
+                <option value={480}>8 hours</option>
+              </select></label>
+            {infoRow("MCP grant recovery","After a host reconnect or time-limited grant expiry, AI Agents can restore the same CLI's access to that host with explicit confirmation. An explicitly revoked token cannot be restored.","Manual approval")}
           </>)}
         </>}
         {section==="terminal"&&<>
