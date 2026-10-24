@@ -125,7 +125,9 @@ export async function runNativeAppSession(page:Page){
         case "ssh_session_docker_inspect":return JSON.stringify({
           image:"api:latest",created:null,startedAt:null,finishedAt:null,restartPolicy:null,mounts:[],networks:[]
         });
-        case "ssh_session_docker_logs":return "2026-10-17 INFO hello\n2026-10-17 ERROR warning\n";
+        case "ssh_session_docker_logs":
+          return args.id==="session-c"?"2026-10-17 INFO Windows container only\n":
+            "2026-10-17 INFO hello\n2026-10-17 ERROR warning\n";
         case "docker_save_visible_logs":
           exports.push({containerName:String(args.containerName),contents:String(args.contents)});
           return "Saved filtered logs in native dialog (IPC simulator)";
