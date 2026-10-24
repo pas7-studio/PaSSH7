@@ -12,6 +12,36 @@ const EVENT: &str = "passh7:ssh-session";
 const MAX_TRANSFER: u64 = 64 * 1024 * 1024;
 const SFTP_EVENT: &str = "passh7:sftp-transfer";
 
+type NativeForward=(tokio::sync::oneshot::Sender<()>,String,u16,u64);
+
+/// Ignore stale completion messages from an earlier listener that used the
+/// same local port. Only the current listener instance can remove itself.
+fn remove_finished_forward(forwarders:&mut HashMap<u16,NativeForward>,port:u16,instance:u64)->bool{
+    if !forwarders.get(&port).is_some_and(|entry|entry.3==instance){return false;}
+    forwarders.remove(&port);
+    true
+}
+
+#[cfg(test)]
+mod forward_lifecycle_tests{
+    use super::*;
+    #[test]
+    fn completion_from_old_listener_must_not_remove_new_forward(){
+        let mut forwards=HashMap::<u16,NativeForward>::new();
+        let (old,_old_rx)=tokio::sync::oneshot::channel();
+        forwards.insert(18080,(old,"127.0.0.1".into(),8080,41));
+        assert!(!remove_finished_forward(&mut forwards,18080,40));
+        assert!(forwards.contains_key(&18080));
+        let (replacement,_replacement_rx)=tokio::sync::oneshot::channel();
+        forwards.insert(18080,(replacement,"127.0.0.1".into(),9090,42));
+        assert!(!remove_finished_forward(&mut forwards,18080,41));
+        assert_eq!(forwards.get(&18080).map(|value|value.2),Some(9090));
+        assert!(remove_finished_forward(&mut forwards,18080,42));
+        assert!(!forwards.contains_key(&18080));
+        assert!(!remove_finished_forward(&mut forwards,18080,42));
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct SshSessionManager {
     channels: Arc<Mutex<HashMap<String, ManagedSession>>>,
@@ -31,14 +61,18 @@ enum SessionCommand {
     Close,
     DockerList(tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerCatalog(String,tokio::sync::oneshot::Sender<Result<String,String>>),
+    DockerInspect(String,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogs(String,u32,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogStart(String,u32,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     DockerLogStop(String,tokio::sync::oneshot::Sender<Result<(),String>>),
     DockerLogFinished(String),
     DockerAction(String,String,tokio::sync::oneshot::Sender<Result<String,String>>),
     AgentProbe(String,tokio::sync::oneshot::Sender<Result<AgentAvailability,String>>),
+    Exec(String,tokio::sync::oneshot::Sender<Result<RemoteExecResult,String>>),
+    SftpWrite(String,String,tokio::sync::oneshot::Sender<Result<(),String>>),
     SftpList(String, tokio::sync::oneshot::Sender<Result<Vec<SftpEntry>,String>>),
     SftpRead(String, tokio::sync::oneshot::Sender<Result<String,String>>),
+    SftpImage(String, tokio::sync::oneshot::Sender<Result<String,String>>),
     SftpMutate(String,String,String,Option<String>,bool,tokio::sync::oneshot::Sender<Result<(),String>>),
     SftpDownload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
     SftpUpload(String, String, PathBuf, tokio::sync::oneshot::Sender<Result<u64,String>>),
@@ -48,6 +82,7 @@ enum SessionCommand {
     VaultRead(String,tokio::sync::oneshot::Sender<Result<Vec<u8>,String>>),
     ForwardStart(u16,String,u16,tokio::sync::oneshot::Sender<Result<(),String>>),
     ForwardStop(u16,tokio::sync::oneshot::Sender<Result<(),String>>),
+    ForwardFinished(u16,u64),
     ForwardList(tokio::sync::oneshot::Sender<Vec<ActiveLocalForward>>),
     ForwardOpen(tokio::net::TcpStream,String,u16),
     JumpOpen(String,u16,tokio::sync::oneshot::Sender<Result<russh::ChannelStream<russh::client::Msg>,String>>),
@@ -134,9 +169,30 @@ pub struct ActiveLocalForward {
 
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
+pub struct RemoteExecResult {
+    pub stdout:String,pub stderr:String,pub exit_code:u32,pub truncated:bool,
+}
+
+#[derive(Clone,Serialize)]
+#[serde(rename_all="camelCase")]
 pub struct AgentAvailability {
     pub installed:bool,
     pub version:Option<String>,
+    pub platform:&'static str,
+    pub source:Option<String>,
+    pub location:Option<String>,
+    pub desktop_app:Option<String>,
+    pub launch_command:Option<String>,
+    pub diagnostic:Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all="camelCase")]
+struct WindowsAgentProbe{
+    installed:bool,
+    path:Option<String>,
+    source:Option<String>,
+    version:Option<String>,
+    desktop_app:Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -234,6 +290,41 @@ impl SshSessionManager {
 
     /// Jump traffic runs only over an already authenticated, pinned gateway
     /// session; the local machine never contacts the target's private address.
+    pub async fn remote_list(&self,id:&str,path:&str)->Result<Vec<SftpEntry>,String>{
+        if !valid_sftp_path(path){return Err("Invalid remote directory path".into());}
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        self.sender(id)?.send(SessionCommand::SftpList(path.to_owned(),tx)).await
+            .map_err(|_|"SSH session closed during directory listing")?;
+        rx.await.map_err(|_|"SFTP directory listing interrupted".to_owned())?
+    }
+
+    pub async fn remote_read(&self,id:&str,path:&str)->Result<String,String>{
+        if !valid_sftp_path(path){return Err("Invalid remote file path".into());}
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        self.sender(id)?.send(SessionCommand::SftpRead(path.to_owned(),tx)).await
+            .map_err(|_|"SSH session closed during SFTP read")?;
+        rx.await.map_err(|_|"SFTP read interrupted".to_owned())?
+    }
+
+    pub async fn remote_write(&self,id:&str,path:&str,body:&str)->Result<(),String>{
+        if !valid_sftp_path(path)||body.len()>256*1024{return Err("SFTP write requires valid path and at most 256 KiB".into());}
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        self.sender(id)?.send(SessionCommand::SftpWrite(path.to_owned(),body.to_owned(),tx)).await
+            .map_err(|_|"SSH session closed before SFTP write")?;
+        rx.await.map_err(|_|"SFTP write interrupted".to_owned())?
+    }
+
+    /// Reuse an already authenticated/pinned SSH session: no Vault secrets.
+    pub async fn execute_remote(&self,id:&str,command:&str)->Result<RemoteExecResult,String>{
+        if command.is_empty()||command.len()>8192||command.as_bytes().contains(&0){
+            return Err("Remote command must be 1–8192 bytes without NUL".into());
+        }
+        let (tx,rx)=tokio::sync::oneshot::channel();
+        self.sender(id)?.send(SessionCommand::Exec(command.to_owned(),tx)).await
+            .map_err(|_|"SSH connection ended before exec could start")?;
+        rx.await.map_err(|_|"Remote command interrupted by SSH disconnect".to_owned())?
+    }
+
     pub async fn jump_stream(&self,gateway_alias:&str,target:&str,port:u16)
         ->Result<russh::ChannelStream<russh::client::Msg>,String>{
         if target.trim().is_empty()||target.len()>253||port==0||
@@ -275,6 +366,19 @@ impl SshSessionManager {
                 } else { true }
             });
         }
+    }
+}
+
+/// SSH keepalives are transport-level probes (not shell commands). An
+/// interactive shell may be quiet for hours while an agent waits for input.
+/// Unresponsive peers still close after three unanswered 30-second probes.
+fn interactive_ssh_config() -> russh::client::Config {
+    russh::client::Config {
+        nodelay: true,
+        inactivity_timeout: None,
+        keepalive_interval: Some(Duration::from_secs(30)),
+        keepalive_max: 3,
+        ..Default::default()
     }
 }
 
@@ -324,12 +428,11 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         Some(russh::keys::decode_secret_key(secret.as_ref().ok_or("SSH identity missing for key authentication")?, if key_passphrase.is_empty() { None } else { Some(key_passphrase.as_str()) })
             .map_err(|_| "Cannot unlock SSH private key. Enter its key passphrase, or verify the imported key.".to_owned())?)
     } else { None };
-    let config = std::sync::Arc::new(russh::client::Config {
-        // Critical for interactive SSH: the default Nagle algorithm may
-        // delay single-keystroke packets until remote acknowledgements arrive.
-        nodelay: true,
-        inactivity_timeout: Some(Duration::from_secs(600)), ..Default::default()
-    });
+    // Long-running coding agents and TUI shells must not be disconnected after
+    // ten minutes without keyboard input. Protocol keepalives distinguish
+    // legitimate idle sessions from truly unreachable servers without
+    // sending any characters to the remote shell or affecting its prompt.
+    let config = std::sync::Arc::new(interactive_ssh_config());
     let jump_alias=host.extensions.get("passh7_jump_alias")
         .and_then(|v|v.as_str()).filter(|s|!s.is_empty());
     let mut connection=if let Some(gateway)=jump_alias {
@@ -399,7 +502,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
         let mut buffered = 0usize;
         let mut overflowed = false;
         let mut closure_detail: Option<String> = None;
-        let mut forwarders: HashMap<u16,(tokio::sync::oneshot::Sender<()>,String,u16)> = HashMap::new();
+        let mut forwarders: HashMap<u16,NativeForward> = HashMap::new();
         let mut transfers: HashMap<String,tokio::sync::watch::Sender<bool>> = HashMap::new();
         let mut docker_log_streams: HashMap<String,tokio::sync::watch::Sender<bool>>=HashMap::new();
         loop {
@@ -456,7 +559,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let setup=tokio::time::timeout(Duration::from_secs(10),async {
                                 let mut channel=connection.channel_open_session().await
                                     .map_err(|_|"Could not open Docker listing channel".to_owned())?;
-                                channel.exec(true,b"docker ps -a --format \"{{json .}}\"").await
+                                channel.exec(true,b"docker ps -a --format json").await
                                     .map_err(|_|"SSH server refused Docker inventory command".to_owned())?;
                                 Ok::<_,String>(channel)
                             }).await.unwrap_or_else(|_|Err("Docker SSH channel setup timed out".into()));
@@ -465,26 +568,35 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 Ok(mut channel)=>{
                                     tauri::async_runtime::spawn(async move {
                                         let result=tokio::time::timeout(Duration::from_secs(20),async {
-                                            let mut output=Vec::new();
+                                            let mut stdout=Vec::new();
+                                            let mut stderr=Vec::new();
                                             let mut exit_status=None;
                                             while let Some(message)=channel.wait().await {
                                                 match message {
-                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
-                                                        if output.len().saturating_add(data.len())>2*1024*1024{
+                                                    russh::ChannelMsg::Data{data}=>{
+                                                        if stdout.len().saturating_add(stderr.len()).saturating_add(data.len())>2*1024*1024{
                                                             return Err("Docker inventory exceeds 2 MiB".to_owned());
                                                         }
-                                                        output.extend_from_slice(&data);
+                                                        stdout.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if stdout.len().saturating_add(stderr.len()).saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker inventory exceeds 2 MiB".to_owned());
+                                                        }
+                                                        stderr.extend_from_slice(&data);
                                                     },
                                                     russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
                                                     russh::ChannelMsg::Close=>break,
                                                     _=>{}
                                                 }
                                             }
-                                            let message=String::from_utf8_lossy(&output).into_owned();
-                                            if exit_status.unwrap_or(1)!=0{
-                                                return Err(format!("Docker inventory failed: {}",message.chars().take(500).collect::<String>()));
+                                            let message=String::from_utf8_lossy(&stdout);
+                                            if exit_status!=Some(0){
+                                                let error=if stderr.is_empty(){message.to_string()}else{String::from_utf8_lossy(&stderr).into_owned()};
+                                                return Err(format!("Docker inventory failed (SSH exit {:?}): {}",exit_status,error.chars().take(500).collect::<String>()));
                                             }
-                                            Ok::<String,String>(message)
+                                            // Warnings on stderr must not corrupt the JSON-lines inventory.
+                                            safe_docker_json_lines("containers",&message)
                                         }).await.unwrap_or_else(|_|Err("Docker inventory timed out after 20 seconds".into()));
                                         let _=response.send(result);
                                     });
@@ -506,26 +618,34 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 Ok(mut channel)=>{
                                     tauri::async_runtime::spawn(async move {
                                         let result=tokio::time::timeout(Duration::from_secs(20),async {
-                                            let mut output=Vec::new();
+                                            let mut stdout=Vec::new();
+                                            let mut stderr=Vec::new();
                                             let mut exit_status=None;
                                             while let Some(message)=channel.wait().await {
                                                 match message {
-                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
-                                                        if output.len().saturating_add(data.len())>2*1024*1024{
+                                                    russh::ChannelMsg::Data{data}=>{
+                                                        if stdout.len().saturating_add(stderr.len()).saturating_add(data.len())>2*1024*1024{
                                                             return Err("Docker catalog exceeds 2 MiB".to_owned());
                                                         }
-                                                        output.extend_from_slice(&data);
+                                                        stdout.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if stdout.len().saturating_add(stderr.len()).saturating_add(data.len())>2*1024*1024{
+                                                            return Err("Docker catalog exceeds 2 MiB".to_owned());
+                                                        }
+                                                        stderr.extend_from_slice(&data);
                                                     },
                                                     russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
                                                     russh::ChannelMsg::Close=>break,
                                                     _=>{}
                                                 }
                                             }
-                                            let message=String::from_utf8_lossy(&output).into_owned();
-                                            if exit_status.is_some_and(|code|code!=0){
-                                                return Err(format!("Docker catalog failed: {}",message.chars().take(500).collect::<String>()));
+                                            let message=String::from_utf8_lossy(&stdout);
+                                            if exit_status!=Some(0){
+                                                let error=if stderr.is_empty(){message.to_string()}else{String::from_utf8_lossy(&stderr).into_owned()};
+                                                return Err(format!("Docker catalog failed (SSH exit {:?}): {}",exit_status,error.chars().take(500).collect::<String>()));
                                             }
-                                            Ok::<String,String>(message)
+                                            safe_docker_json_lines(&kind,&message)
                                         }).await.unwrap_or_else(|_|Err("Docker catalog timed out after 20 seconds".into()));
                                         let _=response.send(result);
                                     });
@@ -562,10 +682,14 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                         let mut initial_error=Vec::new();
                                         let mut exit_status=None;
                                         let mut emitted_anything=false;
+                                        let mut stopped_by_user=false;
                                         let outcome=loop{
                                             tokio::select!{
                                                 changed=stop_rx.changed()=>{
-                                                    if changed.is_err()||*stop_rx.borrow(){break Ok::<(),String>(());}
+                                                    if changed.is_err()||*stop_rx.borrow(){
+                                                        stopped_by_user=true;
+                                                        break Ok::<(),String>(());
+                                                    }
                                                 },
                                                 message=log_channel.wait()=>{
                                                     match message {
@@ -595,13 +719,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             }
                                         };
                                         let _=log_channel.close().await;
-                                        let failure=match (outcome,exit_status){
-                                            (Err(message),_)=>Some(message),
-                                            (_,Some(code)) if code!=0=>Some(format!(
-                                                "Remote Docker log command exited with status {code}: {}",
-                                                String::from_utf8_lossy(&initial_error).chars().take(300).collect::<String>()
-                                            )),
-                                            _=>None,
+                                        let failure=match outcome{
+                                            Err(message)=>Some(message),
+                                            Ok(())=>docker_log_exit_failure(exit_status,stopped_by_user,&initial_error),
                                         };
                                         let _=app.emit(DOCKER_LOG_EVENT,DockerLogStreamEvent{
                                             session_id:session_id.clone(),stream_id:task_id.clone(),
@@ -626,6 +746,52 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                         },
                         Some(SessionCommand::DockerLogFinished(stream_id))=>{
                             docker_log_streams.remove(&stream_id);
+                            Ok(())
+                        },
+                        Some(SessionCommand::DockerInspect(container_id,response)) => {
+                            // The input is a validated hex container ID. Avoid Go templates
+                            // entirely: remote PowerShell/cmd/bash quoting differs, and can
+                            // corrupt '{{json .}}' before it reaches the Docker CLI.
+                            let setup=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Docker inspection channel".to_owned())?;
+                                let command=docker_inspect_command(&container_id)
+                                    .ok_or("Invalid Docker container ID".to_owned())?;
+                                channel.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"SSH server refused Docker inspection".to_owned())?;
+                                Ok::<_,String>(channel)
+                            }).await.unwrap_or_else(|_|Err("Docker inspection SSH setup timed out".into()));
+                            match setup {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut channel)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let mut output=Vec::new();
+                                            let mut exit_status=None;
+                                            while let Some(message)=channel.wait().await{
+                                                match message{
+                                                    russh::ChannelMsg::Data{data} | russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        if output.len().saturating_add(data.len())>1024*1024{
+                                                            return Err("Docker inspection exceeded 1 MiB".to_owned());
+                                                        }
+                                                        output.extend_from_slice(&data);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_status=Some(code),
+                                                    russh::ChannelMsg::Close=>break,
+                                                    _=>{}
+                                                }
+                                            }
+                                            let text=String::from_utf8_lossy(&output);
+                                            if exit_status!=Some(0){
+                                                return Err(format!("Docker inspect failed (SSH exit {:?}): {}",
+                                                    exit_status,text.chars().take(400).collect::<String>()));
+                                            }
+                                            safe_docker_inspect_json(&text)
+                                        }).await.unwrap_or_else(|_|Err("Docker inspection timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
                             Ok(())
                         },
                         Some(SessionCommand::DockerLogs(container_id,tail,response)) => {
@@ -658,8 +824,9 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                 }
                                             }
                                             let message=String::from_utf8_lossy(&output).into_owned();
-                                            if exit_status.is_some_and(|code|code!=0){
-                                                return Err(format!("Docker logs failed: {}",message.chars().take(700).collect::<String>()));
+                                            if exit_status!=Some(0){
+                                                return Err(format!("Docker logs failed (SSH exit {:?}): {}",
+                                                    exit_status,message.chars().take(700).collect::<String>()));
                                             }
                                             Ok::<String,String>(message)
                                         }).await.unwrap_or_else(|_|Err("Docker logs timed out; try fewer lines or check remote Docker service".into()));
@@ -724,59 +891,128 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             let _=response.send(opened.map(|channel|channel.into_stream()));
                             Ok(())
                         },
-                        Some(SessionCommand::AgentProbe(binary,response)) => {
-                            // Binary is an exact native allowlist value, not a user command.
-                            // Probe only --version; do not start an interactive AI session.
-                            let channel=tokio::time::timeout(Duration::from_secs(8),async {
-                                let mut cmd=connection.channel_open_session().await
-                                    .map_err(|_|"Could not open remote AI detection channel".to_owned())?;
-                                // SSH exec does not inherit interactive PATH. A login+interactive
-                                // shell sources shell startup files used by nvm, volta, bun,
-                                // mise and user CLI installations. Only exact allowlisted names
-                                // enter this command; no user-controlled shell text.
-                                let command=format!(
-                                    "${{SHELL:-/bin/sh}} -lic 'command -v {binary} >/dev/null 2>&1 && {binary} --version' 2>/dev/null || {binary} --version"
-                                );
-                                cmd.exec(true,command.as_bytes()).await
-                                    .map_err(|_|"SSH server refused AI CLI version probe".to_owned())?;
-                                Ok::<_,String>(cmd)
-                            }).await.unwrap_or_else(|_|Err("AI CLI channel setup timed out".into()));
-                            match channel {
-                                Err(reason)=>{let _=response.send(Err(reason));},
-                                Ok(mut channel)=>{
-                                    tauri::async_runtime::spawn(async move {
-                                        let result=tokio::time::timeout(Duration::from_secs(12),async {
-                                            let mut output=Vec::new();
-                                            let mut exit_code=None;
-                                            while let Some(message)=channel.wait().await {
-                                                match message {
-                                                    russh::ChannelMsg::Data{data} |
-                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
-                                                        if output.len().saturating_add(data.len())>8192 {
-                                                            return Err("AI CLI version response exceeds 8 KiB".into());
-                                                        }
-                                                        output.extend_from_slice(&data);
+                        Some(SessionCommand::Exec(command,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
+                                let mut ch=connection.channel_open_session().await
+                                    .map_err(|_|"Cannot open SSH exec channel".to_owned())?;
+                                ch.exec(true,command.as_bytes()).await
+                                    .map_err(|_|"Remote SSH server rejected command".to_owned())?;
+                                Ok::<_,String>(ch)
+                            }).await.unwrap_or_else(|_|Err("SSH exec setup timed out".into()));
+                            match opened{
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(mut ch)=>{
+                                    tauri::async_runtime::spawn(async move{
+                                        let result=tokio::time::timeout(Duration::from_secs(60),async {
+                                            let mut stdout=Vec::new();
+                                            let mut stderr=Vec::new();
+                                            let mut exit=None;
+                                            let mut truncated=false;
+                                            const MAX_OUTPUT:usize=256*1024;
+                                            while let Some(event)=ch.wait().await{
+                                                match event{
+                                                    russh::ChannelMsg::Data{data}=>{
+                                                        let room=MAX_OUTPUT.saturating_sub(stdout.len()+stderr.len());
+                                                        if data.len()>room{truncated=true;}
+                                                        stdout.extend_from_slice(&data[..room.min(data.len())]);
                                                     },
-                                                    russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_code=Some(code),
+                                                    russh::ChannelMsg::ExtendedData{data,..}=>{
+                                                        let room=MAX_OUTPUT.saturating_sub(stdout.len()+stderr.len());
+                                                        if data.len()>room{truncated=true;}
+                                                        stderr.extend_from_slice(&data[..room.min(data.len())]);
+                                                    },
+                                                    russh::ChannelMsg::ExitStatus{exit_status}=>exit=Some(exit_status),
                                                     russh::ChannelMsg::Close=>break,
                                                     _=>{}
                                                 }
                                             }
-                                            // Failed exec probes are not proof of absence: a
-                                            // human PTY may have a different PATH or rc files.
-                                            let installed=exit_code==Some(0);
-                                            let version=if installed {
-                                                String::from_utf8_lossy(&output).lines()
-                                                    .map(str::trim).find(|line|!line.is_empty())
-                                                    .map(|line|line.chars().filter(|c|!c.is_control())
-                                                        .take(120).collect::<String>())
-                                            }else{None};
-                                            Ok::<AgentAvailability,String>(AgentAvailability{installed,version})
-                                        }).await.unwrap_or_else(|_|Err("AI CLI version probe timed out after 12 seconds".into()));
+                                            let exit_code=exit.ok_or("Remote SSH exec closed without exit status")?;
+                                            Ok::<RemoteExecResult,String>(RemoteExecResult{
+                                                stdout:String::from_utf8_lossy(&stdout).into_owned(),
+                                                stderr:String::from_utf8_lossy(&stderr).into_owned(),
+                                                exit_code,truncated
+                                            })
+                                        }).await.unwrap_or_else(|_|Err("Remote SSH command exceeded 60-second timeout".into()));
                                         let _=response.send(result);
                                     });
                                 }
                             }
+                            Ok(())
+                        },
+                        Some(SessionCommand::AgentProbe(binary,response)) => {
+                            // Probe both Windows and Unix using independent SSH exec channels.
+                            // A desktop Start Menu app alone does not satisfy the CLI check.
+                            // Binary enters this actor only through the native allowlist.
+                            let windows_command=windows_agent_probe_command(&binary)
+                                .expect("agent kind validated by native IPC allowlist");
+                            let unix_command=format!(
+                                "${{SHELL:-/bin/sh}} -lic 'command -v {binary} >/dev/null 2>&1 && {binary} --version' 2>/dev/null || {binary} --version"
+                            );
+                            let windows_channel=tokio::time::timeout(Duration::from_secs(8),async {
+                                let mut cmd=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Windows probe SSH channel".to_owned())?;
+                                cmd.exec(true,windows_command.as_bytes()).await
+                                    .map_err(|_|"SSH server rejected Windows probe".to_owned())?;
+                                Ok::<_,String>(cmd)
+                            }).await.unwrap_or_else(|_|Err("Windows probe setup timed out".into()));
+                            let unix_channel=tokio::time::timeout(Duration::from_secs(8),async {
+                                let mut cmd=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open Unix probe SSH channel".to_owned())?;
+                                cmd.exec(true,unix_command.as_bytes()).await
+                                    .map_err(|_|"SSH server rejected Unix probe".to_owned())?;
+                                Ok::<_,String>(cmd)
+                            }).await.unwrap_or_else(|_|Err("Unix probe setup timed out".into()));
+                            tauri::async_runtime::spawn(async move {
+                                let result=tokio::time::timeout(Duration::from_secs(32),async {
+                                    if let Ok(channel)=windows_channel {
+                                        if let Ok((true,raw))=tokio::time::timeout(
+                                            Duration::from_secs(21),read_agent_probe_output(channel)
+                                        ).await.unwrap_or_else(|_|Err("Windows agent probe timed out".into())){
+                                            if let Some(found)=parse_windows_agent_probe(&raw){
+                                                let path=found.path.filter(|p|p.len()<=1024&&!p.chars().any(|c|c.is_control()));
+                                                let launch=if found.installed {
+                                                    path.as_deref().and_then(windows_agent_launch_command)
+                                                }else{None};
+                                                let installed=found.installed&&launch.is_some();
+                                                let app=found.desktop_app.map(|v|sanitize_probe_text(&v,120));
+                                                return Ok::<_,String>(AgentAvailability{
+                                                    installed,platform:"windows",
+                                                    version:found.version.map(|v|sanitize_probe_text(&v,120)),
+                                                    source:found.source.map(|v|sanitize_probe_text(&v,90)),
+                                                    location:path.clone(),
+                                                    desktop_app:app.clone(),launch_command:launch,
+                                                    diagnostic:Some(if installed{
+                                                        "Windows CLI detected; the SSH shell might have an outdated PATH. Launch can use its verified absolute path.".into()
+                                                    }else if path.is_some(){
+                                                        "CLI launcher found, but --version failed. Verify Node.js dependencies, permissions and the SSH account PATH before launching.".into()
+                                                    }else if app.is_some(){
+                                                        "A desktop app exists, but no terminal CLI was found. A Windows GUI requires Remote Desktop (RDP), not an SSH PTY.".into()
+                                                    }else{
+                                                        "No CLI found in SSH PATH, npm global bin, WinGet links or known user bins for this Windows SSH account.".into()
+                                                    })
+                                                });
+                                            }
+                                        }
+                                    }
+                                    if let Ok(channel)=unix_channel {
+                                        if let Ok((success,raw))=tokio::time::timeout(
+                                            Duration::from_secs(12),read_agent_probe_output(channel)
+                                        ).await.unwrap_or_else(|_|Err("Unix agent probe timed out".into())){
+                                            return Ok(AgentAvailability{
+                                                installed:success,
+                                                version:if success{raw.lines().map(str::trim).find(|v|!v.is_empty()).map(|v|sanitize_probe_text(v,120))}else{None},
+                                                platform:"unix",
+                                                source:if success{Some("Remote login shell PATH".into())}else{None},
+                                                location:None,desktop_app:None,
+                                                launch_command:if success{Some(binary)}else{None},
+                                                diagnostic:if success{None}else{Some("CLI not found in the Unix login shell. Check the interactive PATH or install the CLI.".into())}
+                                            });
+                                        }
+                                    }
+                                    Err("Neither Windows PowerShell nor a Unix login shell could complete agent discovery. Verify the SSH default shell.".into())
+                                }).await.unwrap_or_else(|_|Err("AI CLI discovery timed out".into()));
+                                let _=response.send(result);
+                            });
                             Ok(())
                         },
                         Some(SessionCommand::VaultRead(path,response)) => {
@@ -982,6 +1218,39 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
+                        Some(SessionCommand::SftpWrite(path,body,response)) => {
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async{
+                                let ch=connection.channel_open_session().await
+                                    .map_err(|_|"Cannot open SFTP write SSH channel".to_owned())?;
+                                ch.request_subsystem(true,"sftp").await
+                                    .map_err(|_|"Remote SFTP write subsystem unavailable".to_owned())?;
+                                Ok::<_,String>(ch.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP write setup timed out".into()));
+                            match opened{
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move{
+                                        use tokio::io::AsyncWriteExt;
+                                        let result=tokio::time::timeout(Duration::from_secs(30),async{
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|_|"SFTP write initialization failed".to_owned())?;
+                                            let mut remote=sftp.open_with_flags(path,
+                                                russh_sftp::protocol::OpenFlags::CREATE |
+                                                russh_sftp::protocol::OpenFlags::TRUNCATE |
+                                                russh_sftp::protocol::OpenFlags::WRITE
+                                            ).await.map_err(|e|format!("Cannot open remote file for writing: {e}"))?;
+                                            remote.write_all(body.as_bytes()).await
+                                                .map_err(|e|format!("SFTP write failed: {e}"))?;
+                                            remote.flush().await.map_err(|e|format!("SFTP flush failed: {e}"))?;
+                                            remote.shutdown().await.map_err(|e|format!("SFTP close failed: {e}"))?;
+                                            Ok::<(),String>(())
+                                        }).await.unwrap_or_else(|_|Err("SFTP write timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
                         Some(SessionCommand::SftpRead(path,response)) => {
                             let opened=tokio::time::timeout(Duration::from_secs(10),async {
                                 let channel=connection.channel_open_session().await
@@ -1012,6 +1281,41 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                             }
                                             String::from_utf8(bytes).map_err(|_|"Text preview requires UTF-8; download binary or non-UTF-8 files instead".into())
                                         }).await.unwrap_or_else(|_|Err("SFTP text preview timed out".into()));
+                                        let _=response.send(result);
+                                    });
+                                }
+                            }
+                            Ok(())
+                        },
+                        Some(SessionCommand::SftpImage(path,response)) => {
+                            // Image preview is read-only, capped and does not expose SVG
+                            // or arbitrary content with active browser parsing privileges.
+                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
+                                let channel=connection.channel_open_session().await
+                                    .map_err(|_|"Could not open SFTP image preview channel".to_owned())?;
+                                channel.request_subsystem(true,"sftp").await
+                                    .map_err(|_|"SFTP image preview subsystem refused".to_owned())?;
+                                Ok::<_,String>(channel.into_stream())
+                            }).await.unwrap_or_else(|_|Err("SFTP image preview setup timed out".into()));
+                            match opened {
+                                Err(error)=>{let _=response.send(Err(error));},
+                                Ok(stream)=>{
+                                    tauri::async_runtime::spawn(async move {
+                                        use tokio::io::AsyncReadExt;
+                                        let result=tokio::time::timeout(Duration::from_secs(20),async {
+                                            let sftp=russh_sftp::client::SftpSession::new(stream).await
+                                                .map_err(|_|"Could not initialize SFTP image preview".to_owned())?;
+                                            let mut remote=sftp.open(path).await
+                                                .map_err(|_|"Cannot open remote image".to_owned())?;
+                                            const MAX:usize=768*1024;
+                                            let mut bytes=Vec::new();
+                                            (&mut remote).take((MAX+1) as u64).read_to_end(&mut bytes).await
+                                                .map_err(|_|"Could not read remote image".to_owned())?;
+                                            if bytes.len()>MAX{return Err("Image preview limit is 768 KiB. Download the full file instead.".into());}
+                                            let mime=verified_preview_image_mime(&bytes)
+                                                .ok_or("Only PNG, JPEG, GIF and WebP image previews are supported.")?;
+                                            Ok::<String,String>(format!("data:{mime};base64,{}",STANDARD.encode(bytes)))
+                                        }).await.unwrap_or_else(|_|Err("SFTP image preview timed out".into()));
                                         let _=response.send(result);
                                     });
                                 }
@@ -1160,7 +1464,8 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                 match tokio::net::TcpListener::bind(("127.0.0.1",local_port)).await {
                                     Ok(listener) => {
                                         let (stop_tx,mut stop_rx) = tokio::sync::oneshot::channel::<()>();
-                                        forwarders.insert(local_port,(stop_tx,target_host.clone(),remote_port));
+                                        let instance=NEXT_ID.fetch_add(1,Ordering::Relaxed);
+                                        forwarders.insert(local_port,(stop_tx,target_host.clone(),remote_port,instance));
                                         let tx = forward_sender.clone();
                                         let mut cancel = cancelled.clone();
                                         tauri::async_runtime::spawn(async move {
@@ -1178,6 +1483,11 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                     },
                                                 }
                                             }
+                                            // A dead listener must disappear from the
+                                            // authoritative native inventory. Instance
+                                            // generation prevents a late old completion
+                                            // from removing a newer listener on this port.
+                                            let _=tx.send(SessionCommand::ForwardFinished(local_port,instance)).await;
                                         });
                                         let _ = response.send(Ok(()));
                                     },
@@ -1187,7 +1497,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::ForwardStop(local_port,response)) => {
-                            if let Some((cancel,_,_))=forwarders.remove(&local_port){
+                            if let Some((cancel,_,_,_))=forwarders.remove(&local_port){
                                 let _ = cancel.send(());
                                 let _ = response.send(Ok(()));
                             }else{
@@ -1195,9 +1505,13 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             }
                             Ok(())
                         },
+                        Some(SessionCommand::ForwardFinished(port,instance))=>{
+                            remove_finished_forward(&mut forwarders,port,instance);
+                            Ok(())
+                        },
                         Some(SessionCommand::ForwardList(response)) => {
                             let mut records:Vec<ActiveLocalForward>=forwarders.iter()
-                                .map(|(port,(_,host,remote_port))|ActiveLocalForward{
+                                .map(|(port,(_,host,remote_port,_instance))|ActiveLocalForward{
                                     local_port:*port,target_host:host.clone(),remote_port:*remote_port
                                 }).collect();
                             records.sort_by_key(|r|r.local_port);
@@ -1252,7 +1566,7 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                 }
             }
         }
-        for (_, (stop,_,_)) in forwarders.drain() { let _=stop.send(()); }
+        for (_, (stop,_,_,_)) in forwarders.drain() { let _=stop.send(()); }
         for (_,cancel) in transfers.drain() { let _=cancel.send(true); }
         for (_,stop) in docker_log_streams.drain() { let _=stop.send(true); }
         let _ = channel.close().await;
@@ -1288,15 +1602,78 @@ pub async fn ssh_session_close(id: String, manager: State<'_, SshSessionManager>
     manager.sender(&id)?.send(SessionCommand::Close).await.map_err(|_| "SSH session already closed".to_owned())
 }
 
+/// All Docker list/catalog invocations use the documented literal JSON
+/// output mode, avoiding shell-specific Go-template quoting on Windows SSH.
+/// Reduce each record BEFORE IPC so container command lines, labels and other
+/// unrelated potentially sensitive Docker metadata never enter the WebView.
+fn safe_docker_json_lines(kind:&str,raw:&str)->Result<String,String>{
+    let fields:&[&str]=match kind{
+        "containers"=>&["ID","Names","Image","State","Status","Ports"],
+        "images"=>&["Repository","Tag","ID","Size","CreatedSince"],
+        "volumes"=>&["Name","Driver","Scope"],
+        "networks"=>&["Name","ID","Driver","Scope"],
+        "stats"=>&["ID","Name","CPUPerc","MemUsage","MemPerc"],
+        "compose"=>&["Name","Status","ConfigFiles"],
+        value if value.starts_with("compose-project:")=>&["ID","Names","Image","State","Status","Ports"],
+        _=>return Err("Unsupported Docker catalog projection".into()),
+    };
+    let sanitize=|value:&serde_json::Value|->Result<serde_json::Value,String>{
+        let source=value.as_object().ok_or_else(||"Docker JSON record is not an object".to_owned())?;
+        let mut safe=serde_json::Map::new();
+        for field in fields{
+            if let Some(value)=source.get(*field){
+                if value.is_string()||value.is_number()||value.is_boolean(){
+                    safe.insert((*field).to_owned(),value.clone());
+                }
+            }
+        }
+        Ok(serde_json::Value::Object(safe))
+    };
+    if kind=="compose"{
+        let array:serde_json::Value=serde_json::from_str(raw.trim())
+            .map_err(|_|"Docker Compose did not return a JSON project array".to_owned())?;
+        let projects=array.as_array()
+            .ok_or_else(||"Docker Compose returned an unexpected project format".to_owned())?;
+        if projects.len()>250{return Err("Docker Compose returned more than 250 projects".into())}
+        let mut safe=Vec::with_capacity(projects.len());
+        for project in projects{safe.push(sanitize(project)?);}
+        return serde_json::to_string(&safe).map_err(|_|"Docker project serialization failed".into());
+    }
+    let mut lines=Vec::new();
+    for line in raw.lines().filter(|line|!line.trim().is_empty()){
+        if lines.len()>=2000{return Err("Docker catalog exceeded 2000 records".into())}
+        let value:serde_json::Value=serde_json::from_str(line.trim())
+            .map_err(|_|"Could not parse Docker JSON output; verify Docker CLI supports --format json".to_owned())?;
+        let safe=sanitize(&value)?;
+        lines.push(serde_json::to_string(&safe)
+            .map_err(|_|"Docker row serialization failed".to_owned())?);
+    }
+    Ok(lines.join("\n"))
+}
+
 /// Fixed commands only: no user-supplied shell command or arbitrary container
 /// names. The catalog response is bounded in the SSH actor.
-fn docker_catalog_command(kind:&str)->Option<&'static str>{
+fn docker_catalog_command(kind:&str)->Option<String>{
     match kind{
-        "images"=>Some("docker image ls --format \"{{json .}}\""),
-        "volumes"=>Some("docker volume ls --format \"{{json .}}\""),
-        "networks"=>Some("docker network ls --format \"{{json .}}\""),
-        _=>None
+        "images"=>Some("docker image ls --format json".into()),
+        "volumes"=>Some("docker volume ls --format json".into()),
+        "networks"=>Some("docker network ls --format json".into()),
+        "stats"=>Some("docker stats --no-stream --format json".into()),
+        "compose"=>Some("docker compose ls --format json".into()),
+        _=>{
+            // Project values are never interpolated without strict validation.
+            // Compose project labels can be queried without reading compose
+            // YAML files, env files, or sending their contents to the WebView.
+            let project=kind.strip_prefix("compose-project:")?;
+            if !valid_compose_project_name(project){return None;}
+            Some(format!("docker ps -a --filter label=com.docker.compose.project={project} --format json"))
+        }
     }
+}
+fn valid_compose_project_name(name:&str)->bool{
+    !name.is_empty()&&name.len()<=128&&
+    (name.as_bytes()[0].is_ascii_lowercase()||name.as_bytes()[0].is_ascii_digit())&&
+    name.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||b==b'_'||b==b'-')
 }
 
 #[tauri::command]
@@ -1314,15 +1691,62 @@ pub async fn ssh_session_docker_catalog(
 
 #[cfg(test)]
 mod docker_catalog_tests{
-    use super::docker_catalog_command;
+    use super::{docker_catalog_command,safe_docker_json_lines};
+    #[test]
+    fn shell_neutral_json_does_not_need_quoted_go_templates(){
+        for kind in ["images","volumes","networks","stats","compose","compose-project:my_project"]{
+            let command=docker_catalog_command(kind).unwrap();
+            assert!(command.ends_with("--format json"),"{command}");
+            assert!(!command.contains("{{"),"{command}");
+            assert!(!command.contains("'"),"{command}");
+            assert!(!command.contains('"'),"{command}");
+        }
+    }
+    #[test]
+    fn json_catalog_projection_excludes_labels_and_commands(){
+        let row=r#"{"ID":"012345abcdef","Names":"api","Image":"api:1","State":"running","Status":"Up 3h","Ports":"8080/tcp","Labels":"SECRET_LABEL_VALUE","Command":"SECRET_ARGUMENT_VALUE"}"#;
+        let safe=safe_docker_json_lines("containers",row).unwrap();
+        assert!(!safe.contains("SECRET"));
+        assert!(!safe.contains("Labels"));
+        assert!(!safe.contains("Command"));
+        let value:serde_json::Value=serde_json::from_str(safe.trim()).unwrap();
+        assert_eq!(value["ID"],"012345abcdef");
+        assert_eq!(value["Names"],"api");
+        let another=r#"{"ID":"abcdef123456","Names":"db"}"#;
+        let listing=safe_docker_json_lines("compose-project:test",&format!("{row}\n{another}")).unwrap();
+        assert_eq!(listing.lines().count(),2);
+    }
+    #[test]
+    fn compose_project_json_array_is_reduced_before_webview(){
+        let raw=r#"[{"Name":"project-a","Status":"running(2)",
+          "ConfigFiles":"compose.yaml","Environment":"SECRET_ENV"},
+          {"Name":"project-b","Status":"exited(1)"}]"#;
+        let reduced=safe_docker_json_lines("compose",raw).unwrap();
+        assert!(!reduced.contains("SECRET_ENV"));
+        let values:Vec<serde_json::Value>=serde_json::from_str(&reduced).unwrap();
+        assert_eq!(values.len(),2);
+        assert_eq!(values[0]["Name"],"project-a");
+        assert_eq!(values[1]["Status"],"exited(1)");
+    }
+    #[test]
+    fn invalid_json_is_reported_without_leaking_remote_data(){
+        let error=safe_docker_json_lines("stats","not json SECRET").unwrap_err();
+        assert!(error.contains("--format json"));
+        assert!(!error.contains("SECRET"));
+        assert_eq!(safe_docker_json_lines("stats","").unwrap(),"");
+        assert!(safe_docker_json_lines("compose","{}").is_err());
+    }
     #[test]
     fn only_fixed_read_only_catalog_commands_are_accepted(){
-        for kind in ["images","volumes","networks"]{
+        for kind in ["images","volumes","networks","stats","compose"]{
             let command=docker_catalog_command(kind).unwrap();
             assert!(command.starts_with("docker "));
             assert!(command.contains("--format"));
         }
-        for bad in ["containers","images; rm -rf /","logs","docker ps",""]{
+        assert!(docker_catalog_command("compose-project:my_project").unwrap().contains("label=com.docker.compose.project=my_project"));
+        for bad in ["containers","images; rm -rf /","logs","docker ps","",
+            "compose-project:","compose-project:Bad","compose-project:foo;id",
+            "compose-project:../foo","compose-project:-bad","compose-project:foo\nbar"]{
             assert!(docker_catalog_command(bad).is_none());
         }
     }
@@ -1336,10 +1760,103 @@ pub async fn ssh_session_docker_list(id: String, manager: State<'_, SshSessionMa
     rx.await.map_err(|_| "Docker request was cancelled".to_owned())?
 }
 
+/// Shell-safe read-only Docker inspection. No Go-template quoting is involved,
+/// so Linux shells, PowerShell, and cmd.exe execute the same command.
+fn docker_inspect_command(container_id:&str)->Option<String>{
+    if !valid_docker_container_id(container_id){return None;}
+    Some(format!("docker container inspect {container_id}"))
+}
+
+/// Docker's default (non-template) inspect output is a JSON array. Only a
+/// deliberately small, non-secret subset ever leaves the native SSH backend.
+fn safe_docker_inspect_json(raw:&str)->Result<String,String>{
+    let parsed:serde_json::Value=serde_json::from_str(raw.trim())
+        .map_err(|_|"Docker returned invalid inspect JSON".to_owned())?;
+    let values=parsed.as_array()
+        .ok_or("Docker returned an unexpected inspect response (expected JSON array)")?;
+    let value=values.first().filter(|value|value.is_object())
+        .ok_or("Docker returned no inspect data for this container")?;
+    let mounts=value.get("Mounts").and_then(|v|v.as_array())
+        .map(|items|items.iter().take(100).map(|item|serde_json::json!({
+            "type":item.get("Type"),"source":item.get("Source"),
+            "destination":item.get("Destination"),"rw":item.get("RW")
+        })).collect::<Vec<_>>()).unwrap_or_default();
+    let networks=value.pointer("/NetworkSettings/Networks")
+        .and_then(|v|v.as_object())
+        .map(|items|items.keys().cloned().collect::<Vec<_>>()).unwrap_or_default();
+    // NEVER forward Config.Env, Config.Labels or the container command.
+    let safe=serde_json::json!({
+        "created":value.get("Created"),
+        "startedAt":value.pointer("/State/StartedAt"),
+        "finishedAt":value.pointer("/State/FinishedAt"),
+        "restartPolicy":value.pointer("/HostConfig/RestartPolicy/Name"),
+        "image":value.pointer("/Config/Image"),
+        "mounts":mounts,
+        "networks":networks
+    });
+    serde_json::to_string(&safe)
+        .map_err(|_|"Could not serialize safe Docker inspection".to_owned())
+}
+
 // Only container IDs from the verified Docker inventory may be used.
 // Names, flags and shell input are intentionally rejected.
 fn valid_docker_container_id(id: &str) -> bool {
     (12..=64).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod docker_inspect_tests{
+    use super::{docker_inspect_command,safe_docker_inspect_json};
+    #[test]
+    fn inspect_uses_no_shell_sensitive_go_template(){
+        assert_eq!(docker_inspect_command("012345abcdef").as_deref(),
+            Some("docker container inspect 012345abcdef"));
+        assert_eq!(docker_inspect_command(&"a".repeat(64)).is_some(),true);
+        for invalid in ["","not-a-container","../foo","012345abcdef;id",
+            "012345abcdef\\nwhoami","012345abcdef'","012345abcdef--format"]{
+            assert!(docker_inspect_command(invalid).is_none());
+        }
+    }
+    #[test]
+    fn docker_array_is_reduced_to_explicit_secret_free_fields(){
+        let raw=r#"[{"Id":"012345abcdef","Created":"2026-10-17T00:00:00Z",
+            "Config":{"Image":"alpine:3","Env":["TOKEN=must_never_leak"],
+                      "Labels":{"private.password":"must_never_leak"}},
+            "State":{"StartedAt":"2026-10-17T01:00:00Z","FinishedAt":""},
+            "HostConfig":{"RestartPolicy":{"Name":"unless-stopped"}},
+            "Mounts":[{"Type":"volume","Source":"/srv/data",
+                       "Destination":"/var/lib/app","RW":true}],
+            "NetworkSettings":{"Networks":{"default":{}}},
+            "Path":"must_never_leak"}]"#;
+        let safe=safe_docker_inspect_json(raw).expect("valid Docker inspect array");
+        assert!(!safe.contains("must_never_leak"));
+        assert!(!safe.contains("Env"));
+        assert!(!safe.contains("Labels"));
+        let parsed:serde_json::Value=serde_json::from_str(&safe).unwrap();
+        assert_eq!(parsed["image"],"alpine:3");
+        assert_eq!(parsed["restartPolicy"],"unless-stopped");
+        assert_eq!(parsed["networks"][0],"default");
+        assert_eq!(parsed["mounts"][0]["destination"],"/var/lib/app");
+    }
+    #[test]
+    fn absent_or_unexpected_inspect_response_is_actionable(){
+        assert!(safe_docker_inspect_json("[]").unwrap_err().contains("no inspect data"));
+        assert!(safe_docker_inspect_json("{}").unwrap_err().contains("expected JSON array"));
+        assert!(safe_docker_inspect_json("not json").unwrap_err().contains("invalid inspect JSON"));
+    }
+}
+
+#[tauri::command]
+pub async fn ssh_session_docker_inspect(
+    id:String,container_id:String,manager:State<'_,SshSessionManager>
+)->Result<String,String>{
+    if !valid_docker_container_id(&container_id){
+        return Err("Invalid Docker container ID".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::DockerInspect(container_id,tx)).await
+        .map_err(|_|"SSH session closed before Docker inspection")?;
+    rx.await.map_err(|_|"Docker inspection interrupted")?
 }
 
 #[tauri::command]
@@ -1384,6 +1901,41 @@ pub async fn ssh_session_docker_log_stop(
     rx.await.map_err(|_|"Docker log stream stop was interrupted")?
 }
 
+/// Interpret remote exit evidence without confusing an explicit user
+/// Stop with an unexpected dropped SSH exec channel. The retained diagnostic
+/// is bounded: Docker often prints permission/daemon errors on stderr.
+fn docker_log_exit_failure(code:Option<u32>,stopped_by_user:bool,detail:&[u8])->Option<String>{
+    if stopped_by_user{return None;}
+    match code{
+        Some(0)=>None,
+        Some(status)=>Some(format!(
+            "Remote Docker log command exited with status {status}: {}",
+            String::from_utf8_lossy(detail).chars().take(300).collect::<String>()
+        )),
+        None=>Some("Docker live log SSH channel closed without an exit status. Check Docker permissions and reconnect if SSH was interrupted.".to_owned())
+    }
+}
+
+#[cfg(test)]
+mod docker_log_exit_tests{
+    use super::docker_log_exit_failure;
+    #[test]
+    fn distinguishes_idle_follow_stop_and_remote_failure(){
+        assert!(docker_log_exit_failure(Some(0),false,b"").is_none());
+        assert!(docker_log_exit_failure(None,true,b"").is_none());
+        assert!(docker_log_exit_failure(Some(137),true,b"").is_none());
+        assert!(docker_log_exit_failure(None,false,b"").unwrap().contains("without an exit status"));
+        let error=docker_log_exit_failure(Some(1),false,b"permission denied").unwrap();
+        assert!(error.contains("status 1"));
+        assert!(error.contains("permission denied"));
+    }
+    #[test]
+    fn diagnostic_does_not_repeat_unbounded_stderr(){
+        let huge=vec![b'Z';30_000];
+        assert!(docker_log_exit_failure(Some(1),false,&huge).unwrap().len()<450);
+    }
+}
+
 fn valid_docker_action(action:&str)->bool{
     matches!(action,"start"|"stop"|"restart")
 }
@@ -1400,6 +1952,124 @@ pub async fn ssh_session_docker_action(
     rx.await.map_err(|_|"Docker action interrupted")?
 }
 
+/// The script is encoded as UTF-16LE to avoid cmd.exe and PowerShell's
+/// incompatible shell quote parsing. Only hard-coded allowlisted agent names
+/// can ever appear in this script. No user-supplied path or command is executed.
+fn powershell_encoded(script:&str)->String{
+    let bytes:Vec<u8>=script.encode_utf16().flat_map(|unit|unit.to_le_bytes()).collect();
+    format!("powershell.exe -NoProfile -NonInteractive -EncodedCommand {}",STANDARD.encode(bytes))
+}
+
+fn sanitize_probe_text(value:&str,max:usize)->String{
+    value.chars().filter(|c|!c.is_control()).take(max).collect()
+}
+async fn read_agent_probe_output(mut channel:russh::Channel<russh::client::Msg>)->Result<(bool,String),String>{
+    let mut output=Vec::new();
+    let mut exit_code=None;
+    while let Some(message)=channel.wait().await{
+        match message{
+            russh::ChannelMsg::Data{data}|russh::ChannelMsg::ExtendedData{data,..}=>{
+                if output.len().saturating_add(data.len())>16384{return Err("Agent probe exceeded 16 KiB".into());}
+                output.extend_from_slice(&data);
+            },
+            russh::ChannelMsg::ExitStatus{exit_status:code}=>exit_code=Some(code),
+            russh::ChannelMsg::Close=>break,
+            _=>{}
+        }
+    }
+    Ok((exit_code==Some(0),String::from_utf8_lossy(&output).to_string()))
+}
+
+fn windows_agent_probe_command(agent:&str)->Option<String>{
+    let name=allowed_agent_binary(agent)?;
+    let script=format!(r#"
+$ErrorActionPreference = 'SilentlyContinue'
+$name = '{name}'
+$found = $null
+$source = $null
+foreach ($ext in @('.exe','.cmd','.bat','.ps1','')) {{
+  if ($found) {{ break }}
+  $which = Get-Command ($name + $ext) -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($which -and $which.Source -and
+      $which.Source -notmatch '\\WindowsApps\\' -and
+      (Test-Path -LiteralPath $which.Source -PathType Leaf)) {{
+    $found = $which.Source
+    $source = 'Shell PATH'
+  }}
+}}
+if (-not $found) {{
+  $roots = @(
+    (Join-Path $env:APPDATA 'npm'),
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'),
+    (Join-Path $env:USERPROFILE '.local\bin'),
+    (Join-Path $env:USERPROFILE '.bun\bin'),
+    (Join-Path $env:USERPROFILE '.volta\bin'),
+    (Join-Path $env:USERPROFILE 'scoop\shims'),
+    (Join-Path $env:USERPROFILE '.cargo\bin'),
+    (Join-Path $env:LOCALAPPDATA 'pnpm'),
+    (Join-Path $env:LOCALAPPDATA 'Yarn\bin'),
+    $env:PNPM_HOME
+  ) | Where-Object {{ $_ -and (Test-Path -LiteralPath $_ -PathType Container) }} | Select-Object -Unique
+  foreach ($root in $roots) {{
+    if ($found) {{ break }}
+    foreach ($ext in @('.cmd','.exe','.ps1','.bat')) {{
+      $candidate = Join-Path $root ($name+$ext)
+      if (Test-Path -LiteralPath $candidate -PathType Leaf) {{
+        $found = $candidate
+        $source = 'User installation outside SSH PATH'
+        break
+      }}
+    }}
+  }}
+}}
+$version = $null
+if ($found) {{
+  try {{
+    $global:LASTEXITCODE = 1
+    $first = & $found --version 2>&1 | Select-Object -First 1
+    if ($LASTEXITCODE -eq 0 -and $first) {{ $version = ([string]$first).Trim() }}
+  }} catch {{}}
+}}
+$desktop = $null
+if (-not $found) {{
+  $pattern = switch ($name) {{
+    'codex' {{ '^(Codex|OpenAI Codex)(\s|$)' }}
+    'claude' {{ '^Claude(\s|$)' }}
+    'opencode' {{ '^OpenCode(\s|$)' }}
+  }}
+  try {{
+    $app = Get-StartApps | Where-Object {{ $_.Name -match $pattern }} | Select-Object -First 1
+    if ($app) {{ $desktop = [string]$app.Name }}
+  }} catch {{}}
+}}
+[PSCustomObject]@{{
+  installed = [bool]($found -and $version)
+  path = $found
+  source = $source
+  version = $version
+  desktopApp = $desktop
+}} | ConvertTo-Json -Compress -Depth 2
+"#);
+    Some(powershell_encoded(&script))
+}
+
+fn windows_agent_launch_command(path:&str)->Option<String>{
+    // Never embed paths in user-visible raw commands. Only a previously probed
+    // Windows CLI executable/script path may be launched, using an encoded
+    // PowerShell command that safely quotes apostrophes and metacharacters.
+    if path.len()>1024||path.chars().any(|c|c.is_control()) ||
+        ![".exe",".cmd",".bat",".ps1"].iter().any(|ext|path.to_ascii_lowercase().ends_with(ext)) ||
+        !(path.contains(":\\")||path.starts_with("\\\\")){return None;}
+    let script=format!("& '{}'",path.replace('\'',"''"));
+    // Launch is interactive: do not set -NonInteractive on this child shell.
+    Some(powershell_encoded(&script).replace(" -NonInteractive", ""))
+}
+
+fn parse_windows_agent_probe(output:&str)->Option<WindowsAgentProbe>{
+    output.lines().rev().map(str::trim).find_map(|line|
+        serde_json::from_str::<WindowsAgentProbe>(line).ok())
+}
+
 fn allowed_agent_binary(kind:&str)->Option<&'static str>{
     match kind{
         "codex"=>Some("codex"),
@@ -1407,6 +2077,12 @@ fn allowed_agent_binary(kind:&str)->Option<&'static str>{
         "opencode"=>Some("opencode"),
         _=>None
     }
+}
+
+#[tauri::command]
+pub async fn ssh_session_exec(id:String,command:String,
+    manager:State<'_,SshSessionManager>)->Result<RemoteExecResult,String>{
+    manager.execute_remote(&id,&command).await
 }
 
 #[tauri::command]
@@ -1544,6 +2220,42 @@ pub async fn ssh_session_sftp_read_text(id:String,path:String,manager:State<'_,S
     manager.sender(&id)?.send(SessionCommand::SftpRead(path,tx)).await
         .map_err(|_|"SSH connection has closed".to_owned())?;
     rx.await.map_err(|_|"SFTP preview was cancelled".to_owned())?
+}
+
+#[tauri::command]
+pub async fn ssh_session_sftp_read_image(id:String,path:String,manager:State<'_,SshSessionManager>)->Result<String,String>{
+    if !valid_sftp_path(&path)||path.chars().any(|c|c.is_control()){
+        return Err("Invalid SFTP image preview path".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    manager.sender(&id)?.send(SessionCommand::SftpImage(path,tx)).await
+        .map_err(|_|"SSH session closed before image preview")?;
+    rx.await.map_err(|_|"SFTP image preview interrupted".to_owned())?
+}
+
+
+fn verified_preview_image_mime(bytes:&[u8])->Option<&'static str>{
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n"){Some("image/png")}
+    else if bytes.starts_with(b"\xff\xd8\xff"){Some("image/jpeg")}
+    else if bytes.starts_with(b"GIF87a")||bytes.starts_with(b"GIF89a"){Some("image/gif")}
+    else if bytes.len()>=12&&bytes.starts_with(b"RIFF")&& &bytes[8..12]==b"WEBP"{Some("image/webp")}
+    else{None}
+}
+
+#[cfg(test)]
+mod preview_image_tests {
+    use super::verified_preview_image_mime;
+    #[test]
+    fn only_allow_bitmap_image_signatures(){
+        assert_eq!(verified_preview_image_mime(b"\x89PNG\r\n\x1a\npayload"),Some("image/png"));
+        assert_eq!(verified_preview_image_mime(b"\xff\xd8\xffpayload"),Some("image/jpeg"));
+        assert_eq!(verified_preview_image_mime(b"GIF89apayload"),Some("image/gif"));
+        assert_eq!(verified_preview_image_mime(b"RIFF1234WEBPdata"),Some("image/webp"));
+        assert_eq!(verified_preview_image_mime(b"<svg onload='alert(1)'>"),None);
+        assert_eq!(verified_preview_image_mime(b"<!doctype html>"),None);
+        assert_eq!(verified_preview_image_mime(b"RIFF1234AVI payload"),None);
+        assert_eq!(verified_preview_image_mime(b""),None);
+    }
 }
 
 fn valid_transfer_id(id:&str)->bool{
@@ -1731,6 +2443,15 @@ pub async fn ssh_session_ready(id: String, manager: State<'_, SshSessionManager>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn idle_interactive_agents_use_ssh_keepalives_not_a_ten_minute_ttl(){
+        let config=interactive_ssh_config();
+        assert!(config.nodelay, "interactive keypresses must not be delayed");
+        assert!(config.inactivity_timeout.is_none(), "a quiet live TUI must remain connected");
+        assert_eq!(config.keepalive_interval,Some(Duration::from_secs(30)));
+        assert_eq!(config.keepalive_max,3, "dead peers must eventually close");
+    }
+
 
     #[test]
     fn mutation_names_are_single_safe_path_components(){
@@ -1741,6 +2462,52 @@ mod tests {
         assert!(safe_sftp_filename(".env"));
         assert!(safe_sftp_filename("new folder"));
         assert_eq!(join_sftp_path("/home/test/","sub"),"/home/test/sub");
+    }
+
+
+    #[test]
+    fn windows_probe_names_are_strict_and_encoded(){
+        for kind in ["codex","claude","opencode"] {
+            let command=windows_agent_probe_command(kind).expect("allowlisted");
+            assert!(command.starts_with("powershell.exe -NoProfile -NonInteractive -EncodedCommand "));
+            assert!(!command.contains(";"));
+            assert!(!command.contains("Get-StartApps"));
+        }
+        for kind in ["claude;echo bad","cmd.exe","","../../../bin/bash"] {
+            assert!(windows_agent_probe_command(kind).is_none());
+        }
+    }
+    #[test]
+    fn windows_probe_does_not_confuse_windows_store_app_alias_with_cli(){
+        let encoded=windows_agent_probe_command("claude").unwrap();
+        let payload=encoded.split_whitespace().last().unwrap();
+        let bytes=STANDARD.decode(payload).unwrap();
+        let words=bytes.chunks_exact(2).map(|pair|u16::from_le_bytes([pair[0],pair[1]])).collect::<Vec<_>>();
+        let script=String::from_utf16(&words).unwrap();
+        assert!(script.contains("WindowsApps"));
+        assert!(script.contains("LASTEXITCODE -eq 0"));
+        for root in ["PNPM_HOME","scoop\\shims",".volta\\bin",".cargo\\bin","Yarn\\bin"]{
+            assert!(script.contains(root),"Windows CLI probe must include {root}");
+        }
+        assert!(script.contains("installed = [bool]($found -and $version)"));
+    }
+    #[test]
+    fn windows_cli_launch_only_uses_safe_absolute_paths(){
+        let command=windows_agent_launch_command(r"C:\Users\nazar\AppData\Roaming\npm\claude.cmd").unwrap();
+        assert!(command.starts_with("powershell.exe -NoProfile -EncodedCommand "));
+        assert!(!command.contains("-NonInteractive"));
+        assert!(!command.contains("claude.cmd"));
+        assert!(windows_agent_launch_command("claude").is_none());
+        assert!(windows_agent_launch_command("C:\\Users\\foo\\bin\\hack.cmd\nquit").is_none());
+        assert!(windows_agent_launch_command("C:\\bad\\payload.txt").is_none());
+    }
+    #[test]
+    fn windows_probe_json_is_not_confused_with_shell_noise(){
+        let content="Windows OpenSSH banner\n{\"installed\":true,\"path\":\"C:\\\\Users\\\\nazar\\\\AppData\\\\Roaming\\\\npm\\\\codex.cmd\",\"source\":\"User installation outside SSH PATH\",\"version\":\"codex 0.2\",\"desktopApp\":null}\n";
+        let found=parse_windows_agent_probe(content).unwrap();
+        assert!(found.installed);
+        assert!(found.path.unwrap().ends_with("codex.cmd"));
+        assert!(parse_windows_agent_probe("The term powershell.exe is not recognized").is_none());
     }
 
     #[test]

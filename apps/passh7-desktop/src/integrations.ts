@@ -1,6 +1,7 @@
 /**
- * Informational client registry only.
- * No external agent configuration is written, no MCP session is opened.
+ * Agent metadata and installation references for PaSSH7 workspaces.
+ * Native Rust creates short-lived local MCP configuration on launch;
+ * this browser-side registry never manages SSH credentials or CLI logins.
  */
 export type AgentKind = "codex" | "claude" | "opencode";
 export interface AgentDefinition {
@@ -11,9 +12,9 @@ export interface AgentDefinition {
   skillPackage: string;
 }
 export const AGENTS: AgentDefinition[] = [
-  {kind:"codex",name:"Codex",description:"Scoped server diagnostics and code assistance",supportsLocalStdioMcp:true,skillPackage:"skills/passh7-remote-assistant"},
-  {kind:"claude",name:"Claude Code",description:"Remote debugging with user-approved capabilities",supportsLocalStdioMcp:true,skillPackage:"skills/passh7-remote-assistant"},
-  {kind:"opencode",name:"OpenCode",description:"Developer workflows with explicit remote access",supportsLocalStdioMcp:true,skillPackage:"skills/passh7-remote-assistant"}
+  {kind:"codex",name:"Codex",description:"Remote coding and terminal workflows",supportsLocalStdioMcp:true,skillPackage:"skills/passh7-remote-assistant"},
+  {kind:"claude",name:"Claude Code",description:"Remote project analysis and debugging",supportsLocalStdioMcp:true,skillPackage:"skills/passh7-remote-assistant"},
+  {kind:"opencode",name:"OpenCode",description:"Remote developer tasks and code assistance",supportsLocalStdioMcp:true,skillPackage:"skills/passh7-remote-assistant"}
 ];
 export type HostDraft = {
   label: string;

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod ssh_sessions;
+mod local_agent_bridge;
 
 mod openssh_config;
 use std::{io::{BufReader, Read}, net::{TcpStream, ToSocketAddrs}, path::PathBuf, sync::Mutex, time::{Duration, Instant}};
@@ -117,12 +118,96 @@ impl SessionStore {
         *self.0.lock().map_err(|_| "Vault session unavailable")? = None;
         Ok(())
     }
+    // Only genuine local user interaction calls this command. Background SSH
+    // heartbeats and agent output must NOT extend the lifetime of decrypted
+    // credentials. Expired sessions are never silently reactivated.
+    fn touch_if_live(&self)->Result<bool,String>{
+        let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
+        let Some(session)=guard.as_mut() else{return Ok(false)};
+        if session.last_used.elapsed()>=IDLE_TIMEOUT{
+            *guard=None;
+            return Ok(false);
+        }
+        session.last_used=Instant::now();
+        Ok(true)
+    }
+    /// Background local agents may READ the Vault's live/expired state but
+    /// must never extend its idle timeout. This is enforced for every MCP
+    /// remote operation, not just when the initial capability was issued.
+    pub(crate) fn live_without_touch(&self)->Result<bool,String>{
+        let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
+        match guard.as_ref(){
+            Some(session) if session.last_used.elapsed()<IDLE_TIMEOUT=>Ok(true),
+            _=>{
+                *guard=None;
+                Ok(false)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod vault_local_activity_tests{
+    use super::*;
+    #[test]
+    fn local_bridge_liveness_check_does_not_extend_vault_timeout(){
+        let prior=Instant::now()-Duration::from_secs(120);
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:prior,
+        })));
+        assert!(store.live_without_touch().unwrap());
+        let guard=store.0.lock().unwrap();
+        let elapsed=guard.as_ref().unwrap().last_used.elapsed();
+        assert!(elapsed>=Duration::from_secs(119));
+    }
+    #[test]
+    fn local_bridge_check_rejects_expired_or_locked_vault(){
+        let expired=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()-IDLE_TIMEOUT-Duration::from_secs(1),
+        })));
+        assert!(!expired.live_without_touch().unwrap());
+        assert!(expired.0.lock().unwrap().is_none());
+        let locked=SessionStore::default();
+        assert!(!locked.live_without_touch().unwrap());
+    }
+    #[test]
+    fn real_local_activity_refreshes_live_vault_ttl(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()-Duration::from_secs(120)
+        })));
+        assert!(store.touch_if_live().unwrap());
+        let guard=store.0.lock().unwrap();
+        assert!(guard.as_ref().unwrap().last_used.elapsed()<Duration::from_secs(3));
+    }
+    #[test]
+    fn expired_vault_cannot_be_reactivated_by_activity(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()-IDLE_TIMEOUT-Duration::from_secs(1)
+        })));
+        assert!(!store.touch_if_live().unwrap());
+        assert!(store.0.lock().unwrap().is_none());
+        assert!(!store.touch_if_live().unwrap());
+    }
+    #[test]
+    fn explicit_vault_lock_cannot_be_reversed_by_activity(){
+        let store=SessionStore(Mutex::new(Some(UnlockedSession{
+            password:Zeroizing::new("only-in-test".to_owned()),
+            last_used:Instant::now()
+        })));
+        store.lock().unwrap();
+        assert!(!store.touch_if_live().unwrap());
+    }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HostSummary {
     alias: String,
+    display_name: Option<String>,
     hostname: String,
     port: u16,
     username: String,
@@ -217,6 +302,72 @@ async fn vault_export_encrypted_backup(
     if result.is_err() && created{let _=std::fs::remove_file(&target);}
     result?;
     Ok(Some(format!("Encrypted Vault exported and verified ({} bytes)",data.len())))
+}
+
+/// Produce a filename safe on both Windows and Unix, including reserved DOS
+/// device names. Docker container names are untrusted display data, not paths.
+fn docker_log_file_name(container_name:&str)->String {
+    let fragment:String=container_name.chars().filter(|ch|
+        ch.is_ascii_alphanumeric()||matches!(ch,'-'|'_')
+    ).take(56).collect();
+    let value=if fragment.is_empty() {"container"}else{fragment.as_str()};
+    format!("passh7-{value}-logs.txt")
+}
+
+/// Save only the currently visible/filtered Docker log lines using the OS
+/// dialog. No browser blob download or implicit overwrite is attempted.
+#[tauri::command]
+async fn docker_save_visible_logs(
+    app:tauri::AppHandle,container_name:String,contents:String
+)->Result<Option<String>,String>{
+    use tauri_plugin_dialog::DialogExt;
+    use std::io::Write;
+    if contents.is_empty(){return Err("No visible Docker log lines to save".into());}
+    if contents.len()>8*1024*1024{
+        return Err("Visible Docker log export exceeds the 8 MiB safety limit".into());
+    }
+    let (tx,rx)=tokio::sync::oneshot::channel();
+    app.dialog().file().set_file_name(docker_log_file_name(&container_name))
+        .save_file(move|selected|{let _=tx.send(selected);});
+    let chosen=rx.await.map_err(|_|"Docker log Save As dialog failed")?;
+    let Some(chosen)=chosen else{return Ok(None)};
+    let target=chosen.into_path().map_err(|_|"Choose a local filesystem path")?;
+    let mut created=false;
+    let result=(||->Result<(),String>{
+        let mut file=std::fs::OpenOptions::new().create_new(true).write(true)
+            .open(&target).map_err(|error|
+                format!("Cannot create log file (existing files are not overwritten): {error}")
+            )?;
+        created=true;
+        file.write_all(contents.as_bytes()).map_err(|error|
+            format!("Could not write Docker log file: {error}")
+        )?;
+        file.sync_all().map_err(|error|format!("Could not sync Docker log file: {error}"))?;
+        drop(file);
+        let readback=std::fs::read(&target).map_err(|error|
+            format!("Could not verify saved Docker logs: {error}")
+        )?;
+        if readback!=contents.as_bytes(){
+            return Err("Saved log bytes did not match the requested export".into());
+        }
+        Ok(())
+    })();
+    if result.is_err()&&created{let _=std::fs::remove_file(&target);}
+    result?;
+    Ok(Some(format!("Saved {} UTF-8 bytes to {}",contents.len(),target.display())))
+}
+
+#[cfg(test)]
+mod docker_log_filename_tests {
+    use super::docker_log_file_name;
+    #[test]
+    fn never_uses_container_names_as_paths(){
+        assert_eq!(docker_log_file_name("../api:prod\\\\secrets"),"passh7-apiprodsecrets-logs.txt");
+        assert_eq!(docker_log_file_name("CON"),"passh7-CON-logs.txt");
+        assert_eq!(docker_log_file_name(""),"passh7-container-logs.txt");
+        assert_eq!(docker_log_file_name("...."),"passh7-container-logs.txt");
+        assert!(docker_log_file_name(&"x".repeat(100)).len()<80);
+    }
 }
 
 fn prepare_vault_restore_preview(
@@ -386,6 +537,13 @@ fn vault_restore_commit(
 }
 
 #[tauri::command]
+fn vault_touch(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool,String>{
+    let active=sessions.touch_if_live()?;
+    if !active{ssh.stop_all();}
+    Ok(active)
+}
+
+#[tauri::command]
 fn vault_status(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool, String> {
     let mut guard = sessions.0.lock().map_err(|_| "Vault session unavailable")?;
     if guard.as_ref().is_some_and(|s| s.last_used.elapsed() >= IDLE_TIMEOUT) { *guard = None; ssh.stop_all(); }
@@ -396,7 +554,8 @@ fn vault_list_hosts(sessions: State<'_, SessionStore>) -> Result<Vec<HostSummary
     sessions.use_password(|password| {
         let vault = passh7_core::load(&vault_path()?, password).map_err(safe_err)?;
         Ok(vault.hosts.into_iter().map(|h| HostSummary {
-            alias:h.alias,hostname:h.hostname,port:h.port,username:h.username,
+            alias:h.alias,display_name:h.extensions.get("passh7_display_name").and_then(|v|v.as_str()).map(str::to_owned),
+            hostname:h.hostname,port:h.port,username:h.username,
             identity_alias:h.identity_alias,host_key_pinned:h.pinned_host_key.is_some(),
             has_saved_credentials:h.extensions.contains_key("passh7_saved_auth"),
             saved_auth_mode:h.extensions.get("passh7_saved_auth").and_then(|v| v.get("mode")).and_then(|v| v.as_str()).map(str::to_owned),
@@ -420,6 +579,107 @@ fn vault_add_host(host: HostInput, sessions: State<'_, SessionStore>) -> Result<
                 username:host.username.clone(),identity_alias:host.identity_alias.clone(),
                 pinned_host_key:host.pinned_host_key.clone(),extensions:Default::default()
             })?;
+            Ok(true)
+        }).map_err(safe_err)
+    })
+}
+/// Update only the immutable-alias host's connection parameters. Changing SSH
+/// endpoint/identity requires a fresh host-key verification and login.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateHostInput {
+    alias:String, display_name:String, hostname:String, port:u16, username:String,
+    identity_alias:String, reset_host_key:bool, forget_credentials:bool,
+}
+fn host_connection_changed(current:&passh7_core::HostProfile,edit:&UpdateHostInput)->bool{
+    current.hostname!=edit.hostname||current.port!=edit.port||
+        current.username!=edit.username||current.identity_alias!=edit.identity_alias||
+        edit.reset_host_key||edit.forget_credentials
+}
+#[cfg(test)]
+mod host_profile_edit_tests{
+    use super::*;
+    #[test]
+    fn live_display_name_change_is_not_an_ssh_connection_change(){
+        let original=passh7_core::HostProfile{
+            alias:"gateway".into(),hostname:"server.example".into(),port:22,
+            username:"ubuntu".into(),identity_alias:String::new(),
+            pinned_host_key:None,extensions:Default::default(),
+        };
+        let mut edit=UpdateHostInput{
+            alias:"gateway".into(),display_name:"Renamed server".into(),
+            hostname:"server.example".into(),port:22,username:"ubuntu".into(),
+            identity_alias:String::new(),reset_host_key:false,forget_credentials:false,
+        };
+        assert!(!host_connection_changed(&original,&edit));
+        edit.hostname="different.example".into();
+        assert!(host_connection_changed(&original,&edit));
+        edit.hostname=original.hostname.clone();
+        edit.username="newuser".into();
+        assert!(host_connection_changed(&original,&edit));
+        edit.username=original.username.clone();
+        edit.identity_alias="new-key".into();
+        assert!(host_connection_changed(&original,&edit));
+        edit.identity_alias=String::new();
+        edit.reset_host_key=true;
+        assert!(host_connection_changed(&original,&edit));
+        edit.reset_host_key=false;
+        edit.forget_credentials=true;
+        assert!(host_connection_changed(&original,&edit));
+    }
+}
+#[tauri::command]
+fn vault_update_host(host:UpdateHostInput,sessions:State<'_,SessionStore>,
+    ssh:State<'_,SshSessionManager>)->Result<(),String>{
+    if host.alias.trim().is_empty()||host.display_name.trim().is_empty()||
+        host.display_name.trim().len()>80||host.display_name.chars().any(|c|c.is_control())||
+        host.hostname.trim().is_empty()||
+        host.hostname.len()>253||host.hostname.chars().any(|c|c.is_whitespace()||c.is_control())||
+        host.username.trim().is_empty()||host.username.len()>128||
+        host.username.chars().any(|c|c.is_whitespace()||c.is_control())||host.port==0{
+        return Err("Invalid SSH hostname, port or username".into());
+    }
+    // Friendly display names are UI metadata, not SSH transport identity.
+    // They may be changed while PTYs are live; endpoint/account/key/trust
+    // changes remain blocked until the affected transports disconnect.
+    let live=ssh.active_sessions()?;
+    sessions.use_password(|password|{
+        passh7_core::transaction(&vault_path()?,password,|vault|{
+            let current=vault.hosts.iter().find(|saved|saved.alias==host.alias)
+                .ok_or(HubError::InvalidInput("Host was not found in Vault"))?;
+            let connection_changed=host_connection_changed(current,&host);
+            if connection_changed&&live.iter().any(|session|session.alias==host.alias){
+                return Err(HubError::InvalidInput(
+                    "Disconnect this host's SSH sessions before changing its SSH connection"));
+            }
+            if connection_changed&&vault.hosts.iter().any(|dependent|
+                dependent.extensions.get("passh7_jump_alias").and_then(|v|v.as_str())==Some(host.alias.as_str())
+                    &&live.iter().any(|session|session.alias==dependent.alias)){
+                return Err(HubError::InvalidInput(
+                    "Disconnect dependent private-host SSH sessions before changing this jump gateway"));
+            }
+            if !host.identity_alias.is_empty()&&!vault.identities.iter().any(|identity|identity.alias==host.identity_alias){
+                return Err(HubError::InvalidInput("Choose a key that exists in the encrypted Vault"));
+            }
+            let current=vault.hosts.iter_mut().find(|saved|saved.alias==host.alias)
+                .ok_or(HubError::InvalidInput("Host was not found in Vault"))?;
+            let endpoint_changed=current.hostname!=host.hostname||current.port!=host.port;
+            let account_changed=current.username!=host.username||
+                current.identity_alias!=host.identity_alias;
+            if host.display_name.trim()==host.alias{
+                current.extensions.remove("passh7_display_name");
+            }else{
+                current.extensions.insert("passh7_display_name".into(),
+                    serde_json::Value::String(host.display_name.trim().to_owned()));
+            }
+            current.hostname=host.hostname.clone();
+            current.port=host.port;
+            current.username=host.username.clone();
+            current.identity_alias=host.identity_alias.clone();
+            if endpoint_changed||host.reset_host_key { current.pinned_host_key=None; }
+            if endpoint_changed||account_changed||host.forget_credentials {
+                current.extensions.remove("passh7_saved_auth");
+            }
             Ok(true)
         }).map_err(safe_err)
     })
@@ -1037,17 +1297,23 @@ async fn tokio_timeout_connect<A: tokio::net::ToSocketAddrs>(
 }
 
 fn main() {
+    // An MCP stdio child must not initialize a second desktop/WebView instance.
+    if std::env::args().nth(1).as_deref()==Some("--passh7-mcp"){
+        local_agent_bridge::run_stdio_mcp();
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(SessionStore::default())
         .manage(PendingVaultRestore::default())
         .manage(SshSessionManager::default())
+        .manage(local_agent_bridge::LocalAgentBridge::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,openssh_config::ssh_discover_local_config_hosts,
-            vault_list_hosts,vault_add_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
+            vault_list_hosts,vault_add_host,vault_update_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
-            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
+            ssh_sessions::ssh_session_ready,ssh_sessions::ssh_session_vault_backup,ssh_sessions::ssh_session_vault_backup_batch,ssh_sessions::ssh_session_docker_list,ssh_sessions::ssh_session_docker_catalog,ssh_sessions::ssh_session_docker_inspect,ssh_sessions::ssh_session_docker_logs,ssh_sessions::ssh_session_docker_log_start,ssh_sessions::ssh_session_docker_log_stop,ssh_sessions::ssh_session_docker_action,ssh_sessions::ssh_session_agent_probe,ssh_sessions::ssh_session_exec,local_agent_bridge::local_agent_probe,local_agent_bridge::local_agent_launch,local_agent_bridge::local_agent_connections,local_agent_bridge::local_agent_revoke,ssh_sessions::ssh_session_sftp_list,ssh_sessions::ssh_session_sftp_mutate,ssh_sessions::ssh_session_sftp_read_text,ssh_sessions::ssh_session_sftp_read_image,ssh_sessions::ssh_session_sftp_download,ssh_sessions::ssh_session_sftp_upload,ssh_sessions::ssh_session_sftp_cancel,ssh_sessions::ssh_session_forward_start,ssh_sessions::ssh_session_forward_stop,ssh_sessions::ssh_session_forward_list
         ])
         .run(tauri::generate_context!())
         .expect("unable to start PaSSH7");

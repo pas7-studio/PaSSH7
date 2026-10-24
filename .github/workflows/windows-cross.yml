@@ -115,3 +115,28 @@ jobs:
           path: apps/passh7-desktop/src-tauri/target/x86_64-pc-windows-gnu/release/passh7-desktop.exe
           if-no-files-found: error
           retention-days: 14
+
+  windows-mcp-smoke:
+    name: Native Windows MCP stdio smoke
+    needs: windows-cross
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: PaSSH7-Windows-GNU-x64-experimental
+          path: windows-build
+      - name: Test packaged Windows PE MCP transport and fail-closed behavior
+        shell: pwsh
+        run: |
+          ./apps/passh7-desktop/scripts/windows-agent-mcp-smoke.ps1 -ExecutablePath "$env:GITHUB_WORKSPACE/windows-build/passh7-desktop.exe"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test all native MCP tools through authenticated framed loopback
+        shell: pwsh
+        run: |
+          python apps/passh7-desktop/scripts/windows-mcp-loopback-smoke.py "$env:GITHUB_WORKSPACE/windows-build/passh7-desktop.exe"
