@@ -200,7 +200,7 @@ export async function runNativeAppSession(page:Page){
   await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
   await expect(page.locator(".agentTerminalFrame .xterm")).toHaveCount(1);
   await expect(page.locator(".agentTerminalFrame .xterm[data-original-instance='kept']")).toHaveCount(1);
-  const chooser=page.getByRole("combobox",{name:"Choose SSH terminal for agent"});
+  const chooser=page.getByRole("combobox",{name:"SSH target for AI assistant"});
   await chooser.selectOption("session-b");
   await expect(page.locator(".agentTerminalFrame .terminalSessionSurface")).toHaveAttribute("data-ssh-session","session-b");
 
@@ -208,18 +208,18 @@ export async function runNativeAppSession(page:Page){
   // Auto uses an already signed-in local CLI and grants access only to the
   // selected native SSH session (not to the SSH identity or account password).
   await page.evaluate(()=>{window.confirm=()=>true;});
-  await page.locator(".agentCard.opencode").click();
-  await page.getByRole("button",{name:"Launch automatically"}).click();
-  await expect(page.locator(".agentLaunch .workspaceNotice")).toContainText("Launched local opencode");
+  await page.getByRole("combobox",{name:"Coding assistant"}).selectOption("opencode");
+  await page.getByRole("button",{name:"Launch OpenCode"}).click();
+  await expect(page.locator(".agentQuickLaunch .workspaceNotice")).toContainText("Launched local opencode");
   const launches=await page.evaluate(()=>
     (window as unknown as {__mockSshBridge:{localAgentLaunches:Array<{id:string;agent:string}>}})
       .__mockSshBridge.localAgentLaunches
   );
   expect(launches).toEqual([{id:"session-b",agent:"opencode"}]);
-  await page.locator(".agentModeOption").filter({hasText:"Run directly in the authenticated SSH terminal."}).click();
-  await expect(page.getByRole("button",{name:"Launch remote CLI"})).toBeVisible();
-  await page.getByRole("button",{name:/Auto · remote first/}).click();
-  await page.locator(".agentCard.codex").click();
+  await page.getByRole("button",{name:"Remote SSH",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Run OpenCode over SSH"})).toBeVisible();
+  await page.getByRole("button",{name:"Auto",exact:true}).click();
+  await page.getByRole("combobox",{name:"Coding assistant"}).selectOption("codex");
   await page.getByRole("button",{name:"Focus console"}).click();
   await page.keyboard.type("echo persistent");
   await page.keyboard.press("Enter");
@@ -304,7 +304,7 @@ export async function runNativeAppSession(page:Page){
   // A host may have several active PTYs. Restore the user's last chosen PTY,
   // rather than switching silently back to session-a on return.
   await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
-  await page.getByRole("combobox",{name:"Choose SSH terminal for agent"}).selectOption("session-b");
+  await page.getByRole("combobox",{name:"SSH target for AI assistant"}).selectOption("session-b");
   await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
   await expect(page.locator(".agentTerminalFrame .terminalSessionSurface"))
     .toHaveAttribute("data-ssh-session","session-c");
