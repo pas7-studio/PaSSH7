@@ -254,6 +254,11 @@ export async function controlDockerContainer(sessionId:string,containerId:string
   return invoke<string>("ssh_session_docker_action",{id:sessionId,containerId,action});
 }
 
+/** Configures the bounded native Vault idle lock. This is a local UI policy,
+ * never extended by remote CLI or SSH background activity. */
+export async function setVaultIdleTimeout(minutes:15|30|60|240|480):Promise<number>{
+  return invoke<number>("vault_set_idle_timeout",{minutes});
+}
 export type LocalAgentAvailability={installed:boolean;path:string|null;diagnostic:string};
 export async function probeLocalAgent(agent:"codex"|"claude"|"opencode"):Promise<LocalAgentAvailability>{
   return invoke<LocalAgentAvailability>("local_agent_probe",{agent});
