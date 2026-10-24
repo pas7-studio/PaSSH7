@@ -261,6 +261,11 @@ export async function setVaultIdleTimeout(minutes:15|30|60|240|480):Promise<numb
 }
 /** Reads user clipboard for interactive SSH terminal paste, never logs or persists it.
  * On Windows native Win32 clipboard avoids WebView permission-prompt failures. */
+/** Remaining idle-lock time in seconds; null when Never or Vault is locked.
+ * Observation does not keep the Vault or any SSH capability alive. */
+export async function getVaultIdleRemaining():Promise<number|null>{
+  return invoke<number|null>("vault_idle_remaining");
+}
 export async function readTerminalClipboard():Promise<string>{
   return invoke<string>("terminal_clipboard_read");
 }
