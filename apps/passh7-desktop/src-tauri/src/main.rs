@@ -10,6 +10,7 @@ use tauri::State;
 use ssh_sessions::SshSessionManager;
 use passh7_core::{HostProfile, HubError, Identity};
 
+#[cfg(test)]
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 static VAULT_IDLE_MINUTES:AtomicU32=AtomicU32::new(15);
 fn current_idle_timeout()->Duration{
