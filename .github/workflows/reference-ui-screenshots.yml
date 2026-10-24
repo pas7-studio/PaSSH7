@@ -2,7 +2,7 @@ name: PaSSH7 reference UI screenshot smoke
 on:
   workflow_dispatch:
   push:
-    branches: [fix/local-agent-grant-recovery]
+    branches: [fix/local-agent-grant-recovery, fix/vault-resume-and-terminal-paste]
     paths:
       - 'apps/passh7-desktop/**'
       - '.github/workflows/reference-ui-screenshots.yml'

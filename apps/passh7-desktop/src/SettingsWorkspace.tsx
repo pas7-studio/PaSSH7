@@ -172,8 +172,11 @@ export default function SettingsWorkspace({preferences,onChange,buildInfo,vaultU
                 <option value={60}>1 hour</option>
                 <option value={240}>4 hours</option>
                 <option value={480}>8 hours</option>
+                <option value={720}>12 hours</option>
+                <option value={0}>Never — until manually locked or PaSSH7 closes</option>
               </select></label>
-            {infoRow("MCP grant recovery","After a host reconnect or time-limited grant expiry, AI Agents can restore the same CLI's access to that host with explicit confirmation. An explicitly revoked token cannot be restored.","Manual approval")}
+            {preferences.vaultIdleMinutes===0&&<p role="status" className="workspaceNotice"><LockKeyhole size={15}/> Automatic idle lock is OFF. Your decrypted Vault and SSH access remain available while PaSSH7 is running. Use Lock Vault manually on shared or unattended computers.</p>}
+            {infoRow("MCP grant recovery","After auto-lock, unlock Vault, reconnect the same SSH host, then use Restore SSH access in AI Agents. Vault lock intentionally disconnects SSH; an explicitly revoked grant cannot be restored. An explicitly revoked token cannot be restored.","Manual approval")}
           </>)}
         </>}
         {section==="terminal"&&<>

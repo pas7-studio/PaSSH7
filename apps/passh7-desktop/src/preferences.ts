@@ -26,7 +26,7 @@ export type AppPreferences={
   sftpSort:"folders"|"name"|"size"|"modified";
   confirmTransfer:boolean;
   rememberWorkspace:boolean;
-  vaultIdleMinutes:15|30|60|240|480;
+  vaultIdleMinutes:0|15|30|60|240|480|720;
   sidebarExpanded:boolean;
   paneSizes:PaneSizes;
 };
@@ -62,7 +62,7 @@ export function validatePreferences(source:unknown):AppPreferences{
     sftpSort:["folders","name","size","modified"].includes(data.sftpSort??"")?data.sftpSort!:"folders",
     confirmTransfer:data.confirmTransfer!==false,
     rememberWorkspace:data.rememberWorkspace!==false,
-    vaultIdleMinutes:([15,30,60,240,480] as number[]).includes(data.vaultIdleMinutes??0)?
+    vaultIdleMinutes:([0,15,30,60,240,480,720] as number[]).includes(data.vaultIdleMinutes??-1)?
       data.vaultIdleMinutes!:15,
     sidebarExpanded:data.sidebarExpanded!==false,
     paneSizes:{

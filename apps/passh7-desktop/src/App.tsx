@@ -15,7 +15,7 @@ import useModalFocus from "./useModalFocus";
 import {loadPreferences,savePreferences,type AppPreferences,type PaneSizes} from "./preferences";
 import {useEffect,useMemo,useState} from "react";
 import {listen} from "@tauri-apps/api/event";
-import {addHost,updateHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,setVaultIdleTimeout,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,reauthorizeLocalAgentConnection,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
+import {addHost,updateHost,desktopAvailable,getHosts,initializeVault,unlockVault as unlockNativeVault,lockVault as lockNativeVault,vaultExists,vaultStatus,touchVaultActivity,setVaultIdleTimeout,getVaultIdleRemaining,getIdentities,importIdentity,setHostIdentity,setHostJumpRoute,setHostBackupDirectory,discoverLocalSshConfigHosts,type LocalSshConfigHost,removeHost,removeIdentity,getBuildInfo,type BuildInfo,probeSshHost,type SshProbeResult,authenticateSshHost,openSshSession,closeSshSession,writeSshSession,generateEd25519,getPublicIdentity,type GeneratedPublicKey,saveHostCredentials,forgetHostCredentials,listDockerContainers,listDockerStats,type DockerRuntimeStats,inspectDockerContainer,type DockerDetails,readDockerLogs,startDockerLogStream,stopDockerLogStream,type DockerLogEvent,controlDockerContainer,probeRemoteAgent,type RemoteAgentAvailability,probeLocalAgent,type LocalAgentAvailability,launchLocalAgent,listLocalAgentConnections,reauthorizeLocalAgentConnection,revokeLocalAgentConnection,type LocalAgentConnection,discoverSshHostKey,discoverSshHostKeyVia,pinSshHostKey,listSftpDirectory,type SftpEntry,readSftpImage,startLocalForward,stopLocalForward,listLocalForwards,readSftpText,mutateSftpFile,backupEncryptedVaultToSsh,backupEncryptedVaultBatch,type VaultBackupBatchProgress,exportEncryptedVaultLocally,inspectEncryptedVaultBackup,inspectRemoteEncryptedVaultBackup,commitEncryptedVaultRestore,type VaultRestorePreview,listLiveSshSessions} from "./backend";
 import {AGENTS,validateHostDraft,type AgentKind,type HostDraft} from "./integrations";
 import {Activity, Bot, ChevronDown, CircleHelp, Command, Container, FileText, FolderClosed, KeyRound, LockKeyhole, Monitor, Pencil, Plus, Search, Server, Settings2, ShieldCheck, TerminalSquare, Trash2, X} from "lucide-react";
 
@@ -44,22 +44,45 @@ export default function App(){
   const [selected,setSelected]=useState("dev");
   const [sshTabs,setSshTabs]=useState<{id:string;alias:string}[]>([]);
   const [vaultUnlocked,setVaultUnlocked]=useState(false);
+  const [vaultIdleRemaining,setVaultIdleRemaining]=useState<number|null>(null);
+  const vaultEpoch=useRef(0);
+  // Keep only non-secret host aliases for a human-controlled recovery flow.
+  // Neither decrypted Vault data nor CLI grant tokens are persisted.
+  const lastConnectedHostsRef=useRef<{aliases:string[];preferred:string}|null>(null);
+  const [vaultRecovery,setVaultRecovery]=useState<{aliases:string[];preferred:string;reason:"idle"|"manual"}|null>(null);
+  const noteVaultLocked=(reason:"idle"|"manual")=>{
+    vaultEpoch.current++;
+    setVaultIdleRemaining(null);
+    const previous=lastConnectedHostsRef.current;
+    if(previous?.aliases.length)setVaultRecovery({...previous,reason});
+    if(reason==="idle")setVaultDialog(true);
+    setVaultUnlocked(false);setHosts([]);setSelected("");
+  };
   const lastLocalVaultActivity=useRef(Number.NEGATIVE_INFINITY);
   const noteLocalVaultActivity=()=>{
     if(!vaultUnlocked||!desktopAvailable())return;
     const now=performance.now();
-    // Protect against IPC floods while preserving a 15-minute idle TTL.
+    // Protect against IPC floods; native Vault enforces the user-selected idle policy.
     // Only actual DOM interaction (keyboard/pointer), not SSH output or
     // recurring polls, is permitted to refresh unlocked credentials.
     if(now-lastLocalVaultActivity.current<60_000)return;
     lastLocalVaultActivity.current=now;
+    const epoch=vaultEpoch.current;
     void touchVaultActivity().then(active=>{
-      if(!active){setVaultUnlocked(false);setHosts([]);setSelected("");}
+      if(!active&&vaultEpoch.current===epoch)noteVaultLocked("idle");
     }).catch(()=>{/* Existing vault_status poll independently enforces expiry. */});
   };
   // Native session events use a stable callback; its owner map stays fresh.
   const sshTabsRef=useRef(sshTabs);
   useEffect(()=>{sshTabsRef.current=sshTabs},[sshTabs]);
+  useEffect(()=>{
+    if(vaultUnlocked&&sshTabs.length){
+      lastConnectedHostsRef.current={
+        aliases:[...new Set(sshTabs.map(t=>t.alias))],
+        preferred: sshTabs.some(t=>t.alias===selected)?selected:sshTabs[0].alias
+      };
+    }
+  },[vaultUnlocked,sshTabs,selected]);
   const [activeSsh,setActiveSsh]=useState("");
   // Remember the user's selected terminal per host. With multiple SSH shells
   // open on the same machine, switching away and back must NOT silently
@@ -338,8 +361,23 @@ export default function App(){
     }
   },[vaultUnlocked]);
   useEffect(()=>{if(desktopAvailable()){void vaultExists().then(setVaultPresent).catch(()=>setVaultPresent(false))}},[]);
-  const lockVault=async()=>{await lockNativeVault();setVaultPassword("");setVaultUnlocked(false);setHosts([]);setIdentities([])};
-  const unlockVault=async()=>{try{if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}await unlockNativeVault(vaultPassword);setVaultPassword("");const saved=await getHosts();setIdentities(await getIdentities());setHosts(saved.map((h,i)=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));setSelected(saved[0]?.alias||"");setVaultUnlocked(true);setVaultDialog(false);setError("")}catch(e){setError(String(e))}};
+  const lockVault=async()=>{
+    await lockNativeVault();setVaultPassword("");noteVaultLocked("manual");setIdentities([]);
+  };
+  const unlockVault=async()=>{try{
+    if(!vaultPresent){await initializeVault(vaultPassword);setVaultPresent(true)}
+    await unlockNativeVault(vaultPassword);
+    vaultEpoch.current++;
+    setVaultPassword("");
+    const saved=await getHosts();
+    setIdentities(await getIdentities());
+    setHosts(saved.map(h=>({id:h.alias,label:h.displayName||h.alias,address:h.hostname,user:h.username,port:h.port,group:"My hosts",fingerprint:h.hostKeyPinned,identityAlias:h.identityAlias,hasSavedCredentials:h.hasSavedCredentials,savedAuthMode:h.savedAuthMode,backupDirectory:h.backupDirectory,jumpAlias:h.jumpAlias})));
+    const prior=vaultRecovery?.preferred;
+    setSelected(saved.some(h=>h.alias===prior)?prior!:saved[0]?.alias||"");
+    setVaultUnlocked(true);setVaultDialog(false);setError("");
+    // Locked Vault intentionally disconnected SSH. Show reconnect controls,
+    // rather than silently replaying remote commands or authorizing agents.
+  }catch(e){setError(String(e))}};
   // A WebView refresh can remount React without terminating the Rust process.
   // Recover ONLY an already-unlocked native vault and already-open sessions;
   // never auto-unlock persisted vault data or request secret material.
@@ -348,6 +386,9 @@ export default function App(){
     let mounted=true;
     const restore=async()=>{
       try{
+        // Apply saved policy before reading Vault status. A WebView reload
+        // must not inadvertently enforce the native default 15-min TTL.
+        await setVaultIdleTimeout(loadPreferences().vaultIdleMinutes);
         if(!await vaultStatus())return;
         const [saved,identities,live]=await Promise.all([
           getHosts(),getIdentities(),listLiveSshSessions()
@@ -373,7 +414,20 @@ export default function App(){
     void restore();
     return()=>{mounted=false};
   },[]);
-  useEffect(()=>{if(!desktopAvailable()||!vaultUnlocked)return;const id=window.setInterval(()=>{void vaultStatus().then(ok=>{if(!ok){setVaultUnlocked(false);setHosts([]);setSelected("");}}).catch(()=>{})},30000);return ()=>window.clearInterval(id)},[vaultUnlocked]);
+  useEffect(()=>{
+    if(!desktopAvailable()||!vaultUnlocked)return;
+    const epoch=vaultEpoch.current;
+    const refresh=()=>{
+      void Promise.all([vaultStatus(),getVaultIdleRemaining()]).then(([alive,seconds])=>{
+        if(vaultEpoch.current!==epoch)return;
+        if(!alive){noteVaultLocked("idle");return}
+        setVaultIdleRemaining(seconds);
+      }).catch(()=>{});
+    };
+    refresh();
+    const id=window.setInterval(refresh,15000);
+    return ()=>window.clearInterval(id);
+  },[vaultUnlocked]);
   const [configImportOpen,setConfigImportOpen]=useState(false);
   const [configImportBusy,setConfigImportBusy]=useState(false);
   const [configImportError,setConfigImportError]=useState("");
@@ -1653,6 +1707,40 @@ export default function App(){
         {sessionNotice.kind!=="close-failed"&&sessionNotice.alias&&hosts.some(h=>h.id===sessionNotice.alias)&&vaultUnlocked&&
           <button type="button" disabled={sshBusy} onClick={()=>reconnectNotice(sessionNotice.alias)}>Reconnect</button>}
         <button type="button" aria-label="Dismiss session notice" onClick={()=>setSessionNotice(null)}>Dismiss</button>
+      </div>
+    </div>}
+    {vaultUnlocked&&vaultIdleRemaining!==null&&vaultIdleRemaining>0&&vaultIdleRemaining<=120&&
+      <div className="globalSessionNotice vaultIdleWarning" role="status" aria-live="polite">
+        <div className="globalSessionNoticeText"><LockKeyhole size={17}/>
+          <span><strong>Vault will auto-lock soon</strong> · Approximately {Math.max(1,Math.ceil(vaultIdleRemaining/60))} minute(s) remaining. SSH terminals and agent tools will disconnect at lock.</span>
+        </div>
+        <div className="globalSessionNoticeActions">
+          <button type="button" onClick={()=>void touchVaultActivity().then(ok=>{
+            if(ok)setVaultIdleRemaining(preferences.vaultIdleMinutes===0?null:preferences.vaultIdleMinutes*60);
+            else noteVaultLocked("idle");
+          }).catch(()=>{})}>Keep unlocked</button>
+          <button type="button" onClick={()=>setPanel("settings")}>Change auto-lock</button>
+        </div>
+      </div>}
+    {vaultRecovery&&<div className="globalSessionNotice vaultResumeNotice" role="status" aria-live="polite">
+      <div className="globalSessionNoticeText"><LockKeyhole size={17}/>
+        <span><strong>{vaultUnlocked?"Resume your SSH workspace":vaultRecovery.reason==="idle"?"Vault automatically locked":"Vault locked"}</strong> ·
+          {vaultUnlocked?" The Vault is unlocked again, but the previous SSH terminals were disconnected. Reconnect explicitly, then restore the original CLI grant in AI Agents. Running PTY commands cannot be automatically resumed.":" SSH sessions and remote agent tools are paused/disconnected. Unlock to reconnect safely; no commands will be replayed."}</span>
+      </div>
+      <div className="globalSessionNoticeActions">
+        {!vaultUnlocked?<button type="button" onClick={()=>setVaultDialog(true)}>Unlock &amp; resume</button>:
+          <>
+            {vaultRecovery.aliases.filter(alias=>hosts.some(h=>h.id===alias)).slice(0,3).map(alias=>
+              sshTabs.some(tab=>tab.alias===alias)?
+                <button type="button" key={alias} onClick={()=>{
+                  const tab=sshTabs.find(t=>t.alias===alias);
+                  if(tab){setSelected(alias);setActiveSsh(tab.id);setPanel("agent")}
+                }}>Restore agent tools · {hosts.find(h=>h.id===alias)?.label||alias}</button>:
+                <button type="button" key={alias} disabled={sshBusy} onClick={()=>reconnectNotice(alias)}>
+                  Reconnect · {hosts.find(h=>h.id===alias)?.label||alias}
+                </button>)}
+          </>}
+        <button type="button" aria-label="Dismiss Vault recovery" onClick={()=>setVaultRecovery(null)}>Dismiss</button>
       </div>
     </div>}
     {<SessionStrip sessions={sshTabs} hosts={hosts} closingSessions={closingSessions}

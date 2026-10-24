@@ -13,8 +13,16 @@ use passh7_core::{HostProfile, HubError, Identity};
 #[cfg(test)]
 const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 static VAULT_IDLE_MINUTES:AtomicU32=AtomicU32::new(15);
-fn current_idle_timeout()->Duration{
-    Duration::from_secs(VAULT_IDLE_MINUTES.load(Ordering::Relaxed) as u64*60)
+/// None means the user explicitly disabled idle locking for this running
+/// desktop. The explicit Lock button and application exit remain effective.
+fn idle_timeout_for_minutes(minutes:u32)->Option<Duration>{
+    if minutes==0{None}else{Some(Duration::from_secs(minutes as u64*60))}
+}
+fn current_idle_timeout()->Option<Duration>{
+    idle_timeout_for_minutes(VAULT_IDLE_MINUTES.load(Ordering::Relaxed))
+}
+fn vault_idle_expired(last_used:Instant)->bool{
+    current_idle_timeout().is_some_and(|timeout|last_used.elapsed()>=timeout)
 }
 
 #[derive(Default)]
@@ -111,7 +119,7 @@ impl SessionStore {
     fn use_password<T>(&self, operation: impl FnOnce(&str) -> Result<T, String>) -> Result<T, String> {
         let mut guard = self.0.lock().map_err(|_| "Vault session unavailable")?;
         let session = guard.as_mut().ok_or("Vault is locked")?;
-        if session.last_used.elapsed() >= current_idle_timeout() {
+        if vault_idle_expired(session.last_used) {
             *guard = None;
             return Err("Vault session expired".into());
         }
@@ -129,7 +137,7 @@ impl SessionStore {
     fn touch_if_live(&self)->Result<bool,String>{
         let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
         let Some(session)=guard.as_mut() else{return Ok(false)};
-        if session.last_used.elapsed()>=current_idle_timeout(){
+        if vault_idle_expired(session.last_used){
             *guard=None;
             return Ok(false);
         }
@@ -142,7 +150,7 @@ impl SessionStore {
     pub(crate) fn live_without_touch(&self)->Result<bool,String>{
         let mut guard=self.0.lock().map_err(|_|"Vault session unavailable")?;
         match guard.as_ref(){
-            Some(session) if session.last_used.elapsed()<current_idle_timeout()=>Ok(true),
+            Some(session) if !vault_idle_expired(session.last_used)=>Ok(true),
             _=>{
                 *guard=None;
                 Ok(false)
@@ -154,6 +162,13 @@ impl SessionStore {
 #[cfg(test)]
 mod vault_local_activity_tests{
     use super::*;
+    #[test]
+    fn configurable_idle_timeout_supports_explicit_never_and_rejects_invalid_values(){
+        assert_eq!(idle_timeout_for_minutes(0),None);
+        assert_eq!(idle_timeout_for_minutes(15),Some(Duration::from_secs(900)));
+        assert_eq!(idle_timeout_for_minutes(720),Some(Duration::from_secs(43200)));
+        assert!(![0,15,30,60,240,480,720].contains(&42));
+    }
     #[test]
     fn local_bridge_liveness_check_does_not_extend_vault_timeout(){
         let prior=Instant::now()-Duration::from_secs(120);
@@ -550,19 +565,89 @@ fn vault_touch(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManag
 
 /// Only explicit user-selected idle policies are accepted; a local coding CLI
 /// cannot extend this timer through its MCP calls or SSH keepalives.
+/// Copy/paste in the SSH terminal must not depend on WebView2's clipboard
+/// permission prompt. Only a user-initiated UI paste invokes this command.
+#[tauri::command]
+fn terminal_clipboard_read()->Result<String,String>{
+    #[cfg(windows)]
+    {
+        use std::{ffi::c_void,ptr,slice};
+        #[link(name="user32")]
+        extern "system"{
+            fn OpenClipboard(owner:*mut c_void)->i32;
+            fn CloseClipboard()->i32;
+            fn GetClipboardData(format:u32)->*mut c_void;
+        }
+        #[link(name="kernel32")]
+        extern "system"{
+            fn GlobalLock(handle:*mut c_void)->*mut c_void;
+            fn GlobalUnlock(handle:*mut c_void)->i32;
+            fn GlobalSize(handle:*mut c_void)->usize;
+        }
+        // Clipboard access is synchronous and owned by this Windows process.
+        // Read only CF_UNICODETEXT, cap at 512 KiB and never log clipboard data.
+        unsafe {
+            let mut opened=false;
+            for _ in 0..4 {
+                if OpenClipboard(ptr::null_mut())!=0{opened=true;break}
+                std::thread::sleep(Duration::from_millis(15));
+            }
+            if !opened{return Err("Windows clipboard is busy. Retry paste.".into());}
+            let value=(||->Result<String,String>{
+                let handle=GetClipboardData(13); // CF_UNICODETEXT
+                if handle.is_null(){return Err("Clipboard contains no plain Unicode text.".into());}
+                let size=GlobalSize(handle);
+                if size==0{return Err("Clipboard text size unavailable.".into());}
+                let data=GlobalLock(handle) as *const u16;
+                if data.is_null(){return Err("Could not lock clipboard text.".into());}
+                let count=(size/2).min(262_144);
+                let slice=slice::from_raw_parts(data,count);
+                let used=slice.iter().position(|unit|*unit==0);
+                let result=match used {
+                    Some(end)=>String::from_utf16(&slice[..end])
+                        .map_err(|_|"Clipboard is not valid Unicode.".to_owned()),
+                    None=>Err("Clipboard text exceeds the 512 KiB terminal paste limit.".into())
+                };
+                let _=GlobalUnlock(handle);
+                result
+            })();
+            let _=CloseClipboard();
+            value
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Use the native browser clipboard on non-Windows desktops.".into())
+    }
+}
+
 #[tauri::command]
 fn vault_set_idle_timeout(minutes:u32)->Result<u32,String>{
-    if ![15,30,60,240,480].contains(&minutes){
-        return Err("Vault auto-lock must be 15, 30, 60, 240 or 480 minutes".into());
+    if ![0,15,30,60,240,480,720].contains(&minutes){
+        return Err("Vault auto-lock must be Never (0), 15, 30, 60, 240, 480 or 720 minutes".into());
     }
     VAULT_IDLE_MINUTES.store(minutes,Ordering::Relaxed);
     Ok(minutes)
 }
 
+/// Observe an approaching idle lock without extending the Vault session.
+/// "Never" and locked Vault return None; only an explicit local gesture can
+/// call vault_touch and reset the timer.
+#[tauri::command]
+fn vault_idle_remaining(sessions:State<'_,SessionStore>)->Result<Option<u64>,String>{
+    let guard=sessions.0.lock().map_err(|_|"Vault session unavailable")?;
+    Ok(guard.as_ref().and_then(|session|
+        current_idle_timeout().map(|timeout|{
+            let remaining=timeout.saturating_sub(session.last_used.elapsed());
+            ((remaining.as_millis()+999)/1000) as u64
+        })
+    ))
+}
+
 #[tauri::command]
 fn vault_status(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManager>) -> Result<bool, String> {
     let mut guard = sessions.0.lock().map_err(|_| "Vault session unavailable")?;
-    if guard.as_ref().is_some_and(|s| s.last_used.elapsed() >= current_idle_timeout()) { *guard = None; ssh.stop_all(); }
+    if guard.as_ref().is_some_and(|s| vault_idle_expired(s.last_used)) { *guard = None; ssh.stop_all(); }
     Ok(guard.is_some())
 }
 #[tauri::command]
@@ -1325,7 +1410,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .manage(local_agent_bridge::LocalAgentBridge::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_set_idle_timeout,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_set_idle_timeout,vault_idle_remaining,terminal_clipboard_read,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_update_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,

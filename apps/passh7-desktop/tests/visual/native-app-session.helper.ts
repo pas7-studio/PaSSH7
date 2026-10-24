@@ -18,6 +18,8 @@ export async function runNativeAppSession(page:Page){
     const resized:Array<{id:string;cols:number;rows:number}>=[];
     const ready:string[]=[];
     let localTouches=0;
+    let vaultLive=true;
+    const idlePolicyChanges:number[]=[];
     const delayedWrites:Array<()=>void>=[];
     let dockerListFailure="";
     const exports:Array<{containerName:string;contents:string}>=[];
@@ -42,8 +44,14 @@ export async function runNativeAppSession(page:Page){
     let eventId=1;
     const invoke:MockInvoke=async(command,args={})=>{
       switch(command){
-        case "vault_exists":case "vault_status":return true;
-        case "vault_touch":localTouches++;return true;
+        case "vault_exists":return true;
+        case "vault_status":return vaultLive;
+        case "vault_touch":localTouches++;return vaultLive;
+        case "vault_lock":vaultLive=false;return null;
+        case "vault_unlock":vaultLive=true;return null;
+        case "vault_set_idle_timeout":idlePolicyChanges.push(Number(args.minutes));return Number(args.minutes);
+        case "vault_idle_remaining":return idlePolicyChanges.at(-1)===0?null:180;
+        case "terminal_clipboard_read":return "clipboard-paste-probe-✓";
         case "vault_list_hosts":return hosts;
         case "vault_list_identities":return [];
         case "ssh_session_list":return sessions;
@@ -117,7 +125,9 @@ export async function runNativeAppSession(page:Page){
         case "ssh_session_docker_inspect":return JSON.stringify({
           image:"api:latest",created:null,startedAt:null,finishedAt:null,restartPolicy:null,mounts:[],networks:[]
         });
-        case "ssh_session_docker_logs":return "2026-10-17 INFO hello\n2026-10-17 ERROR warning\n";
+        case "ssh_session_docker_logs":
+          return args.id==="session-c"?"2026-10-17 INFO Windows container only\n":
+            "2026-10-17 INFO hello\n2026-10-17 ERROR warning\n";
         case "docker_save_visible_logs":
           exports.push({containerName:String(args.containerName),contents:String(args.contents)});
           return "Saved filtered logs in native dialog (IPC simulator)";
@@ -149,7 +159,7 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_INTERNALS__=mock;
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
-      writes,resized,ready,exports,agentProbes,localAgentProbes,localAgentLaunches,restoredGrants,
+      writes,resized,ready,exports,agentProbes,localAgentProbes,localAgentLaunches,restoredGrants,idlePolicyChanges,
       addGrant(){mockGrants.push({id:"cccccccccccccccccccccccccccccccc",
         agent:"codex",sessionId:"session-a",host:"linux-test",
         ageSeconds:13*3600,status:"expired"});},
@@ -175,7 +185,7 @@ export async function runNativeAppSession(page:Page){
     (window as unknown as {__mockSshBridge:{localTouches:()=>number}})
       .__mockSshBridge.localTouches()
   )).toBeGreaterThan(0);
-  await expect(page.locator(".sshTab")).toHaveCount(3);
+  await expect(page.locator(".sessionStripItem")).toHaveCount(3);
   await expect(page.locator(".terminalDockSlot .xterm")).toHaveCount(1);
   await expect(page.locator(".terminalParked .xterm")).toHaveCount(2);
   await page.evaluate(()=>{
@@ -192,7 +202,7 @@ export async function runNativeAppSession(page:Page){
   await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
   await expect(page.locator(".agentTerminalFrame .xterm")).toHaveCount(1);
   await expect(page.locator(".agentTerminalFrame .xterm[data-original-instance='kept']")).toHaveCount(1);
-  const chooser=page.getByRole("combobox",{name:"Choose SSH terminal for agent"});
+  const chooser=page.getByRole("combobox",{name:"SSH target for AI assistant"});
   await chooser.selectOption("session-b");
   await expect(page.locator(".agentTerminalFrame .terminalSessionSurface")).toHaveAttribute("data-ssh-session","session-b");
 
@@ -200,21 +210,31 @@ export async function runNativeAppSession(page:Page){
   // Auto uses an already signed-in local CLI and grants access only to the
   // selected native SSH session (not to the SSH identity or account password).
   await page.evaluate(()=>{window.confirm=()=>true;});
-  await page.locator(".agentCard.opencode").click();
-  await page.getByRole("button",{name:"Launch automatically"}).click();
-  await expect(page.locator(".agentLaunch .workspaceNotice")).toContainText("Launched local opencode");
+  await page.getByRole("combobox",{name:"Coding assistant"}).selectOption("opencode");
+  await page.getByRole("button",{name:"Launch OpenCode"}).click();
+  await expect(page.locator(".agentQuickLaunch .workspaceNotice")).toContainText("Launched local opencode");
   const launches=await page.evaluate(()=>
     (window as unknown as {__mockSshBridge:{localAgentLaunches:Array<{id:string;agent:string}>}})
       .__mockSshBridge.localAgentLaunches
   );
   expect(launches).toEqual([{id:"session-b",agent:"opencode"}]);
-  await page.locator(".agentModeOption").filter({hasText:"Run directly in the authenticated SSH terminal."}).click();
-  await expect(page.getByRole("button",{name:"Launch remote CLI"})).toBeVisible();
-  await page.getByRole("button",{name:/Auto · remote first/}).click();
-  await page.locator(".agentCard.codex").click();
+  await page.getByRole("button",{name:"Remote SSH",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Run OpenCode over SSH"})).toBeVisible();
+  await page.getByRole("button",{name:"Auto",exact:true}).click();
+  await page.getByRole("combobox",{name:"Coding assistant"}).selectOption("codex");
   await page.getByRole("button",{name:"Focus console"}).click();
   await page.keyboard.type("echo persistent");
   await page.keyboard.press("Enter");
+  // Ctrl+V must read the actual clipboard and paste text, never send ^V.
+  await page.keyboard.press("Control+v");
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}})
+      .__mockSshBridge.writes.some(entry=>entry.id==="session-b"&&entry.data.includes("clipboard-paste-probe-✓"))
+  )).toBe(true);
+  expect(await page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}})
+      .__mockSshBridge.writes.some(entry=>entry.data==="\u0016")
+  )).toBe(false);
   await expect.poll(()=>page.evaluate(()=>
     (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}}).__mockSshBridge.writes.length
   )).toBeGreaterThan(0);
@@ -286,7 +306,7 @@ export async function runNativeAppSession(page:Page){
   // A host may have several active PTYs. Restore the user's last chosen PTY,
   // rather than switching silently back to session-a on return.
   await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
-  await page.getByRole("combobox",{name:"Choose SSH terminal for agent"}).selectOption("session-b");
+  await page.getByRole("combobox",{name:"SSH target for AI assistant"}).selectOption("session-b");
   await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
   await expect(page.locator(".agentTerminalFrame .terminalSessionSurface"))
     .toHaveAttribute("data-ssh-session","session-c");
@@ -300,7 +320,7 @@ export async function runNativeAppSession(page:Page){
   await page.getByRole("button",{name:"Disconnect linux-test"}).last().click();
   await expect(page.locator(".globalSessionNotice")).toContainText("Could not confirm SSH disconnect");
   await expect(page.locator(".globalSessionNotice").getByRole("button",{name:"Reconnect"})).toHaveCount(0);
-  await expect(page.locator(".sshTab")).toHaveCount(3);
+  await expect(page.locator(".sessionStripItem")).toHaveCount(3);
   await expect(page.locator(".terminalDockSlot .terminalSessionSurface"))
     .toHaveAttribute("data-ssh-session","session-b");
   await page.getByRole("button",{name:"Dismiss session notice"}).click();
@@ -377,7 +397,7 @@ export async function runNativeAppSession(page:Page){
   await expect(page.locator(".forwardTableWrap")).toContainText("127.0.0.1:19001");
   await expect(page.locator(".forwardTableWrap")).not.toContainText("19002");
   await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
-  await page.locator(".sshTab").filter({hasText:"linux-test"}).first().click();
+  await page.locator(".sessionStripItem").filter({hasText:"linux-test"}).first().click();
   await page.locator(".workspaceNav button").filter({hasText:"Port Forwarding"}).click();
   await page.getByRole("spinbutton",{name:"Local TCP port"}).fill("19003");
   await page.getByRole("button",{name:"Start forwarding"}).click();
@@ -390,6 +410,7 @@ export async function runNativeAppSession(page:Page){
   // bridge. The recovery action must be visible outside hidden Terminal.
   await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
   await expect(page.locator(".topHostIdentity strong")).toHaveText("win-test");
+  await page.getByRole("tab",{name:"Logs"}).click();
   await expect(page.locator(".dockerLogsBody")).not.toContainText("ERROR warning");
   await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
   await expect(page.locator(".agentTerminalFrame .terminalSessionSurface")).toHaveAttribute("data-ssh-session","session-c");
@@ -427,7 +448,7 @@ export async function runNativeAppSession(page:Page){
   // One-click, scoped, read-only diagnostics: real React Settings UI with
   // simulated native SSH/SFTP/Docker/CLI IPC and no agent launch or mutation.
   await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
-  await page.locator(".sshTab").filter({hasText:"linux-test"}).first().click();
+  await page.locator(".sessionStripItem").filter({hasText:"linux-test"}).first().click();
   await page.locator(".workspaceNav button").filter({hasText:"Settings"}).click();
   await page.locator(".settingsNav button").filter({hasText:"About & Diagnostics"}).click();
   await expect(page.getByLabel("Remote host health check")).toBeVisible();
@@ -497,5 +518,27 @@ export async function runNativeAppSession(page:Page){
   await grants.getByRole("button",{name:"Revoke SSH access"}).click();
   await expect(grants).toContainText("No recoverable local CLI grant");
   await expect(grants.getByRole("button",{name:"Restore SSH access"})).toHaveCount(0);
+  // "Never" is a deliberate native setting, not a reset to 15 minutes.
+  await page.locator(".workspaceNav button").filter({hasText:"Settings"}).click();
+  await page.locator(".settingsNav button").filter({hasText:"Vault & Security"}).click();
+  await page.getByRole("combobox",{name:"Vault auto-lock duration"}).selectOption("0");
+  await expect(page.getByText("Automatic idle lock is OFF.")).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{idlePolicyChanges:number[]}})
+      .__mockSshBridge.idlePolicyChanges.at(-1)
+  )).toBe(0);
+  // Locking deliberately closes SSH but should preserve a safe, non-secret
+  // recovery choice after re-unlocking, not silently replay PTY commands.
+  await page.getByRole("button",{name:"Lock Vault now"}).first().click();
+  await expect(page.locator(".vaultResumeNotice")).toContainText("Vault locked");
+  await expect(page.locator(".vaultResumeNotice").getByRole("button",{name:"Unlock & resume"})).toBeVisible();
+  await page.locator(".vaultResumeNotice").getByRole("button",{name:"Unlock & resume"}).click();
+  const unlock=page.getByRole("dialog",{name:"Unlock encrypted vault"});
+  await unlock.getByLabel("Master password").fill("test-password-is-not-secret");
+  await unlock.getByRole("button",{name:"Unlock",exact:true}).click();
+  await expect(page.locator(".vaultResumeNotice")).toContainText("Resume your SSH workspace");
+  await expect(page.locator(".vaultResumeNotice")).toContainText("Reconnect");
+  await page.getByRole("button",{name:"Dismiss Vault recovery"}).click();
+  await expect(page.locator(".vaultResumeNotice")).toHaveCount(0);
   expect(browserErrors).toEqual([]);
 }

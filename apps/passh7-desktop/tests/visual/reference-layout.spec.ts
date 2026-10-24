@@ -59,6 +59,7 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
           await expect(page.locator(".snippetCard")).toHaveCount(9);
           await expect(page.locator(".snippetsRunner")).toBeVisible();
         }else if(screen.name==="agent"){
+          await page.getByRole("button",{name:"Setup & diagnostics"}).click();
           await expect(page.locator(".agentCard")).toHaveCount(3);
           await expect(page.locator(".agentWorkspaceSide")).toBeVisible();
           await expect(page.locator(".agentEmbeddedTerminal")).toBeVisible();
@@ -158,18 +159,18 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await page.goto("/",{waitUntil:"domcontentloaded"});
     // Vite serves the HTML before React is mounted; wait for the real shell
     // and its installed shortcut listeners instead of racing initial hydration.
-    await expect(page.getByRole("button",{name:"Quick switch"})).toBeVisible();
+    await expect(page.getByRole("button",{name:"Open command palette"})).toBeVisible();
     await page.keyboard.press("Control+k");
-    const palette=page.getByRole("dialog",{name:"Quick switch"});
+    const palette=page.getByRole("dialog",{name:"Command palette"});
     await expect(palette).toBeVisible();
-    const search=page.getByRole("textbox",{name:"Search hosts and workspaces"});
+    const search=page.getByRole("combobox",{name:"Search SSH sessions, hosts, workspaces and commands"});
     await expect(search).toBeFocused();
     await search.fill("docker");
     await expect(palette.getByRole("option")).toHaveCount(1);
     await search.press("Enter");
     await expect(palette).toHaveCount(0);
     await expect(page.locator(".workspaceNav button.active")).toHaveText("Docker");
-    await page.getByRole("button",{name:"Quick switch"}).click();
+    await page.getByRole("button",{name:"Open command palette"}).click();
     await expect(palette).toBeVisible();
     // The modal is keyboard-contained: reverse Tab wraps from close to the
     // final option, and Escape uses the native Close handler.
@@ -179,7 +180,7 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await expect(palette.getByRole("option").last()).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(palette).toHaveCount(0);
-    await expect(page.getByRole("button",{name:"Quick switch"})).toBeFocused();
+    await expect(page.getByRole("button",{name:"Open command palette"})).toBeFocused();
   });
 
   await test.step("Appearance light theme reaches terminal and workspace chrome",async()=>{
@@ -195,13 +196,15 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
 
   await test.step("Windows SSH agent detection: desktop-only versus CLI",async()=>{
     await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
+    await page.getByRole("button",{name:"Setup & diagnostics"}).click();
     await expect(page.locator(".agentInstallHelp")).toContainText("Desktop");
     await expect(page.locator(".agentInstallHelp")).toContainText("RDP");
-    await expect(page.getByRole("button",{name:/Launch remote CLI/})).toBeDisabled();
+    await expect(page.getByRole("button",{name:"Run Codex over SSH"})).toBeDisabled();
     await page.getByRole("button",{name:/Prepare RDP tunnel/}).click();
     await expect(page.locator(".widePageTitle h1")).toHaveText("Port Forwarding");
     await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
-    await page.locator(".agentCard.claude").click();
+    await page.getByRole("button",{name:"Setup & diagnostics"}).click();
+    await page.getByRole("combobox",{name:"Coding assistant"}).selectOption("claude");
     await expect(page.locator(".agentDiscovery")).toContainText("User installation outside SSH PATH");
     await expect(page.locator(".agentDevTerminalPreview")).toContainText("Claude Code CLI");
     await page.getByRole("button",{name:"Expand console"}).click();
@@ -209,7 +212,7 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
     await page.getByRole("button",{name:"Compact console"}).click();
     await expect(page.locator(".agentTerminalFrame")).not.toHaveClass(/expanded/);
     await expect(page.locator(".agentDiscovery")).toContainText("claude.cmd");
-    await expect(page.getByRole("button",{name:/Launch remote CLI/})).toBeEnabled();
+    await expect(page.getByRole("button",{name:"Run Claude Code over SSH"})).toBeEnabled();
     await page.locator(".agentCard.opencode").click();
     await expect(page.locator(".agentInstallHelp")).toContainText("CLI not found");
     await expect(page.locator(".agentInstallHelp code")).toContainText("opencode-ai");
