@@ -408,6 +408,7 @@ export async function runNativeAppSession(page:Page){
   // bridge. The recovery action must be visible outside hidden Terminal.
   await page.locator(".sidebar .host").filter({hasText:"win-test"}).click();
   await expect(page.locator(".topHostIdentity strong")).toHaveText("win-test");
+  await page.getByRole("tab",{name:"Logs"}).click();
   await expect(page.locator(".dockerLogsBody")).not.toContainText("ERROR warning");
   await page.locator(".workspaceNav button").filter({hasText:"AI Agents"}).click();
   await expect(page.locator(".agentTerminalFrame .terminalSessionSurface")).toHaveAttribute("data-ssh-session","session-c");
