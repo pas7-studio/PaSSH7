@@ -183,7 +183,7 @@ export async function runNativeAppSession(page:Page){
     (window as unknown as {__mockSshBridge:{localTouches:()=>number}})
       .__mockSshBridge.localTouches()
   )).toBeGreaterThan(0);
-  await expect(page.locator(".sshTab")).toHaveCount(3);
+  await expect(page.locator(".sessionStripItem")).toHaveCount(3);
   await expect(page.locator(".terminalDockSlot .xterm")).toHaveCount(1);
   await expect(page.locator(".terminalParked .xterm")).toHaveCount(2);
   await page.evaluate(()=>{
@@ -318,7 +318,7 @@ export async function runNativeAppSession(page:Page){
   await page.getByRole("button",{name:"Disconnect linux-test"}).last().click();
   await expect(page.locator(".globalSessionNotice")).toContainText("Could not confirm SSH disconnect");
   await expect(page.locator(".globalSessionNotice").getByRole("button",{name:"Reconnect"})).toHaveCount(0);
-  await expect(page.locator(".sshTab")).toHaveCount(3);
+  await expect(page.locator(".sessionStripItem")).toHaveCount(3);
   await expect(page.locator(".terminalDockSlot .terminalSessionSurface"))
     .toHaveAttribute("data-ssh-session","session-b");
   await page.getByRole("button",{name:"Dismiss session notice"}).click();
@@ -395,7 +395,7 @@ export async function runNativeAppSession(page:Page){
   await expect(page.locator(".forwardTableWrap")).toContainText("127.0.0.1:19001");
   await expect(page.locator(".forwardTableWrap")).not.toContainText("19002");
   await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
-  await page.locator(".sshTab").filter({hasText:"linux-test"}).first().click();
+  await page.locator(".sessionStripItem").filter({hasText:"linux-test"}).first().click();
   await page.locator(".workspaceNav button").filter({hasText:"Port Forwarding"}).click();
   await page.getByRole("spinbutton",{name:"Local TCP port"}).fill("19003");
   await page.getByRole("button",{name:"Start forwarding"}).click();
@@ -445,7 +445,7 @@ export async function runNativeAppSession(page:Page){
   // One-click, scoped, read-only diagnostics: real React Settings UI with
   // simulated native SSH/SFTP/Docker/CLI IPC and no agent launch or mutation.
   await page.locator(".workspaceNav button").filter({hasText:"Terminal"}).click();
-  await page.locator(".sshTab").filter({hasText:"linux-test"}).first().click();
+  await page.locator(".sessionStripItem").filter({hasText:"linux-test"}).first().click();
   await page.locator(".workspaceNav button").filter({hasText:"Settings"}).click();
   await page.locator(".settingsNav button").filter({hasText:"About & Diagnostics"}).click();
   await expect(page.getByLabel("Remote host health check")).toBeVisible();
