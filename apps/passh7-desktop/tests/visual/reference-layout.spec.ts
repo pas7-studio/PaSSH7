@@ -59,6 +59,7 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
           await expect(page.locator(".snippetCard")).toHaveCount(9);
           await expect(page.locator(".snippetsRunner")).toBeVisible();
         }else if(screen.name==="agent"){
+          await page.getByRole("button",{name:"Setup & diagnostics"}).click();
           await expect(page.locator(".agentCard")).toHaveCount(3);
           await expect(page.locator(".agentWorkspaceSide")).toBeVisible();
           await expect(page.locator(".agentEmbeddedTerminal")).toBeVisible();
@@ -195,13 +196,15 @@ test("reference layouts: all eight workspaces across three viewports and keyboar
 
   await test.step("Windows SSH agent detection: desktop-only versus CLI",async()=>{
     await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
+    await page.getByRole("button",{name:"Setup & diagnostics"}).click();
     await expect(page.locator(".agentInstallHelp")).toContainText("Desktop");
     await expect(page.locator(".agentInstallHelp")).toContainText("RDP");
     await expect(page.getByRole("button",{name:/Launch remote CLI/})).toBeDisabled();
     await page.getByRole("button",{name:/Prepare RDP tunnel/}).click();
     await expect(page.locator(".widePageTitle h1")).toHaveText("Port Forwarding");
     await page.goto("/?__reference=1&screen=agent",{waitUntil:"domcontentloaded"});
-    await page.locator(".agentCard.claude").click();
+    await page.getByRole("button",{name:"Setup & diagnostics"}).click();
+    await page.getByRole("combobox",{name:"Coding assistant"}).selectOption("claude");
     await expect(page.locator(".agentDiscovery")).toContainText("User installation outside SSH PATH");
     await expect(page.locator(".agentDevTerminalPreview")).toContainText("Claude Code CLI");
     await page.getByRole("button",{name:"Expand console"}).click();
