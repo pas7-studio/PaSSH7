@@ -256,7 +256,7 @@ export async function controlDockerContainer(sessionId:string,containerId:string
 
 /** Configures the bounded native Vault idle lock. This is a local UI policy,
  * never extended by remote CLI or SSH background activity. */
-export async function setVaultIdleTimeout(minutes:15|30|60|240|480):Promise<number>{
+export async function setVaultIdleTimeout(minutes:0|15|30|60|240|480|720):Promise<number>{
   return invoke<number>("vault_set_idle_timeout",{minutes});
 }
 /** Reads user clipboard for interactive SSH terminal paste, never logs or persists it.
