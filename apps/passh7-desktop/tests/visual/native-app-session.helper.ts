@@ -18,6 +18,8 @@ export async function runNativeAppSession(page:Page){
     const resized:Array<{id:string;cols:number;rows:number}>=[];
     const ready:string[]=[];
     let localTouches=0;
+    let vaultLive=true;
+    const idlePolicyChanges:number[]=[];
     const delayedWrites:Array<()=>void>=[];
     let dockerListFailure="";
     const exports:Array<{containerName:string;contents:string}>=[];
@@ -42,8 +44,13 @@ export async function runNativeAppSession(page:Page){
     let eventId=1;
     const invoke:MockInvoke=async(command,args={})=>{
       switch(command){
-        case "vault_exists":case "vault_status":return true;
-        case "vault_touch":localTouches++;return true;
+        case "vault_exists":return true;
+        case "vault_status":return vaultLive;
+        case "vault_touch":localTouches++;return vaultLive;
+        case "vault_lock":vaultLive=false;return null;
+        case "vault_unlock":vaultLive=true;return null;
+        case "vault_set_idle_timeout":idlePolicyChanges.push(Number(args.minutes));return Number(args.minutes);
+        case "terminal_clipboard_read":return "clipboard-paste-probe-✓";
         case "vault_list_hosts":return hosts;
         case "vault_list_identities":return [];
         case "ssh_session_list":return sessions;
@@ -149,7 +156,7 @@ export async function runNativeAppSession(page:Page){
     root.__TAURI_INTERNALS__=mock;
     root.__TAURI_EVENT_PLUGIN_INTERNALS__={unregisterListener:()=>{}};
     root.__mockSshBridge={
-      writes,resized,ready,exports,agentProbes,localAgentProbes,localAgentLaunches,restoredGrants,
+      writes,resized,ready,exports,agentProbes,localAgentProbes,localAgentLaunches,restoredGrants,idlePolicyChanges,
       addGrant(){mockGrants.push({id:"cccccccccccccccccccccccccccccccc",
         agent:"codex",sessionId:"session-a",host:"linux-test",
         ageSeconds:13*3600,status:"expired"});},
@@ -215,6 +222,16 @@ export async function runNativeAppSession(page:Page){
   await page.getByRole("button",{name:"Focus console"}).click();
   await page.keyboard.type("echo persistent");
   await page.keyboard.press("Enter");
+  // Ctrl+V must read the actual clipboard and paste text, never send ^V.
+  await page.keyboard.press("Control+v");
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}})
+      .__mockSshBridge.writes.some(entry=>entry.id==="session-b"&&entry.data.includes("clipboard-paste-probe-✓"))
+  )).toBe(true);
+  expect(await page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}})
+      .__mockSshBridge.writes.some(entry=>entry.data==="\u0016")
+  )).toBe(false);
   await expect.poll(()=>page.evaluate(()=>
     (window as unknown as {__mockSshBridge:{writes:Array<{id:string;data:string}>}}).__mockSshBridge.writes.length
   )).toBeGreaterThan(0);
@@ -497,5 +514,27 @@ export async function runNativeAppSession(page:Page){
   await grants.getByRole("button",{name:"Revoke SSH access"}).click();
   await expect(grants).toContainText("No recoverable local CLI grant");
   await expect(grants.getByRole("button",{name:"Restore SSH access"})).toHaveCount(0);
+  // "Never" is a deliberate native setting, not a reset to 15 minutes.
+  await page.locator(".workspaceNav button").filter({hasText:"Settings"}).click();
+  await page.locator(".settingsNav button").filter({hasText:"Vault & Security"}).click();
+  await page.getByRole("combobox",{name:"Vault auto-lock duration"}).selectOption("0");
+  await expect(page.getByText("Automatic idle lock is OFF.")).toBeVisible();
+  await expect.poll(()=>page.evaluate(()=>
+    (window as unknown as {__mockSshBridge:{idlePolicyChanges:number[]}})
+      .__mockSshBridge.idlePolicyChanges.at(-1)
+  )).toBe(0);
+  // Locking deliberately closes SSH but should preserve a safe, non-secret
+  // recovery choice after re-unlocking, not silently replay PTY commands.
+  await page.getByRole("button",{name:"Lock Vault now"}).first().click();
+  await expect(page.locator(".vaultResumeNotice")).toContainText("Vault locked");
+  await expect(page.locator(".vaultResumeNotice").getByRole("button",{name:"Unlock & resume"})).toBeVisible();
+  await page.locator(".vaultResumeNotice").getByRole("button",{name:"Unlock & resume"}).click();
+  const unlock=page.getByRole("dialog",{name:"Unlock encrypted vault"});
+  await unlock.getByLabel("Master password").fill("test-password-is-not-secret");
+  await unlock.getByRole("button",{name:"Unlock",exact:true}).click();
+  await expect(page.locator(".vaultResumeNotice")).toContainText("Resume your SSH workspace");
+  await expect(page.locator(".vaultResumeNotice")).toContainText("Reconnect");
+  await page.getByRole("button",{name:"Dismiss Vault recovery"}).click();
+  await expect(page.locator(".vaultResumeNotice")).toHaveCount(0);
   expect(browserErrors).toEqual([]);
 }
