@@ -259,6 +259,11 @@ export async function controlDockerContainer(sessionId:string,containerId:string
 export async function setVaultIdleTimeout(minutes:15|30|60|240|480):Promise<number>{
   return invoke<number>("vault_set_idle_timeout",{minutes});
 }
+/** Reads user clipboard for interactive SSH terminal paste, never logs or persists it.
+ * On Windows native Win32 clipboard avoids WebView permission-prompt failures. */
+export async function readTerminalClipboard():Promise<string>{
+  return invoke<string>("terminal_clipboard_read");
+}
 export type LocalAgentAvailability={installed:boolean;path:string|null;diagnostic:string};
 export async function probeLocalAgent(agent:"codex"|"claude"|"opencode"):Promise<LocalAgentAvailability>{
   return invoke<LocalAgentAvailability>("local_agent_probe",{agent});
