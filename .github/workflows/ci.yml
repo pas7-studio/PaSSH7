@@ -1,7 +1,7 @@
 name: PaSSH7 Linux self-hosted build
 on:
   push:
-    branches: [main, fix/local-agent-grant-recovery]
+    branches: [main, fix/local-agent-grant-recovery, fix/vault-resume-and-terminal-paste]
   workflow_dispatch:
 permissions:
   contents: read
