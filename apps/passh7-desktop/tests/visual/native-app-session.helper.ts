@@ -50,6 +50,7 @@ export async function runNativeAppSession(page:Page){
         case "vault_lock":vaultLive=false;return null;
         case "vault_unlock":vaultLive=true;return null;
         case "vault_set_idle_timeout":idlePolicyChanges.push(Number(args.minutes));return Number(args.minutes);
+        case "vault_idle_remaining":return idlePolicyChanges.at(-1)===0?null:180;
         case "terminal_clipboard_read":return "clipboard-paste-probe-✓";
         case "vault_list_hosts":return hosts;
         case "vault_list_identities":return [];
