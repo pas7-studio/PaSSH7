@@ -15,11 +15,11 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 static VAULT_IDLE_MINUTES:AtomicU32=AtomicU32::new(15);
 /// None means the user explicitly disabled idle locking for this running
 /// desktop. The explicit Lock button and application exit remain effective.
+fn idle_timeout_for_minutes(minutes:u32)->Option<Duration>{
+    if minutes==0{None}else{Some(Duration::from_secs(minutes as u64*60))}
+}
 fn current_idle_timeout()->Option<Duration>{
-    match VAULT_IDLE_MINUTES.load(Ordering::Relaxed){
-        0=>None,
-        minutes=>Some(Duration::from_secs(minutes as u64*60))
-    }
+    idle_timeout_for_minutes(VAULT_IDLE_MINUTES.load(Ordering::Relaxed))
 }
 fn vault_idle_expired(last_used:Instant)->bool{
     current_idle_timeout().is_some_and(|timeout|last_used.elapsed()>=timeout)
@@ -164,10 +164,9 @@ mod vault_local_activity_tests{
     use super::*;
     #[test]
     fn configurable_idle_timeout_supports_explicit_never_and_rejects_invalid_values(){
-        let old=VAULT_IDLE_MINUTES.swap(0,Ordering::SeqCst);
-        assert!(!vault_idle_expired(Instant::now()-Duration::from_secs(60*60*24)));
-        VAULT_IDLE_MINUTES.store(old,Ordering::SeqCst);
-        assert_eq!(current_idle_timeout(),Some(Duration::from_secs(old as u64*60)));
+        assert_eq!(idle_timeout_for_minutes(0),None);
+        assert_eq!(idle_timeout_for_minutes(15),Some(Duration::from_secs(900)));
+        assert_eq!(idle_timeout_for_minutes(720),Some(Duration::from_secs(43200)));
         assert!(![0,15,30,60,240,480,720].contains(&42));
     }
     #[test]
