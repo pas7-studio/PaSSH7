@@ -566,6 +566,62 @@ fn vault_touch(sessions: State<'_, SessionStore>, ssh: State<'_, SshSessionManag
 
 /// Only explicit user-selected idle policies are accepted; a local coding CLI
 /// cannot extend this timer through its MCP calls or SSH keepalives.
+/// Copy/paste in the SSH terminal must not depend on WebView2's clipboard
+/// permission prompt. Only a user-initiated UI paste invokes this command.
+#[tauri::command]
+fn terminal_clipboard_read()->Result<String,String>{
+    #[cfg(windows)]
+    {
+        use std::{ffi::c_void,ptr,slice};
+        #[link(name="user32")]
+        extern "system"{
+            fn OpenClipboard(owner:*mut c_void)->i32;
+            fn CloseClipboard()->i32;
+            fn GetClipboardData(format:u32)->*mut c_void;
+        }
+        #[link(name="kernel32")]
+        extern "system"{
+            fn GlobalLock(handle:*mut c_void)->*mut c_void;
+            fn GlobalUnlock(handle:*mut c_void)->i32;
+            fn GlobalSize(handle:*mut c_void)->usize;
+        }
+        // Clipboard access is synchronous and owned by this Windows process.
+        // Read only CF_UNICODETEXT, cap at 512 KiB and never log clipboard data.
+        unsafe {
+            let mut opened=false;
+            for _ in 0..4 {
+                if OpenClipboard(ptr::null_mut())!=0{opened=true;break}
+                std::thread::sleep(Duration::from_millis(15));
+            }
+            if !opened{return Err("Windows clipboard is busy. Retry paste.".into());}
+            let value=(||->Result<String,String>{
+                let handle=GetClipboardData(13); // CF_UNICODETEXT
+                if handle.is_null(){return Err("Clipboard contains no plain Unicode text.".into());}
+                let size=GlobalSize(handle);
+                if size==0{return Err("Clipboard text size unavailable.".into());}
+                let data=GlobalLock(handle) as *const u16;
+                if data.is_null(){return Err("Could not lock clipboard text.".into());}
+                let count=(size/2).min(262_144);
+                let slice=slice::from_raw_parts(data,count);
+                let used=slice.iter().position(|unit|*unit==0);
+                let result=match used {
+                    Some(end)=>String::from_utf16(&slice[..end])
+                        .map_err(|_|"Clipboard is not valid Unicode.".to_owned()),
+                    None=>Err("Clipboard text exceeds the 512 KiB terminal paste limit.".into())
+                };
+                let _=GlobalUnlock(handle);
+                result
+            })();
+            let _=CloseClipboard();
+            value
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Use the native browser clipboard on non-Windows desktops.".into())
+    }
+}
+
 #[tauri::command]
 fn vault_set_idle_timeout(minutes:u32)->Result<u32,String>{
     if ![0,15,30,60,240,480,720].contains(&minutes){
@@ -1341,7 +1397,7 @@ fn main() {
         .manage(SshSessionManager::default())
         .manage(local_agent_bridge::LocalAgentBridge::default())
         .invoke_handler(tauri::generate_handler![
-            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_set_idle_timeout,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
+            vault_exists,vault_initialize,vault_unlock,vault_lock,vault_status,vault_touch,vault_set_idle_timeout,terminal_clipboard_read,vault_export_encrypted_backup,vault_restore_inspect,vault_restore_inspect_remote,vault_restore_commit,docker_save_visible_logs,openssh_config::ssh_discover_local_config_hosts,
             vault_list_hosts,vault_add_host,vault_update_host,vault_set_host_identity,vault_set_jump_host,vault_set_backup_directory,vault_remove_host,vault_save_host_credentials,vault_forget_host_credentials,vault_list_identities,vault_import_identity,vault_generate_ed25519,vault_public_identity,vault_remove_identity,app_build_info,ssh_probe_host,ssh_authenticate,ssh_discover_host_key,ssh_discover_host_key_via,vault_pin_host_key,
             ssh_sessions::ssh_session_open,ssh_sessions::ssh_session_list,ssh_sessions::ssh_session_write,
             ssh_sessions::ssh_session_resize,ssh_sessions::ssh_session_close,
