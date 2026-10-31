@@ -5,7 +5,7 @@ use std::{
     collections::HashMap, fs::{self,OpenOptions},io::{BufRead,Read,Write},
     net::{Ipv4Addr,SocketAddr,SocketAddrV4,TcpStream},
     path::{Path,PathBuf},process::{Command,Stdio},
-    sync::{Arc,Mutex},time::{Duration,Instant}
+    sync::{Arc,Mutex},time::{Duration,Instant,SystemTime,UNIX_EPOCH}
 };
 use serde::{Deserialize,Serialize};
 use serde_json::{json,Value};
@@ -20,6 +20,72 @@ const GRANT_MAX_AGE:Duration=Duration::from_secs(12*3600);
 const GRANT_RECOVERY_WINDOW:Duration=Duration::from_secs(48*3600);
 type Grants=Arc<Mutex<HashMap<String,Grant>>>;
 struct Grant{id:String,agent:String,session:String,host:String,created:Instant}
+
+/// On-disk record of an issued grant. Only a SHA-256 fingerprint of the bridge token is
+/// stored, so the file cannot be replayed as a credential; it merely lets the *same* CLI
+/// process recover its access after PaSSH7 restarts.
+#[derive(Serialize,Deserialize)]
+struct PersistedGrant{token_sha256:String,id:String,agent:String,host:String,created_unix:u64}
+
+fn grants_file_path()->Option<PathBuf>{
+    let base=std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+        .or_else(||std::env::var_os("APPDATA").map(PathBuf::from))?;
+    let dir=base.join("passh7");
+    let _=std::fs::create_dir_all(&dir);
+    Some(dir.join("bridge-grants.json"))
+}
+fn token_fingerprint(token:&str)->String{
+    use sha2::{Digest,Sha256};
+    Sha256::digest(token.as_bytes()).iter().map(|b|format!("{b:02x}")).collect()
+}
+fn now_unix()->u64{
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d|d.as_secs()).unwrap_or(0)
+}
+fn load_persisted_grants()->Vec<PersistedGrant>{
+    let Some(path)=grants_file_path() else{return Vec::new()};
+    std::fs::read_to_string(path).ok()
+        .and_then(|text|serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+fn persist_grant(token:&str,id:&str,agent:&str,host:&str){
+    let Some(path)=grants_file_path() else{return};
+    let fingerprint=token_fingerprint(token);
+    let mut list=load_persisted_grants();
+    list.retain(|g|g.token_sha256!=fingerprint&&g.id!=id);
+    list.push(PersistedGrant{token_sha256:fingerprint,id:id.to_owned(),agent:agent.to_owned(),
+        host:host.to_owned(),created_unix:now_unix()});
+    if let Ok(text)=serde_json::to_string(&list){let _=std::fs::write(path,text);}
+}
+fn forget_persisted_grant(id:&str){
+    let Some(path)=grants_file_path() else{return};
+    let mut list=load_persisted_grants();
+    let before=list.len();
+    list.retain(|g|g.id!=id);
+    if list.len()!=before{
+        if let Ok(text)=serde_json::to_string(&list){let _=std::fs::write(path,text);}
+    }
+}
+/// Restore a grant for the token the CLI already holds. Bounded by the same twelve-hour
+/// lease, requires a live SSH session for the original host, and binds to the current
+/// session id so a stale id cannot outlive a reconnect. Nothing is granted to a token
+/// that was never issued by this installation.
+fn restore_grant(grants:&Grants,ssh:&crate::ssh_sessions::SshSessionManager,token:&str)->bool{
+    let fingerprint=token_fingerprint(token);
+    let now=now_unix();
+    let Some(record)=load_persisted_grants().into_iter()
+        .find(|g|g.token_sha256==fingerprint
+            && now.saturating_sub(g.created_unix)<=GRANT_MAX_AGE.as_secs()) else{return false};
+    let Ok(live)=ssh.active_sessions() else{return false};
+    let Some(session)=live.into_iter().find(|s|s.alias==record.host) else{return false};
+    let age=Duration::from_secs(now.saturating_sub(record.created_unix));
+    let created=Instant::now().checked_sub(age).unwrap_or_else(Instant::now);
+    if let Ok(mut guard)=grants.lock(){
+        guard.insert(token.to_owned(),Grant{id:record.id,agent:record.agent,
+            session:session.id,host:record.host,created});
+        return true;
+    }
+    false
+}
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct LocalAgentConnection{
@@ -49,6 +115,8 @@ fn revoke_grant_by_id(grants:&Grants,id:&str)->Result<bool,String>{
     let Some(token)=guard.iter().find_map(|(token,grant)|
         (grant.id==id).then(||token.clone())) else{return Ok(false)};
     guard.remove(&token);
+    // Explicit revoke must also drop the restart-recovery record.
+    forget_persisted_grant(id);
     Ok(true)
 }
 
@@ -142,6 +210,13 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
         let req:BrokerRequest=serde_json::from_slice(&bytes)
             .map_err(|_|"Invalid local bridge request".to_owned())?;
         let session={
+            let known=grants.lock().map(|guard|guard.contains_key(&req.token)).unwrap_or(false);
+            if !known{
+                // The app was restarted: the in-memory map is empty, but the CLI still holds the
+                // token it was launched with. Recover it from the on-disk fingerprint instead of
+                // forcing the user to relaunch the coding session. Bounded and read-only.
+                let _=restore_grant(&grants,&ssh,&req.token);
+            }
             let guard=grants.lock().map_err(|_|"Local bridge unavailable".to_owned())?;
             let grant=guard.get(&req.token).ok_or(
                 "Local agent SSH access was revoked or PaSSH7 was restarted. Open AI Agents in PaSSH7 and launch a new local CLI session.")?;
@@ -216,8 +291,10 @@ async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&s
     let token=bytes.iter().map(|b|format!("{b:02x}")).collect::<String>();
     let launch_id=format!("{:032x}",rand::random::<u128>());
     bridge.grants.lock().map_err(|_|"Cannot issue local CLI grant")?
-        .insert(token.clone(),Grant{id:launch_id,agent:agent.to_owned(),
+        .insert(token.clone(),Grant{id:launch_id.clone(),agent:agent.to_owned(),
             session:session.to_owned(),host:owner.alias.clone(),created:Instant::now()});
+    // Remember only the token fingerprint so the same CLI keeps working after an app restart.
+    persist_grant(&token,&launch_id,agent,&owner.alias);
     Ok((addr,token))
 }
 

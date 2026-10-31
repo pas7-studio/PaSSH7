@@ -371,13 +371,14 @@ impl SshSessionManager {
 
 /// SSH keepalives are transport-level probes (not shell commands). An
 /// interactive shell may be quiet for hours while an agent waits for input.
-/// Unresponsive peers still close after three unanswered 30-second probes.
+/// A dropped network (laptop moved to another Wi-Fi) must be noticed quickly:
+/// two unanswered 15-second probes mark the session dead in ~30s instead of ~90s.
 fn interactive_ssh_config() -> russh::client::Config {
     russh::client::Config {
         nodelay: true,
         inactivity_timeout: None,
-        keepalive_interval: Some(Duration::from_secs(30)),
-        keepalive_max: 3,
+        keepalive_interval: Some(Duration::from_secs(15)),
+        keepalive_max: 2,
         ..Default::default()
     }
 }
@@ -892,12 +893,30 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                             Ok(())
                         },
                         Some(SessionCommand::Exec(command,response)) => {
-                            let opened=tokio::time::timeout(Duration::from_secs(10),async {
-                                let mut ch=connection.channel_open_session().await
-                                    .map_err(|_|"Cannot open SSH exec channel".to_owned())?;
-                                ch.exec(true,command.as_bytes()).await
-                                    .map_err(|_|"Remote SSH server rejected command".to_owned())?;
-                                Ok::<_,String>(ch)
+                            // A laptop that changed networks leaves a half-dead TCP connection: the
+                            // session object still exists, but the server never answers a channel open.
+                            // Retry once, then say plainly that the session is gone instead of surfacing
+                            // the cryptic "Cannot open SSH exec channel".
+                            let opened=tokio::time::timeout(Duration::from_secs(15),async {
+                                let mut last_error="Cannot open SSH exec channel".to_owned();
+                                for attempt in 0..2u8 {
+                                    match connection.channel_open_session().await {
+                                        Ok(mut ch)=>{
+                                            return ch.exec(true,command.as_bytes()).await
+                                                .map(|_|ch)
+                                                .map_err(|_|"Remote SSH server rejected command".to_owned());
+                                        }
+                                        Err(_)=>{
+                                            last_error=if attempt==0{
+                                                "Cannot open SSH exec channel".to_owned()
+                                            }else{
+                                                "SSH session lost (network changed or the server closed it). Reconnect this host in PaSSH7 and retry.".to_owned()
+                                            };
+                                            tokio::time::sleep(Duration::from_millis(700)).await;
+                                        }
+                                    }
+                                }
+                                Err(last_error)
                             }).await.unwrap_or_else(|_|Err("SSH exec setup timed out".into()));
                             match opened{
                                 Err(error)=>{let _=response.send(Err(error));},
