@@ -911,9 +911,10 @@ export default function App(){
   const restoreAgentSshAccess=async(id:string)=>{
     const grant=localAgentConnections.find(item=>item.id===id);
     if(!grant||localAgentRevoking)return;
-    const owner=sshTabs.find(session=>session.id===activeSsh&&session.alias===grant.host);
+    const hosts=grant.hosts&&grant.hosts.length?grant.hosts:[grant.host];
+    const owner=sshTabs.find(session=>session.id===activeSsh&&hosts.includes(session.alias));
     if(!owner){
-      setAgentStatus("Select a connected SSH terminal on "+grant.host+
+      setAgentStatus("Select a connected SSH terminal on "+hosts.join(", ")+
         " first, then choose Restore SSH access. Access cannot move to a different host.");
       return;
     }
@@ -927,7 +928,7 @@ export default function App(){
     const sourceSession=owner.id,sourceHost=owner.alias;
     setLocalAgentRevoking(id);
     try{
-      const allowed=await reauthorizeLocalAgentConnection(id,sourceSession);
+      const allowed=await reauthorizeLocalAgentConnection(id,sourceSession,owner.alias);
       await refreshLocalAgentConnections();
       if(agentContext.current.session===sourceSession&&agentContext.current.host===sourceHost){
         setAgentStatus(allowed?"SSH tools restored for "+grant.agent+" on "+grant.host+
@@ -967,6 +968,10 @@ export default function App(){
   },[agentMode,agent]);
   const [agentStatus,setAgentStatus]=useState("");
   const [agentLaunching,setAgentLaunching]=useState(false);
+  // One agent for every connected host: the grant covers several sessions and each
+  // MCP call selects its target with the optional `host` argument.
+  const [agentMulti,setAgentMulti]=useState(false);
+  const [agentMultiTargets,setAgentMultiTargets]=useState<string[]>([]);
   const agentLaunchRef=useRef(false);
   const [agentProbeBusy,setAgentProbeBusy]=useState(false);
   const [agentProbeError,setAgentProbeError]=useState("");
@@ -1013,6 +1018,20 @@ export default function App(){
     agentLaunchRef.current=true;
     setAgentLaunching(true);
     try{
+    if(agentMulti){
+      const ids=agentMultiTargets.filter(id=>sshTabs.some(tab=>tab.id===id));
+      if(!ids.length){setAgentStatus("Select at least one connected host for the multi-host agent.");return}
+      const names=sshTabs.filter(tab=>ids.includes(tab.id)).map(tab=>tab.alias).join(", ");
+      if(!window.confirm("Start the LOCAL "+agent+" CLI with SSH tool access to "+ids.length+" hosts ("+names+")?\n\nOne console opens, its PaSSH7 MCP server reaches every listed host, and the CLI may ask you to sign in. Remote changes run with those SSH accounts' permissions."))return;
+      try{
+        const notice=await launchLocalAgent(agent,ids);
+        await refreshLocalAgentConnections();
+        setAgentStatus(notice);
+      }catch(error){
+        setAgentStatus("Could not launch the multi-host local CLI: "+String(error));
+      }
+      return;
+    }
     const session=sshTabs.find(t=>t.id===activeSsh&&t.alias===selected);
     if(!session){setAgentStatus("Connect to the selected SSH host before starting any agent.");return}
     if(agentMode==="local"){
@@ -1823,6 +1842,8 @@ export default function App(){
  localAvailability={localAgentAvailability} localChecking={localAgentBusy}
  localConnections={localAgentConnections} localRevoking={localAgentRevoking}
  onRevokeLocal={id=>void revokeAgentSshAccess(id)} onRestoreLocal={id=>void restoreAgentSshAccess(id)}
+ multi={agentMulti} onMulti={setAgentMulti}
+ multiTargets={agentMultiTargets} onMultiTargets={setAgentMultiTargets}
  onLaunch={()=>void launchAgent()}
  onTerminal={()=>setPanel("terminal")}
  onPrepareRdp={()=>{

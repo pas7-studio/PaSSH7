@@ -19,13 +19,33 @@ const GRANT_MAX_AGE:Duration=Duration::from_secs(12*3600);
 // a fresh launch is required; never extend grants implicitly from MCP calls.
 const GRANT_RECOVERY_WINDOW:Duration=Duration::from_secs(48*3600);
 type Grants=Arc<Mutex<HashMap<String,Grant>>>;
-struct Grant{id:String,agent:String,session:String,host:String,created:Instant}
+/// One SSH target a grant is allowed to talk to. A single local CLI session may hold
+/// several of these, so one agent can serve every connected host at once.
+#[derive(Clone)]
+struct GrantTarget{session:String,host:String}
+struct Grant{id:String,agent:String,targets:Vec<GrantTarget>,created:Instant}
+impl Grant{
+    fn hosts(&self)->Vec<String>{self.targets.iter().map(|t|t.host.clone()).collect()}
+    /// No selector means "the first target", which keeps single-host agents working unchanged.
+    fn pick(&self,host:Option<&str>)->Option<&GrantTarget>{
+        match host{
+            Some(requested)=>self.targets.iter().find(|t|t.host.eq_ignore_ascii_case(requested)),
+            None=>self.targets.first(),
+        }
+    }
+}
 
 /// On-disk record of an issued grant. Only a SHA-256 fingerprint of the bridge token is
 /// stored, so the file cannot be replayed as a credential; it merely lets the *same* CLI
 /// process recover its access after PaSSH7 restarts.
 #[derive(Serialize,Deserialize)]
-struct PersistedGrant{token_sha256:String,id:String,agent:String,host:String,created_unix:u64}
+struct PersistedGrant{
+    token_sha256:String,id:String,agent:String,
+    /// Every host the grant may reach. Older files only stored `host`.
+    #[serde(default)]hosts:Vec<String>,
+    #[serde(default)]host:String,
+    created_unix:u64,
+}
 
 fn grants_file_path()->Option<PathBuf>{
     let base=std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
@@ -47,13 +67,13 @@ fn load_persisted_grants()->Vec<PersistedGrant>{
         .and_then(|text|serde_json::from_str(&text).ok())
         .unwrap_or_default()
 }
-fn persist_grant(token:&str,id:&str,agent:&str,host:&str){
+fn persist_grant(token:&str,id:&str,agent:&str,hosts:&[String]){
     let Some(path)=grants_file_path() else{return};
     let fingerprint=token_fingerprint(token);
     let mut list=load_persisted_grants();
     list.retain(|g|g.token_sha256!=fingerprint&&g.id!=id);
     list.push(PersistedGrant{token_sha256:fingerprint,id:id.to_owned(),agent:agent.to_owned(),
-        host:host.to_owned(),created_unix:now_unix()});
+        host:hosts.first().cloned().unwrap_or_default(),hosts:hosts.to_vec(),created_unix:now_unix()});
     if let Ok(text)=serde_json::to_string(&list){let _=std::fs::write(path,text);}
 }
 fn forget_persisted_grant(id:&str){
@@ -76,12 +96,20 @@ fn restore_grant(grants:&Grants,ssh:&crate::ssh_sessions::SshSessionManager,toke
         .find(|g|g.token_sha256==fingerprint
             && now.saturating_sub(g.created_unix)<=GRANT_MAX_AGE.as_secs()) else{return false};
     let Ok(live)=ssh.active_sessions() else{return false};
-    let Some(session)=live.into_iter().find(|s|s.alias==record.host) else{return false};
+    let wanted:Vec<String>=if record.hosts.is_empty(){vec![record.host]}else{record.hosts};
+    let mut targets=Vec::new();
+    for host in wanted{
+        if let Some(session)=live.iter().find(|s|s.alias==host){
+            if !targets.iter().any(|t:&GrantTarget|t.host==host){
+                targets.push(GrantTarget{session:session.id.clone(),host});
+            }
+        }
+    }
+    if targets.is_empty(){return false}
     let age=Duration::from_secs(now.saturating_sub(record.created_unix));
     let created=Instant::now().checked_sub(age).unwrap_or_else(Instant::now);
     if let Ok(mut guard)=grants.lock(){
-        guard.insert(token.to_owned(),Grant{id:record.id,agent:record.agent,
-            session:session.id,host:record.host,created});
+        guard.insert(token.to_owned(),Grant{id:record.id,agent:record.agent,targets,created});
         return true;
     }
     false
@@ -89,23 +117,28 @@ fn restore_grant(grants:&Grants,ssh:&crate::ssh_sessions::SshSessionManager,toke
 #[derive(Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct LocalAgentConnection{
-    id:String,agent:String,session_id:String,host:String,age_seconds:u64,
+    id:String,agent:String,session_id:String,host:String,hosts:Vec<String>,age_seconds:u64,
     /// active | expired | disconnected; never contains the secret bridge token.
     status:String,
 }
 /// Renew a previously issued token only through explicit desktop approval,
 /// and never for a different saved SSH host.
-fn reauthorize_grant_by_id(grants:&Grants,id:&str,session:&str,host:&str)->Result<bool,String>{
+/// Renew a previously issued token only through explicit desktop approval, and never for a
+/// different saved SSH host. For a multi-host grant only the named host is rebound.
+fn reauthorize_grant_by_id(grants:&Grants,id:&str,session:&str,host:Option<&str>)->Result<bool,String>{
     let mut guard=grants.lock().map_err(|_|"Local CLI grants unavailable")?;
     let grant=guard.values_mut().find(|grant|grant.id==id)
         .ok_or("This CLI grant was revoked or PaSSH7 restarted. Launch a new local CLI session.")?;
     if grant.created.elapsed()>GRANT_RECOVERY_WINDOW{
         return Err("The recovery window ended. Launch a new local CLI session.".into());
     }
-    if grant.host!=host{
+    let wanted=host.map(str::to_owned).or_else(||grant.targets.first().map(|t|t.host.clone()));
+    let target=wanted.and_then(|wanted|grant.targets.iter_mut()
+        .find(|target|target.host.eq_ignore_ascii_case(&wanted)));
+    let Some(target)=target else{
         return Err("Cannot move local agent access to another host. Select an SSH session for the original host.".into());
-    }
-    grant.session=session.to_owned();
+    };
+    target.session=session.to_owned();
     grant.created=Instant::now();
     Ok(true)
 }
@@ -200,7 +233,7 @@ pub async fn local_agent_probe(agent:String)->Result<LocalAgentStatus,String>{
 }
 
 #[derive(Deserialize)]
-struct BrokerRequest{token:String,op:String,command:Option<String>,path:Option<String>,content:Option<String>}
+struct BrokerRequest{token:String,op:String,host:Option<String>,command:Option<String>,path:Option<String>,content:Option<String>}
 async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:SshSessionManager,app:tauri::AppHandle){
     let result=async{
         let len=socket.read_u32().await.map_err(|_|"Invalid local bridge frame".to_owned())? as usize;
@@ -209,7 +242,7 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
         socket.read_exact(&mut bytes).await.map_err(|_|"Incomplete bridge frame".to_owned())?;
         let req:BrokerRequest=serde_json::from_slice(&bytes)
             .map_err(|_|"Invalid local bridge request".to_owned())?;
-        let session={
+        let (target,all_targets)={
             let known=grants.lock().map(|guard|guard.contains_key(&req.token)).unwrap_or(false);
             if !known{
                 // The app was restarted: the in-memory map is empty, but the CLI still holds the
@@ -223,7 +256,11 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
             if grant.created.elapsed()>GRANT_MAX_AGE{
                 return Err("Local agent SSH access expired. In PaSSH7 > AI Agents, select the original SSH host and choose Restore SSH access.".into());
             }
-            grant.session.clone()
+            let hosts=grant.hosts();
+            let target=grant.pick(req.host.as_deref()).cloned().ok_or_else(||format!(
+                "Unknown SSH host '{}' for this local agent. Call remote_hosts to list the hosts it may use ({}).",
+                req.host.clone().unwrap_or_default(),hosts.join(", ")))?;
+            (target,grant.targets.clone())
         };
         // A CLI can stay open for hours. An existing grant must not bypass
         // the Vault's idle lock just because UI polling has not noticed expiry.
@@ -232,7 +269,16 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
             ssh.stop_all();
             return Err("Vault locked or expired. Unlock Vault, reconnect the same SSH host, then choose Restore SSH access in AI Agents.".into());
         }
+        let session=target.session.clone();
         let result=match req.op.as_str(){
+            // Lets one agent discover every host it was granted, so it can route each call.
+            "hosts"=>{
+                let active=ssh.active_sessions().unwrap_or_default();
+                json!(all_targets.iter().map(|entry|json!({
+                    "host":entry.host,
+                    "connected":active.iter().any(|live|live.alias==entry.host)
+                })).collect::<Vec<_>>())
+            },
             "exec"=>{
                 let command=req.command.ok_or("Missing remote command")?;
                 serde_json::to_value(ssh.execute_remote(&session,&command).await?)
@@ -263,11 +309,20 @@ async fn serve_connection(mut socket:tokio::net::TcpStream,grants:Grants,ssh:Ssh
         let _=socket.write_all(&encoded).await;
     }
 }
-async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&str,agent:&str,app:tauri::AppHandle)->Result<(SocketAddr,String),String>{
-    // Validate the session before generating a grant.
+/// Issue one capability token covering every listed live session. One local CLI can therefore
+/// reach all connected hosts, and each MCP call selects its target with an optional `host`.
+async fn grant_sessions(bridge:&LocalAgentBridge,ssh:SshSessionManager,sessions:&[String],agent:&str,app:tauri::AppHandle)->Result<(SocketAddr,String),String>{
+    if sessions.is_empty(){return Err("Select at least one live SSH session".into())}
+    // Validate every session before generating a grant.
     let live=ssh.active_sessions()?;
-    let owner=live.iter().find(|live|live.id==session)
-        .ok_or("Select a live authenticated SSH session")?;
+    let mut targets:Vec<GrantTarget>=Vec::new();
+    for id in sessions{
+        let owner=live.iter().find(|live|&live.id==id)
+            .ok_or("Select a live authenticated SSH session")?;
+        if targets.iter().any(|target|target.host==owner.alias){continue;}
+        targets.push(GrantTarget{session:owner.id.clone(),host:owner.alias.clone()});
+    }
+    if targets.is_empty(){return Err("Select at least one live SSH session".into())}
     let mut address=bridge.address.lock().await;
     let addr=if let Some(addr)=*address{addr}else{
         let listener=TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST,0)).await
@@ -290,11 +345,12 @@ async fn grant_session(bridge:&LocalAgentBridge,ssh:SshSessionManager,session:&s
     let bytes:[u8;32]=rand::random();
     let token=bytes.iter().map(|b|format!("{b:02x}")).collect::<String>();
     let launch_id=format!("{:032x}",rand::random::<u128>());
+    let hosts:Vec<String>=targets.iter().map(|target|target.host.clone()).collect();
     bridge.grants.lock().map_err(|_|"Cannot issue local CLI grant")?
         .insert(token.clone(),Grant{id:launch_id.clone(),agent:agent.to_owned(),
-            session:session.to_owned(),host:owner.alias.clone(),created:Instant::now()});
+            targets:targets.clone(),created:Instant::now()});
     // Remember only the token fingerprint so the same CLI keeps working after an app restart.
-    persist_grant(&token,&launch_id,agent,&owner.alias);
+    persist_grant(&token,&launch_id,agent,&hosts);
     Ok((addr,token))
 }
 
@@ -314,14 +370,17 @@ pub fn local_agent_connections(bridge:State<'_,LocalAgentBridge>,
     let mut guard=bridge.grants.lock().map_err(|_|"Local CLI grants unavailable")?;
     guard.retain(|_,grant|grant.created.elapsed()<=GRANT_RECOVERY_WINDOW);
     let mut items=guard.values().map(|grant|{
-        let connected=active.iter().any(|s|s.id==grant.session && s.alias==grant.host);
+        let connected=grant.targets.iter()
+            .any(|target|active.iter().any(|s|s.id==target.session&&s.alias==target.host));
         let status=if grant.created.elapsed()>GRANT_MAX_AGE{
             "expired"
         }else if !connected{
             "disconnected"
         }else{"active"};
+        let hosts=grant.hosts();
         LocalAgentConnection{id:grant.id.clone(),agent:grant.agent.clone(),
-            session_id:grant.session.clone(),host:grant.host.clone(),
+            session_id:grant.targets.first().map(|t|t.session.clone()).unwrap_or_default(),
+            host:hosts.join(", "),hosts,
             age_seconds:grant.created.elapsed().as_secs(),status:status.to_owned()}
     }).collect::<Vec<_>>();
     items.sort_by(|a,b|a.host.cmp(&b.host).then(a.agent.cmp(&b.agent)));
@@ -332,7 +391,7 @@ pub fn local_agent_connections(bridge:State<'_,LocalAgentBridge>,
 /// host. The original token stays in its existing local CLI process; it is
 /// never returned over IPC, persisted or re-enabled after explicit Revoke.
 #[tauri::command]
-pub fn local_agent_reauthorize(id:String,session_id:String,
+pub fn local_agent_reauthorize(id:String,session_id:String,host:Option<String>,
     bridge:State<'_,LocalAgentBridge>,ssh:State<'_,SshSessionManager>,
     vault:State<'_,SessionStore>
 )->Result<bool,String>{
@@ -345,7 +404,7 @@ pub fn local_agent_reauthorize(id:String,session_id:String,
     let active=ssh.active_sessions()?;
     let target=active.iter().find(|session|session.id==session_id)
         .ok_or("Select a connected SSH session before restoring access")?;
-    reauthorize_grant_by_id(&bridge.grants,&id,&target.id,&target.alias)
+    reauthorize_grant_by_id(&bridge.grants,&id,&target.id,host.as_deref())
 }
 /// Removing a grant blocks all subsequent MCP calls from that local console.
 /// It intentionally leaves the user's independently signed-in CLI running.
@@ -412,7 +471,7 @@ fn cleanup_temp_config(path:Option<&Path>){
 // An empty, disposable local cwd is important: built-in agent shell/file tools
 // must never accidentally treat PaSSH7's installation directory as the SSH host.
 // Codex/OpenCode read AGENTS.md; Claude Code reads CLAUDE.md from their cwd.
-const REMOTE_WORKSPACE_INSTRUCTIONS:&str="You were started locally by PaSSH7 to work on the SSH host selected in the PaSSH7 app.\n\nFor ALL commands and file operations on that host, use the passh7 MCP tools: remote_exec, remote_list, remote_read, and remote_write. Your built-in shell and file tools operate on the LOCAL machine, not the SSH host. Do not run host commands using your local shell or another SSH connection.\n\nThis is not a sandbox. Confirm destructive operations with the user and never reveal credentials. If PaSSH7's MCP tools are unavailable, tell the user and stop remote actions rather than silently using local tools.\n";
+const REMOTE_WORKSPACE_INSTRUCTIONS:&str="You were started locally by PaSSH7 to work on the SSH host selected in the PaSSH7 app.\n\nFor ALL commands and file operations on that host, use the passh7 MCP tools: remote_exec, remote_list, remote_read, and remote_write. Your built-in shell and file tools operate on the LOCAL machine, not the SSH host. Do not run host commands using your local shell or another SSH connection.\n\nIf PaSSH7 launched you for several hosts, call remote_hosts first: it lists every host you may target, and each remote_* call then accepts an optional host parameter (the host alias). When more than one host is available, always pass host explicitly so a command never lands on the wrong server.\n\nThis is not a sandbox. Confirm destructive operations with the user and never reveal credentials. If PaSSH7's MCP tools are unavailable, tell the user and stop remote actions rather than silently using local tools.\n";
 fn prepare_agent_workspace(config:Option<&Path>)->Result<PathBuf,String>{
     let dir=if is_opencode_v2_config(config){
         config.and_then(Path::parent).ok_or("Missing OpenCode V2 working directory")?.to_path_buf()
@@ -495,10 +554,20 @@ fn shell_launch_command(agent:&str,cli:&Path,self_exe:&Path,config:Option<&Path>
     }else{format!("& {binary}")}
 }
 #[tauri::command]
-pub async fn local_agent_launch(agent:String,id:String,app:tauri::AppHandle,
+pub async fn local_agent_launch(agent:String,id:Option<String>,ids:Option<Vec<String>>,app:tauri::AppHandle,
     bridge:State<'_,LocalAgentBridge>,ssh:State<'_,SshSessionManager>,vault:State<'_,SessionStore>
 )->Result<String,String>{
     allowed_agent(&agent)?;
+    // `ids` launches one agent for several hosts at once; `id` keeps the single-host callers working.
+    let requested:Vec<String>=match (ids,id){
+        (Some(list),_)=>list,
+        (None,Some(single))=>vec![single],
+        (None,None)=>return Err("Select at least one connected SSH session".into()),
+    };
+    let requested:Vec<String>=requested.into_iter()
+        .map(|item|item.trim().to_owned()).filter(|item|!item.is_empty()).collect();
+    if requested.is_empty(){return Err("Select at least one connected SSH session".into())}
+    let host_count=requested.len();
     if !cfg!(windows){
         return Err("Interactive local CLI launch currently requires Windows desktop. Remote CLI over SSH remains available.".into());
     }
@@ -518,7 +587,7 @@ pub async fn local_agent_launch(agent:String,id:String,app:tauri::AppHandle,
         Ok(path)=>path,
         Err(error)=>{cleanup_temp_config(config.as_deref());return Err(error);}
     };
-    let (address,token)=match grant_session(bridge.inner(),ssh.inner().clone(),&id,&agent,app).await{
+    let (address,token)=match grant_sessions(bridge.inner(),ssh.inner().clone(),&requested,&agent,app).await{
         Ok(grant)=>grant,
         Err(error)=>{
             cleanup_local_launch(config.as_deref(),&workspace);
@@ -567,7 +636,11 @@ pub async fn local_agent_launch(agent:String,id:String,app:tauri::AppHandle,
                 // expires after GRANT_MAX_AGE and remains explicitly revocable.
                 cleanup_local_launch(config.as_deref(),&workspace);
             });
-            Ok(format!("Launched local {agent} CLI in a separate console with SSH tool access to the selected authenticated session. Local CLI login remains unchanged."))
+            Ok(if host_count>1{
+                format!("Launched local {agent} CLI in a separate console with SSH tool access to {host_count} connected hosts. Ask it for remote_hosts to see them; each tool call takes an optional host.")
+            }else{
+                format!("Launched local {agent} CLI in a separate console with SSH tool access to the selected authenticated session. Local CLI login remains unchanged.")
+            })
         },
         Err(error)=>{
             if let Ok(mut active)=bridge.grants.lock(){active.remove(&token);}
@@ -588,7 +661,7 @@ fn rpc_call(name:&str,args:&Value)->Result<Value,String>{
     stream.set_read_timeout(Some(Duration::from_secs(80))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
     let req=json!({
-        "token":token,"op":name,
+        "token":token,"op":name,"host":args.get("host"),
         "command":args.get("command"),"path":args.get("path"),"content":args.get("content")
     });
     let bytes=serde_json::to_vec(&req).map_err(|_|"Cannot encode local tool request")?;
@@ -611,16 +684,21 @@ fn tool(name:&str,description:&str,properties:Value,required:Vec<&str>)->Value{
     json!({"name":name,"description":description,
         "inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false}})
 }
+fn host_arg()->Value{
+    json!({"type":"string","description":"Target SSH host alias (for example 'meawbuntu'). Omit it when the agent was launched for a single host; call remote_hosts to list every host this agent may use."})
+}
 fn mcp_tools()->Value{
     json!([
-        tool("remote_exec","Run a shell command on the selected authenticated SSH host, never the local machine. Returns separate stdout/stderr and exit code. Limit 60 seconds, 256 KiB output.",
-            json!({"command":{"type":"string","description":"Command interpreted by the remote user's SSH shell, not by the local OS"}}),vec!["command"]),
-        tool("remote_list","List files in a directory on the selected SSH host via SFTP.",
-            json!({"path":{"type":"string"}}),vec!["path"]),
+        tool("remote_hosts","List every SSH host this agent is allowed to target, with its live connection state. Call this first when the agent was launched for several hosts.",
+            json!({}),Vec::new()),
+        tool("remote_exec","Run a shell command on an authenticated SSH host, never the local machine. Returns separate stdout/stderr and exit code. Limit 60 seconds, 256 KiB output.",
+            json!({"command":{"type":"string","description":"Command interpreted by the remote user's SSH shell, not by the local OS"},"host":host_arg()}),vec!["command"]),
+        tool("remote_list","List files in a directory on an SSH host via SFTP.",
+            json!({"path":{"type":"string"},"host":host_arg()}),vec!["path"]),
         tool("remote_read","Read a remote UTF-8 text file via SFTP (maximum 256 KiB).",
-            json!({"path":{"type":"string"}}),vec!["path"]),
+            json!({"path":{"type":"string"},"host":host_arg()}),vec!["path"]),
         tool("remote_write","CREATE or OVERWRITE a remote UTF-8 file via SFTP (maximum 256 KiB). Destructive: confirm before editing important files.",
-            json!({"path":{"type":"string"},"content":{"type":"string"}}),vec!["path","content"])
+            json!({"path":{"type":"string"},"content":{"type":"string"},"host":host_arg()}),vec!["path","content"])
     ])
 }
 fn mcp_tool_text(name:&str,value:&Value)->String{
@@ -644,7 +722,7 @@ fn mcp_handle(message:&Value)->Option<Value>{
             let params=message.get("params").cloned().unwrap_or(Value::Null);
             let name=params.get("name").and_then(Value::as_str).unwrap_or("");
             let args=params.get("arguments").cloned().unwrap_or(Value::Null);
-            let outcome=if ["remote_exec","remote_list","remote_read","remote_write"].contains(&name){
+            let outcome=if ["remote_exec","remote_list","remote_read","remote_write","remote_hosts"].contains(&name){
                 rpc_call(name.strip_prefix("remote_").unwrap(),&args)
             }else{Err("Unknown PaSSH7 remote tool".into())};
             match outcome{

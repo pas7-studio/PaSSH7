@@ -273,13 +273,16 @@ export type LocalAgentAvailability={installed:boolean;path:string|null;diagnosti
 export async function probeLocalAgent(agent:"codex"|"claude"|"opencode"):Promise<LocalAgentAvailability>{
   return invoke<LocalAgentAvailability>("local_agent_probe",{agent});
 }
-export async function launchLocalAgent(agent:"codex"|"claude"|"opencode",sessionId:string):Promise<string>{
-  return invoke<string>("local_agent_launch",{agent,id:sessionId});
+/** Launch one local CLI. One id keeps the single-host behaviour; several ids grant
+ * the same CLI access to every listed host, selected per call with the `host` argument. */
+export async function launchLocalAgent(agent:"codex"|"claude"|"opencode",sessionIds:string|string[]):Promise<string>{
+  const ids=Array.isArray(sessionIds)?sessionIds:[sessionIds];
+  return invoke<string>("local_agent_launch",{agent,ids});
 }
 /** Non-secret inventory of SSH capabilities issued to live local CLI consoles. */
 export type LocalAgentConnection={
   id:string;agent:"codex"|"claude"|"opencode";
-  sessionId:string;host:string;ageSeconds:number;
+  sessionId:string;host:string;hosts:string[];ageSeconds:number;
   status:"active"|"expired"|"disconnected";
 };
 export async function listLocalAgentConnections():Promise<LocalAgentConnection[]>{
@@ -287,8 +290,8 @@ export async function listLocalAgentConnections():Promise<LocalAgentConnection[]
 }
 /** Only the desktop user can restore the original process token to an SSH
  * session on the same saved host. Never returns secret grant material. */
-export async function reauthorizeLocalAgentConnection(id:string,sessionId:string):Promise<boolean>{
-  return invoke<boolean>("local_agent_reauthorize",{id,sessionId});
+export async function reauthorizeLocalAgentConnection(id:string,sessionId:string,host?:string):Promise<boolean>{
+  return invoke<boolean>("local_agent_reauthorize",{id,sessionId,host:host??null});
 }
 /** Revokes SSH tool access only. Does not close or kill the local CLI console. */
 export async function revokeLocalAgentConnection(id:string):Promise<boolean>{

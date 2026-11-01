@@ -15,6 +15,9 @@ type Props={
   localAvailability:Partial<Record<AgentKind,LocalAgentAvailability>>;localChecking:boolean;
   localConnections:LocalAgentConnection[];localRevoking:string;onRevokeLocal:(id:string)=>void;
   onRestoreLocal:(id:string)=>void;
+  /** One agent, several hosts: selected live session ids for the multi-host run. */
+  multi:boolean;onMulti:(value:boolean)=>void;
+  multiTargets:string[];onMultiTargets:(ids:string[])=>void;
   onCheck:()=>void;onLaunch:()=>void;onTerminal:()=>void;onSession:(id:string)=>void;
   onPrepareRdp:()=>void;
   liveTerminal?:boolean;onTerminalDock?:(node:HTMLDivElement|null)=>void;
@@ -97,6 +100,34 @@ export default function AgentWorkspace(p:Props){
         <button type="button" onClick={p.onTerminal}><TerminalSquare size={15}/> Terminal</button>
       </div>
     </section>
+    <section className="agentSection agentMultiHost" aria-label="Multi-host agent run">
+      <label className="agentMultiToggle">
+        <input type="checkbox" checked={p.multi}
+          onChange={event=>{
+            const next=event.target.checked;
+            p.onMulti(next);
+            // Default to every connected host, which is what "all" should mean.
+            if(next&&p.multiTargets.length===0)p.onMultiTargets(p.allSessions.map(session=>session.id));
+          }}/>
+        <span><strong>Run one agent on all connected hosts</strong>
+          <small>{p.allSessions.length} connected · {p.multiTargets.length} selected · local CLI, one SSH grant for every host</small></span>
+      </label>
+      {p.multi&&<div className="agentHostPicker" role="group" aria-label="Hosts for this agent">
+        {p.allSessions.length===0&&<p className="workspaceNotice">No connected SSH sessions. Connect the hosts you want this agent to reach.</p>}
+        {p.allSessions.map((session,index)=><label key={session.id} className={p.multiTargets.includes(session.id)?"agentHostOption active":"agentHostOption"}>
+          <input type="checkbox" checked={p.multiTargets.includes(session.id)}
+            onChange={()=>p.onMultiTargets(p.multiTargets.includes(session.id)
+              ?p.multiTargets.filter(id=>id!==session.id)
+              :[...p.multiTargets,session.id])}/>
+          <span>{session.alias}<small>session {index+1}</small></span>
+        </label>)}
+        {p.allSessions.length>0&&<div className="agentHostActions">
+          <button type="button" onClick={()=>p.onMultiTargets(p.allSessions.map(session=>session.id))}>Select all</button>
+          <button type="button" onClick={()=>p.onMultiTargets([])}>Clear</button>
+        </div>}
+        <p className="agentHostHint">The agent calls <code>remote_hosts</code> to list its targets; every <code>remote_*</code> tool then takes an optional <code>host</code> argument. One CLI, many servers, same window.</p>
+      </div>}
+    </section>
     {!connected&&<div className="agentConnectNotice" role="status">
       <LockKeyhole size={20}/><div><strong>{!p.vaultUnlocked?"Unlock the Vault to continue":"An SSH connection is required"}</strong>
         <p>{!p.vaultUnlocked?"Unlock your encrypted Vault, then connect to a saved host.":"Open Terminal and connect to a host. Your selected CLI will use that existing SSH connection."}</p>
@@ -122,12 +153,16 @@ export default function AgentWorkspace(p:Props){
           {([
             ["auto","Auto"],["remote","Remote SSH"],["local","Local + SSH"]
           ] as const).map(([value,label])=><button key={value} type="button" aria-pressed={p.mode===value}
+            disabled={value==="remote"&&p.multi}
+            title={value==="remote"&&p.multi?"One agent across several hosts runs locally with SSH tools":undefined}
             className={p.mode===value?"active":""} onClick={()=>p.onMode(value)}>{label}</button>)}
         </div>
         <button type="button" className="workspacePrimary agentRunButton"
-          disabled={!connected||p.launching||(p.mode==="remote"&&probe?.platform==="windows"&&!probe.installed)}
+          disabled={p.launching||(p.multi?(p.multiTargets.length===0||p.mode==="remote"):(!connected||(p.mode==="remote"&&probe?.platform==="windows"&&!probe.installed)))}
           onClick={p.onLaunch}><Play size={16}/>
-          {p.launching?"Launching…":p.mode==="local"?"Open local "+selected.name:p.mode==="remote"?"Run "+selected.name+" over SSH":"Launch "+selected.name}
+          {p.launching?"Launching…":p.multi
+            ?`Open local ${selected.name} on ${p.multiTargets.length} host${p.multiTargets.length===1?"":"s"}`
+            :p.mode==="local"?"Open local "+selected.name:p.mode==="remote"?"Run "+selected.name+" over SSH":"Launch "+selected.name}
         </button>
         <button type="button" className="agentCheckButton" disabled={!connected||p.checking||p.localChecking}
           onClick={p.onCheck}><RefreshCw size={15} className={p.checking||p.localChecking?"agentSpin":""}/>{p.checking||p.localChecking?"Checking…":"Check CLIs"}</button>
@@ -221,22 +256,28 @@ export default function AgentWorkspace(p:Props){
           {!p.localConnections.length?<p className="agentHint">No recoverable local CLI grant. Launch a local assistant above to issue a temporary SSH grant. If access was explicitly revoked or PaSSH7 restarted, a new CLI launch is required.</p>:
             <div className="agentGrantRows">{p.localConnections.map(item=><div className="agentLaunchRow" key={item.id}>
               <div className="agentLaunchCommand">
-                <span>{item.host} · {item.status==="active"?"SSH TOOLS ACTIVE":item.status==="expired"?"GRANT EXPIRED":"SSH DISCONNECTED"}</span>
+                <span>{item.hosts&&item.hosts.length>1?`${item.hosts.length} HOSTS`:`${item.host}`} · {item.status==="active"?"SSH TOOLS ACTIVE":item.status==="expired"?"GRANT EXPIRED":"SSH DISCONNECTED"}</span>
                 <code>{AGENTS.find(a=>a.kind===item.agent)?.name??item.agent}</code>
                 <small>Authorized {item.ageSeconds<60?"less than a minute":Math.floor(item.ageSeconds/60)+" min"} ago.
-                  {item.status==="active"?" Original SSH host only.":" Remote operations are blocked."}
+                  {item.status==="active"?(item.hosts&&item.hosts.length>1?" Original SSH hosts only.":" Original SSH host only."):" Remote operations are blocked."}
                 </small>
               </div>
-              {p.sessionId&&p.allSessions.some(session=>session.id===p.sessionId&&session.alias===item.host)?
-                <button type="button" disabled={Boolean(p.localRevoking)} onClick={()=>p.onRestoreLocal(item.id)}>
-                  <RefreshCw size={15}/>{p.localRevoking===item.id?"Updating…":item.status==="active"?"Extend access":"Restore SSH access"}
-                </button>:
-                p.allSessions.some(session=>session.alias===item.host)?
-                  <button type="button" disabled={Boolean(p.localRevoking)} onClick={()=>{
-                    const target=p.allSessions.find(session=>session.alias===item.host);
-                    if(target)p.onSession(target.id);
-                  }}><Server size={15}/> Select {item.host} SSH</button>:
-                  <small className="agentGrantNoSession">Reconnect {item.host} in Terminal to restore access.</small>}
+              {(()=>{
+                // A multi-host grant is restored one host at a time, always through a live
+                // session for a host that the grant actually covers.
+                const hosts=item.hosts&&item.hosts.length?item.hosts:[item.host];
+                const current=p.sessionId?p.allSessions.find(session=>session.id===p.sessionId):undefined;
+                const live=hosts.map(host=>p.allSessions.find(session=>session.alias===host)).find(Boolean);
+                if(current&&hosts.includes(current.alias))
+                  return <button type="button" disabled={Boolean(p.localRevoking)} onClick={()=>p.onRestoreLocal(item.id)}>
+                    <RefreshCw size={15}/>{p.localRevoking===item.id?"Updating…":item.status==="active"?"Extend access":"Restore SSH access"}
+                  </button>;
+                if(live)
+                  return <button type="button" disabled={Boolean(p.localRevoking)} onClick={()=>p.onSession(live.id)}>
+                    <Server size={15}/> Select {live.alias} SSH
+                  </button>;
+                return <small className="agentGrantNoSession">Reconnect {hosts.join(" or ")} in Terminal to restore access.</small>;
+              })()}
               <button type="button" disabled={Boolean(p.localRevoking)} onClick={()=>p.onRevokeLocal(item.id)}>
                 <LockKeyhole size={15}/>{p.localRevoking===item.id?"Updating…":"Revoke SSH access"}
               </button>

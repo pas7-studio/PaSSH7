@@ -297,3 +297,21 @@
 .terminalContext .contextAction{display:flex;justify-content:center;align-items:center;gap:9px}
 @media(max-width:1180px){.agentWorkspaceGrid{grid-template-columns:minmax(0,1fr)}.agentWorkspaceSide{grid-template-columns:repeat(2,minmax(0,1fr))}.agentHeroMeta{margin-left:0}}
 @media(max-width:820px){.agentCards{grid-template-columns:1fr}.agentPage .agentCard{min-height:auto}.agentCard small{min-height:0}.agentWorkspaceSide{grid-template-columns:1fr}.agentHero{align-items:stretch}.agentHeroActions{flex-wrap:wrap}}
+
+/* --- one agent, many hosts: target picker for the local CLI grant --- */
+.agentMultiHost{padding:15px 19px}
+.agentMultiToggle{display:flex;align-items:flex-start;gap:10px;cursor:pointer}
+.agentMultiToggle input{width:16px;height:16px;margin-top:2px;accent-color:var(--accent)}
+.agentMultiToggle>span{display:flex;flex-direction:column;gap:3px}
+.agentMultiToggle strong{font-size:13px}
+.agentMultiToggle small{font-size:11px;color:var(--muted)}
+.agentHostPicker{display:grid;gap:8px;margin-top:13px}
+.agentHostOption{display:flex;align-items:center;gap:9px;padding:8px 11px;border:1px solid var(--border);border-radius:9px;background:var(--panel2);cursor:pointer;font-size:12px}
+.agentHostOption.active{border-color:var(--accent);background:var(--accentSoft)}
+.agentHostOption input{accent-color:var(--accent)}
+.agentHostOption span{display:flex;align-items:baseline;gap:6px}
+.agentHostOption small{color:var(--muted);font-size:10px}
+.agentHostActions{display:flex;gap:8px;align-items:center;margin-top:2px}
+.agentHostActions button{height:28px;padding:0 11px;font-size:11px;width:auto}
+.agentHostHint{margin:0;font-size:11px;line-height:1.6;color:var(--muted)}
+.agentHostHint code{font-size:10px}
