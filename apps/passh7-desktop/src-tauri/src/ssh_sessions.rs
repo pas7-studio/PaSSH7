@@ -167,6 +167,31 @@ pub struct ActiveLocalForward {
     pub remote_port:u16,
 }
 
+/// Interactive or endless commands never terminate on their own. Over the agent
+/// bridge they would keep the SSH channel (and the user's uplink) busy until the
+/// 60-second exec timeout, so refuse them and point at a bounded alternative.
+fn streaming_command_reason(command:&str)->Option<&'static str>{
+    let lower=command.to_lowercase();
+    // Judge every simple command on its own: `journalctl -n 5; lsblk -f` is fine,
+    // only a segment that itself streams is refused.
+    for segment in lower.split(|c:char|matches!(c,';'|'|'|'&'|'\n'|'(')){
+        let seg=segment.trim();
+        if seg.is_empty(){continue;}
+        let words:Vec<&str>=seg.split_whitespace().collect();
+        let first=words.first().copied().unwrap_or("");
+        let follow=words.iter().any(|w|matches!(*w,"-f"|"-fn"|"-ff"))||seg.contains("--follow");
+        if first=="watch"{return Some("watch re-runs its command forever");}
+        if first=="yes"{return Some("yes produces endless output");}
+        if first=="tail"&&follow{return Some("tail -f never returns");}
+        if seg.contains("journalctl")&&follow{return Some("journalctl -f never returns");}
+        if (seg.contains("docker logs")||seg.contains("docker container logs")
+            ||seg.contains("podman logs")||seg.contains("kubectl logs"))
+            &&follow{return Some("`logs --follow` streams forever");}
+        if (first=="top"||first=="htop"||first=="btop")&&!seg.contains("-b"){return Some("interactive monitor needs `-b -n 1` for a snapshot");}
+    }
+    None
+}
+
 #[derive(Clone,Serialize)]
 #[serde(rename_all="camelCase")]
 pub struct RemoteExecResult {
@@ -317,7 +342,13 @@ impl SshSessionManager {
     /// Reuse an already authenticated/pinned SSH session: no Vault secrets.
     pub async fn execute_remote(&self,id:&str,command:&str)->Result<RemoteExecResult,String>{
         if command.is_empty()||command.len()>8192||command.as_bytes().contains(&0){
-            return Err("Remote command must be 1–8192 bytes without NUL".into());
+            return Err("Remote command must be 1-8192 bytes without NUL".into());
+        }
+        if let Some(reason)=streaming_command_reason(command){
+            return Err(format!(
+                "Refused: {reason}. Use a bounded form (docker logs --tail 200, journalctl -n 200, tail -n 200, top -b -n 1) \
+                 or run the streaming command in the interactive terminal tab."
+            ));
         }
         let (tx,rx)=tokio::sync::oneshot::channel();
         self.sender(id)?.send(SessionCommand::Exec(command.to_owned(),tx)).await
@@ -934,18 +965,20 @@ pub async fn ssh_session_open(alias: String, cols: u32, rows: u32, account_passw
                                                         let room=MAX_OUTPUT.saturating_sub(stdout.len()+stderr.len());
                                                         if data.len()>room{truncated=true;}
                                                         stdout.extend_from_slice(&data[..room.min(data.len())]);
+                                                        if truncated{let _=ch.close().await;break;}
                                                     },
                                                     russh::ChannelMsg::ExtendedData{data,..}=>{
                                                         let room=MAX_OUTPUT.saturating_sub(stdout.len()+stderr.len());
                                                         if data.len()>room{truncated=true;}
                                                         stderr.extend_from_slice(&data[..room.min(data.len())]);
+                                                        if truncated{let _=ch.close().await;break;}
                                                     },
                                                     russh::ChannelMsg::ExitStatus{exit_status}=>exit=Some(exit_status),
                                                     russh::ChannelMsg::Close=>break,
                                                     _=>{}
                                                 }
                                             }
-                                            let exit_code=exit.ok_or("Remote SSH exec closed without exit status")?;
+                                            let exit_code=if truncated{exit.unwrap_or(0)}else{exit.ok_or("Remote SSH exec closed without exit status")?};
                                             Ok::<RemoteExecResult,String>(RemoteExecResult{
                                                 stdout:String::from_utf8_lossy(&stdout).into_owned(),
                                                 stderr:String::from_utf8_lossy(&stderr).into_owned(),

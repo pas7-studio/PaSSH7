@@ -7,6 +7,12 @@ license = "Apache-2.0"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Production builds embed ../dist into the binary instead of loading devUrl
+# (http://localhost:1420). Without this a plain `cargo build --release`
+# starts the window against a dev server that does not exist -> 404 page.
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
