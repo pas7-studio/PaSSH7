@@ -57,7 +57,7 @@ try {
     $listed = Invoke-McpRequest -Request @{ jsonrpc = '2.0'; id = 2; method = 'tools/list' }
     if ($listed.id -ne 2) { throw 'MCP notification unexpectedly generated a response' }
     $names = @($listed.result.tools | ForEach-Object { $_.name } | Sort-Object)
-    $expected = @('remote_exec', 'remote_list', 'remote_read', 'remote_write')
+    $expected = @('remote_exec', 'remote_hosts', 'remote_list', 'remote_read', 'remote_write')
     if (($names -join ',') -ne ($expected -join ',')) {
         throw "Unexpected MCP tool list: $($names -join ',')"
     }
