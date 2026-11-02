@@ -19,8 +19,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # rust-toolchain.toml pins a channel, so components must be added to the
+      # active toolchain rather than to the freshly installed stable one.
+      - name: Add rustfmt and clippy to pinned toolchain
+        run: rustup component add rustfmt clippy
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

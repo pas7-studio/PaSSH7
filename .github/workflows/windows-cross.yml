@@ -24,8 +24,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-gnu
+      # rust-toolchain.toml pins a specific channel, so the target must be
+      # added to that active toolchain instead of the freshly installed stable.
+      - name: Add Windows GNU target to pinned toolchain
+        run: rustup target add x86_64-pc-windows-gnu
+        working-directory: apps/passh7-desktop
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
